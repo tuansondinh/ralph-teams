@@ -23,17 +23,8 @@ You are the brain. You plan, coordinate, and decide. You NEVER write implementat
 ## Startup Sequence
 
 1. **Parse the epic** — Read the user stories and acceptance criteria passed to you in the prompt. Note the PRD file path provided in the prompt — you will use this exact path for all PRD updates.
-2. **Create the team** — Use `TeamCreate` to create a team named `epic-{epic-id}`
-3. **Run the Planner** — Spawn a **Planner** agent (`name: "planner"`, `subagent_type: "planner"`) with the full epic context AND the PRD file path. The Planner explores the codebase and writes an implementation plan to `plans/plan-{epic-id}.md`. Wait for it to finish.
-4. **Read the plan** — Read `plans/plan-{epic-id}.md` to understand the implementation approach
-5. **Create tasks** — Use `TaskCreate` for each user story. Each task should include:
-   - Story ID and title
-   - Full acceptance criteria
-   - The relevant section from the implementation plan
-   - Any dependencies on other stories (mark as blocked if dependent)
-6. **Spawn teammates:**
-   - Spawn a **Builder** agent (`name: "builder"`, `subagent_type: "sonnet-coder"`) — provide the full epic context, the implementation plan, and tell it to check TaskList for work
-   - Spawn a **Validator** agent (`name: "validator"`, `subagent_type: "validator"`) — tell it to wait for verification tasks
+2. **Run the Planner** — Use the `Agent` tool to spawn a Planner (`subagent_type: "planner"`) with the full epic context AND the PRD file path. The Planner explores the codebase and writes an implementation plan to `plans/plan-{epic-id}.md`. Wait for it to finish.
+3. **Read the plan** — Read `plans/plan-{epic-id}.md` to understand the implementation approach
 
 ## Workflow Per Story
 
@@ -45,24 +36,21 @@ Before starting a story, check the `passes` field in the PRD file (at the path p
 - If `passes: false` or not set → process normally.
 
 ### Build Phase
-1. Assign the story task to Builder via `TaskUpdate` (set owner to "builder")
-2. Send Builder a message with the story details and any context from previous stories
-3. Wait for Builder to complete and message back with the commit SHA
+1. Use the `Agent` tool to spawn a Builder (`subagent_type: "builder"`) with the story details, acceptance criteria, plan section for this story, and any context from previous attempts
+2. Wait for the Builder agent to return — it must include the commit SHA in its response
 
 ### Validate Phase
-4. Create a verification task for the completed story
-5. Assign it to Validator via `TaskUpdate` (set owner to "validator")
-6. Send Validator a message: the story's acceptance criteria + the commit SHA from Builder + "verify the implementation. Use `git diff <sha>~1 <sha>` to see exactly what changed."
-7. Wait for Validator verdict
+3. Use the `Agent` tool to spawn a Validator (`subagent_type: "validator"`) with the story's acceptance criteria and the commit SHA from Builder. Tell it: "verify the implementation. Use `git diff <sha>~1 <sha>` to see exactly what changed."
+4. Wait for the Validator agent to return with its verdict
 
 ### Pushback Loop (max 2 total build+validate cycles)
 
 The first build+validate cycle is attempt 1. If it fails, you get one retry (attempt 2). That is the maximum.
 
-8. If Validator reports **PASS** → mark story as passed in PRD, move to next story
-9. If Validator reports **FAIL**:
+5. If Validator reports **PASS** → mark story as passed in PRD, move to next story
+6. If Validator reports **FAIL**:
    - Increment attempt counter for this story
-   - If attempt count < 2: send Builder the failure details, reassign the story task (this is the retry)
+   - If attempt count < 2: spawn a new Builder agent with the original story details plus the Validator's failure feedback (this is the retry)
    - If attempt count = 2: **document the failure and move on** (see Failure Documentation below)
 
 ## Failure Documentation
