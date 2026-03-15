@@ -5,6 +5,10 @@
   "bin": {
     "ralph-claude": "dist/index.js"
   },
+  "files": [
+    "dist",
+    "ralph.sh"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
