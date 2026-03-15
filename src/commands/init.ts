@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as readline from 'readline';
 import chalk from 'chalk';
+import { createRl, ask, askMultiline } from '../prd-utils';
 
 interface UserStory {
   id: string;
@@ -26,32 +26,6 @@ interface Prd {
   branchName: string;
   description: string;
   epics: Epic[];
-}
-
-function createRl(): readline.Interface {
-  return readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-}
-
-function ask(rl: readline.Interface, question: string): Promise<string> {
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      resolve(answer.trim());
-    });
-  });
-}
-
-async function askMultiline(rl: readline.Interface, prompt: string): Promise<string[]> {
-  console.log(chalk.dim(`${prompt} (enter each on a new line, empty line to finish):`));
-  const lines: string[] = [];
-  while (true) {
-    const line = await ask(rl, '  > ');
-    if (line === '') break;
-    lines.push(line);
-  }
-  return lines;
 }
 
 export async function initCommand(): Promise<void> {

@@ -5,6 +5,8 @@ import chalk from 'chalk';
 import { statusCommand } from './commands/status';
 import { initCommand } from './commands/init';
 import { runCommand } from './commands/run';
+import { logsCommand } from './commands/logs';
+import { resetCommand } from './commands/reset';
 
 const program = new Command();
 
@@ -32,6 +34,21 @@ program
   .description('Run ralph.sh with the given prd.json')
   .action((prdPath: string = './prd.json') => {
     runCommand(prdPath);
+  });
+
+program
+  .command('logs')
+  .description('View the progress log')
+  .option('--tail <n>', 'Show last N entries')
+  .action((options: { tail?: string }) => {
+    logsCommand(options);
+  });
+
+program
+  .command('reset <epicId> [path]')
+  .description('Reset an epic status back to pending')
+  .action((epicId: string, prdPath: string = './prd.json') => {
+    resetCommand(epicId, prdPath);
   });
 
 program.parse(process.argv);
