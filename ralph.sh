@@ -11,7 +11,7 @@ PRD_FILE="${1:-prd.json}"
 MAX_EPICS=10
 PROGRESS_FILE="progress.txt"
 BACKEND="claude"
-IDLE_TIMEOUT=0  # seconds of silence before killing agent; 0 = no timeout
+IDLE_TIMEOUT=300  # seconds of silence before killing agent; 0 = no timeout
 
 # Parse flags — shift past the PRD_FILE arg first
 shift 2>/dev/null || true
