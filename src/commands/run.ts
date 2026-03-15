@@ -47,7 +47,7 @@ export function runCommand(prdPath: string, options: { backend?: string }, deps:
 
   if (!deps.existsSync(resolved)) {
     console.error(chalk.red(`Error: prd.json not found at ${resolved}`));
-    console.error(chalk.dim('Run `ralph-team-agents init` to create one.'));
+    console.error(chalk.dim('Run `ralph-teams init` to create one.'));
     deps.exit(1);
   }
 

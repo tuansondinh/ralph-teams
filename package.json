@@ -1,9 +1,9 @@
 {
-  "name": "ralph-team-agents",
+  "name": "ralph-teams",
   "version": "0.1.1",
-  "description": "CLI tool for Ralph Team Agents",
+  "description": "CLI tool for Ralph Teams",
   "bin": {
-    "ralph-team-agents": "dist/index.js"
+    "ralph-teams": "dist/index.js"
   },
   "files": [
     "dist",

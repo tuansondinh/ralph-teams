@@ -1,4 +1,4 @@
-# Ralph Team Agents
+# Ralph Teams
 
 Ralph is a project manager that spawns AI coding agent teams to implement epics autonomously. Supports Claude Code and GitHub Copilot CLI as backends.
 

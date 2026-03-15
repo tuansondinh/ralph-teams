@@ -1,5 +1,5 @@
 #!/bin/bash
-# Ralph Team Agents — Project Manager Shell Harness
+# Ralph Teams — Project Manager Shell Harness
 # Ralph never writes code. Ralph schedules epics and spawns teams.
 #
 # Usage: ./ralph.sh [prd.json] [--max-epics N] [--backend claude|copilot]
@@ -133,22 +133,40 @@ TOTAL_EPICS=$(jq '.epics | length' "$PRD_FILE")
 
 echo ""
 echo "========================================================"
-echo "  Ralph Team Agents — Project Manager"
+echo "  Ralph Teams — Project Manager"
 echo "  Project: $PROJECT"
 echo "  Branch: ${BRANCH:-<not set>}"
 echo "  Epics: $TOTAL_EPICS"
 echo "  Backend: $BACKEND"
 echo "========================================================"
 
+prompt_to_commit_dirty_worktree() {
+  local target_branch="$1"
+
+  echo "Worktree has uncommitted changes and Ralph needs to switch to branch '$target_branch'."
+  echo "Ralph will now stage and commit all current changes before the run."
+  git status --short
+  printf "Proceed with auto-commit before continuing? [y/N]: "
+
+  local response
+  IFS= read -r response || response=""
+  case "$response" in
+    y|Y|yes|YES)
+      git add -A
+      git commit -m "chore: auto-commit changes before ralph run"
+      ;;
+    *)
+      echo "Aborted: user declined auto-commit before run."
+      exit 1
+      ;;
+  esac
+}
+
 # --- Ensure correct branch ---
 CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
 if [ -n "$BRANCH" ] && [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
-  # Check for dirty worktree before switching
   if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
-    echo "Error: Worktree is dirty (uncommitted changes). Cannot switch to branch '$BRANCH'."
-    echo "Please commit or stash your changes first."
-    git status --short
-    exit 1
+    prompt_to_commit_dirty_worktree "$BRANCH"
   fi
   echo "Switching to branch: $BRANCH"
   git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH"

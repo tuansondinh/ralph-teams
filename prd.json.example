@@ -1,7 +1,7 @@
 {
   "project": "MyApp",
   "branchName": "ralph/task-priority",
-  "description": "Task management app with priority system",
+  "description": "Task management app with priority system and labels",
   "epics": [
     {
       "id": "EPIC-001",
@@ -12,11 +12,12 @@
       "userStories": [
         {
           "id": "US-001",
-          "title": "Add priority field to database",
-          "description": "As a developer, I need to store task priority so it persists across sessions.",
+          "title": "Priority data model and API",
+          "description": "As a developer, I need priority stored in the database and exposed via API so the frontend can read and write it.",
           "acceptanceCriteria": [
             "Add priority column to tasks table: 'high' | 'medium' | 'low' (default 'medium')",
-            "Generate and run migration successfully",
+            "Migration runs successfully",
+            "API endpoints accept and return priority field",
             "Typecheck passes"
           ],
           "priority": 1,
@@ -24,11 +25,12 @@
         },
         {
           "id": "US-002",
-          "title": "Display priority indicator on task cards",
-          "description": "As a user, I want to see task priority at a glance.",
+          "title": "Priority display and editing on task cards",
+          "description": "As a user, I want to see and change task priority directly from the task card.",
           "acceptanceCriteria": [
             "Each task card shows colored priority badge (red=high, yellow=medium, gray=low)",
-            "Priority visible without hovering or clicking",
+            "Clicking badge opens priority selector",
+            "Selection saves immediately",
             "Typecheck passes",
             "Verify in browser"
           ],
@@ -37,42 +39,17 @@
         },
         {
           "id": "US-003",
-          "title": "Add priority selector to task edit",
-          "description": "As a user, I want to change a task's priority when editing it.",
+          "title": "Filter and sort tasks by priority",
+          "description": "As a user, I want to filter the task list by priority and have high-priority items appear first.",
           "acceptanceCriteria": [
-            "Priority dropdown in task edit modal",
-            "Shows current priority as selected",
-            "Saves immediately on selection change",
+            "Filter dropdown with options: All | High | Medium | Low",
+            "Tasks sorted high → medium → low within each column (stable sort)",
+            "Filter persists in URL params",
+            "Empty state message when no tasks match",
             "Typecheck passes",
             "Verify in browser"
           ],
           "priority": 3,
-          "passes": false
-        },
-        {
-          "id": "US-004",
-          "title": "Filter tasks by priority",
-          "description": "As a user, I want to filter the task list to see only high-priority items.",
-          "acceptanceCriteria": [
-            "Filter dropdown with options: All | High | Medium | Low",
-            "Filter persists in URL params",
-            "Empty state message when no tasks match filter",
-            "Typecheck passes",
-            "Verify in browser"
-          ],
-          "priority": 4,
-          "passes": false
-        },
-        {
-          "id": "US-005",
-          "title": "Sort tasks by priority within columns",
-          "description": "As a user, I want high-priority tasks to appear at the top of each column.",
-          "acceptanceCriteria": [
-            "Tasks within each status column sorted: high → medium → low",
-            "Sort is stable (preserves creation order within same priority)",
-            "Typecheck passes"
-          ],
-          "priority": 5,
           "passes": false
         }
       ]
@@ -85,12 +62,12 @@
       "dependsOn": ["EPIC-001"],
       "userStories": [
         {
-          "id": "US-006",
-          "title": "Create labels table and API",
-          "description": "As a developer, I need a labels system in the database.",
+          "id": "US-004",
+          "title": "Labels data model and CRUD API",
+          "description": "As a developer, I need a labels system with many-to-many task relationships and full CRUD endpoints.",
           "acceptanceCriteria": [
             "Labels table with: id, name, color",
-            "Many-to-many relationship between tasks and labels",
+            "Join table for many-to-many task-label relationship",
             "CRUD API endpoints for labels",
             "Typecheck passes"
           ],
@@ -98,12 +75,12 @@
           "passes": false
         },
         {
-          "id": "US-007",
-          "title": "Display labels on task cards",
-          "description": "As a user, I want to see labels on each task card.",
+          "id": "US-005",
+          "title": "Label display and management on tasks",
+          "description": "As a user, I want to see labels on task cards and add/remove them from the edit modal.",
           "acceptanceCriteria": [
-            "Colored label chips shown on task cards",
-            "Max 3 visible, '+N more' for overflow",
+            "Colored label chips on task cards (max 3 visible, '+N more' for overflow)",
+            "Label picker in task edit modal with search and inline creation",
             "Typecheck passes",
             "Verify in browser"
           ],
@@ -111,45 +88,16 @@
           "passes": false
         },
         {
-          "id": "US-008",
-          "title": "Add/remove labels from tasks",
-          "description": "As a user, I want to manage labels on my tasks.",
+          "id": "US-006",
+          "title": "Filter by label and label management page",
+          "description": "As a user, I want to filter tasks by label and manage all labels from a dedicated page.",
           "acceptanceCriteria": [
-            "Label picker in task edit modal",
-            "Search/filter within label picker",
-            "Can create new labels inline",
+            "Multi-select label filter in task list header (combines with priority filter)",
+            "Dedicated /labels page with create, edit, delete and task count per label",
             "Typecheck passes",
             "Verify in browser"
           ],
           "priority": 3,
-          "passes": false
-        },
-        {
-          "id": "US-009",
-          "title": "Filter tasks by label",
-          "description": "As a user, I want to filter the task list by label.",
-          "acceptanceCriteria": [
-            "Multi-select label filter in task list header",
-            "Shows only tasks matching ANY selected label",
-            "Combines with priority filter",
-            "Typecheck passes",
-            "Verify in browser"
-          ],
-          "priority": 4,
-          "passes": false
-        },
-        {
-          "id": "US-010",
-          "title": "Label management page",
-          "description": "As a user, I want to manage all my labels in one place.",
-          "acceptanceCriteria": [
-            "Dedicated /labels page",
-            "Create, edit, delete labels",
-            "Shows task count per label",
-            "Typecheck passes",
-            "Verify in browser"
-          ],
-          "priority": 5,
           "passes": false
         }
       ]

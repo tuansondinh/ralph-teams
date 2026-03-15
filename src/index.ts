@@ -14,8 +14,8 @@ import { summaryCommand } from './commands/summary';
 const program = new Command();
 
 program
-  .name('ralph-team-agents')
-  .description(chalk.bold('CLI for Ralph Team Agents'))
+  .name('ralph-teams')
+  .description(chalk.bold('CLI for Ralph Teams'))
   .version('0.1.0');
 
 program
