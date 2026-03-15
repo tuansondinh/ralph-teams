@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { statusCommand } from './commands/status';
 import { initCommand } from './commands/init';
+import { runCommand } from './commands/run';
 
 const program = new Command();
 
@@ -24,6 +25,13 @@ program
   .description('Interactively create a new prd.json file')
   .action(async () => {
     await initCommand();
+  });
+
+program
+  .command('run [path]')
+  .description('Run ralph.sh with the given prd.json')
+  .action((prdPath: string = './prd.json') => {
+    runCommand(prdPath);
   });
 
 program.parse(process.argv);
