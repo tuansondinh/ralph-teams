@@ -9,6 +9,7 @@ import { logsCommand } from './commands/logs';
 import { resetCommand } from './commands/reset';
 import { addEpicCommand } from './commands/add-epic';
 import { validateCommand } from './commands/validate';
+import { summaryCommand } from './commands/summary';
 
 const program = new Command();
 
@@ -65,6 +66,13 @@ program
   .description('Validate prd.json structure and references')
   .action((prdPath: string = './prd.json') => {
     validateCommand(prdPath);
+  });
+
+program
+  .command('summary [path]')
+  .description('Show dependency tree and summary of all epics')
+  .action((prdPath: string = './prd.json') => {
+    summaryCommand(prdPath);
   });
 
 program.parse(process.argv);
