@@ -7,7 +7,8 @@
   },
   "files": [
     "dist",
-    "ralph.sh"
+    "ralph.sh",
+    "prd.json.example"
   ],
   "scripts": {
     "build": "tsc",

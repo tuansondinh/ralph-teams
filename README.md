@@ -155,19 +155,28 @@ Run `ralph.sh` directly when you want to choose a backend:
 
 ### `ralph-team-agents init`
 
-Creates a new `prd.json` interactively in the current directory.
+Creates a new `prd.json` interactively in the current directory by launching an AI PRD-creator session.
 
 ```bash
 ralph-team-agents init
+ralph-team-agents init --backend claude
+ralph-team-agents init --backend copilot
 ```
 
-It prompts for:
+Flow:
 
-- project name
-- branch name
-- project description
-- first epic title and description
-- one or more user stories
+1. `init` launches an interactive agent session
+2. the agent discusses the product with you directly
+3. the agent asks follow-up questions until the requirements are clear
+4. the agent generates the full `prd.json` with project metadata, epics, and user stories
+5. the agent writes `./prd.json`
+
+Notes:
+
+- `init` is grounded by `prd.json.example`
+- the agent generates epics and user stories automatically
+- `--backend` controls whether the interview/generation uses `claude` or `copilot`
+- the discussion itself is handled by the agent, not by a hardcoded questionnaire in the CLI
 
 ### `ralph-team-agents run [path]`
 
@@ -336,6 +345,8 @@ Important fields:
 - `epics[].status`: `pending` | `completed` | `partial` | `failed`
 - `epics[].dependsOn`: epic IDs that must be completed first
 - `userStories[].passes`: whether the story is currently marked as passing
+
+The `init` command uses [prd.json.example](/Users/sonwork/Workspace/ralph-team-agents/prd.json.example) as schema and style guidance when generating a new PRD.
 
 ## Files Ralph Produces
 

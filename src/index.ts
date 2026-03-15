@@ -28,8 +28,9 @@ program
 program
   .command('init')
   .description('Interactively create a new prd.json file')
-  .action(async () => {
-    await initCommand();
+  .option('--backend <backend>', 'AI backend to use for story generation (claude or copilot)', 'claude')
+  .action(async (options: { backend?: string }) => {
+    await initCommand(options);
   });
 
 program
