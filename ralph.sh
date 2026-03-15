@@ -118,6 +118,63 @@ fi
 
 echo "PRD validation passed."
 
+# --- Circular Dependency Detection ---
+# Uses Kahn's algorithm (BFS topological sort) to detect cycles.
+# If after processing all zero-in-degree nodes some epics remain unprocessed,
+# a cycle exists. Exits with code 1 and an error message if a cycle is found.
+detect_circular_deps() {
+  local prd_file="$1"
+  local total="$2"
+
+  # Build in-degree array and adjacency list using jq
+  # in_degree[i] = number of dependencies epic i has
+  local -a in_degree=()
+  for i in $(seq 0 $((total - 1))); do
+    local cnt
+    cnt=$(jq ".epics[$i].dependsOn // [] | length" "$prd_file")
+    in_degree+=("$cnt")
+  done
+
+  # BFS queue: start with all epics that have in-degree 0
+  local queue=""
+  for i in $(seq 0 $((total - 1))); do
+    [ "${in_degree[$i]}" -eq 0 ] && queue="$queue $i"
+  done
+  queue="${queue# }"  # trim leading space
+
+  local processed=0
+  while [ -n "$queue" ]; do
+    # Dequeue first element
+    local node="${queue%% *}"
+    if [ "$queue" = "$node" ]; then
+      queue=""
+    else
+      queue="${queue#* }"
+    fi
+    processed=$((processed + 1))
+
+    # For each epic that depends on this node (reverse adjacency)
+    local node_id
+    node_id=$(jq -r ".epics[$node].id" "$prd_file")
+    for j in $(seq 0 $((total - 1))); do
+      local dep_match
+      dep_match=$(jq -r ".epics[$j].dependsOn // [] | map(select(. == \"$node_id\")) | length" "$prd_file")
+      if [ "$dep_match" -gt 0 ]; then
+        in_degree[$j]=$((in_degree[$j] - 1))
+        if [ "${in_degree[$j]}" -eq 0 ]; then
+          queue="$queue $j"
+          queue="${queue# }"
+        fi
+      fi
+    done
+  done
+
+  if [ "$processed" -lt "$total" ]; then
+    echo "Error: Circular dependency detected in epic dependency graph. Check dependsOn fields." >&2
+    exit 1
+  fi
+}
+
 # --- Initialize ---
 if [ ! -f "$PROGRESS_FILE" ]; then
   echo "# Ralph Progress Log" > "$PROGRESS_FILE"
@@ -172,46 +229,67 @@ if [ -n "$BRANCH" ] && [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
   git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH"
 fi
 
-# --- Process Epics ---
+# --- Process Epics (Wave-based) ---
 COMPLETED=0
 FAILED=0
+PROCESSED=0
 
 # Resolve absolute path to PRD file so team lead always has the correct path
 PRD_ABS_PATH="$(cd "$(dirname "$PRD_FILE")" && pwd)/$(basename "$PRD_FILE")"
 
-for EPIC_INDEX in $(seq 0 $((TOTAL_EPICS - 1))); do
-  # Check max epics limit
-  if [ $((EPIC_INDEX + 1)) -gt "$MAX_EPICS" ]; then
-    echo "Reached max epics limit ($MAX_EPICS). Stopping."
-    break
+# Detect circular dependencies before starting
+detect_circular_deps "$PRD_FILE" "$TOTAL_EPICS"
+
+# process_epic_result: parse result file and update PRD status for a given epic index
+process_epic_result() {
+  local epic_index="$1"
+  local epic_id
+  epic_id=$(jq -r ".epics[$epic_index].id" "$PRD_FILE")
+  local result_file="$(pwd)/results/result-${epic_id}.txt"
+
+  if [ ! -f "$result_file" ]; then
+    echo ""
+    echo "  [$epic_id] FAILED — no result file found at $result_file"
+    jq ".epics[$epic_index].status = \"failed\"" "$PRD_FILE" > tmp.$$.json && mv tmp.$$.json "$PRD_FILE"
+    FAILED=$((FAILED + 1))
+    echo "[$epic_id] FAILED (no result file) — $(date)" >> "$PROGRESS_FILE"
+    return
   fi
 
-  # Read epic details
-  EPIC_ID=$(jq -r ".epics[$EPIC_INDEX].id" "$PRD_FILE")
-  EPIC_TITLE=$(jq -r ".epics[$EPIC_INDEX].title" "$PRD_FILE")
-  EPIC_STATUS=$(jq -r ".epics[$EPIC_INDEX].status // \"pending\"" "$PRD_FILE")
+  local result
+  result=$(cat "$result_file")
 
-  # Skip completed epics
-  if [ "$EPIC_STATUS" = "completed" ]; then
-    echo "  [$EPIC_ID] $EPIC_TITLE — already completed, skipping"
+  if echo "$result" | grep -qi "^PASS$"; then
+    echo ""
+    echo "  [$epic_id] PASSED — all stories completed"
+    jq ".epics[$epic_index].status = \"completed\"" "$PRD_FILE" > tmp.$$.json && mv tmp.$$.json "$PRD_FILE"
     COMPLETED=$((COMPLETED + 1))
-    continue
-  fi
+    echo "[$epic_id] PASSED — $(date)" >> "$PROGRESS_FILE"
 
-  # Check dependencies
-  DEPS=$(jq -r ".epics[$EPIC_INDEX].dependsOn // [] | .[]" "$PRD_FILE" 2>/dev/null || true)
-  BLOCKED=false
-  for DEP in $DEPS; do
-    DEP_STATUS=$(jq -r ".epics[] | select(.id == \"$DEP\") | .status // \"pending\"" "$PRD_FILE")
-    if [ "$DEP_STATUS" != "completed" ]; then
-      echo "  [$EPIC_ID] $EPIC_TITLE — blocked by $DEP (status: $DEP_STATUS)"
-      BLOCKED=true
-      break
-    fi
-  done
-  if [ "$BLOCKED" = true ]; then
-    continue
+  elif echo "$result" | grep -qi "^PARTIAL"; then
+    echo ""
+    echo "  [$epic_id] PARTIAL — $result"
+    jq ".epics[$epic_index].status = \"partial\"" "$PRD_FILE" > tmp.$$.json && mv tmp.$$.json "$PRD_FILE"
+    echo "[$epic_id] PARTIAL — $(date) — $result" >> "$PROGRESS_FILE"
+
+  else
+    echo ""
+    echo "  [$epic_id] FAILED — $result"
+    jq ".epics[$epic_index].status = \"failed\"" "$PRD_FILE" > tmp.$$.json && mv tmp.$$.json "$PRD_FILE"
+    FAILED=$((FAILED + 1))
+    echo "[$epic_id] FAILED — $(date) — $result" >> "$PROGRESS_FILE"
   fi
+}
+
+# spawn_epic: build prompt and run team lead for a given epic index (foreground)
+spawn_epic() {
+  local EPIC_INDEX="$1"
+  local EPIC_ID
+  EPIC_ID=$(jq -r ".epics[$EPIC_INDEX].id" "$PRD_FILE")
+  local EPIC_TITLE
+  EPIC_TITLE=$(jq -r ".epics[$EPIC_INDEX].title" "$PRD_FILE")
+  local EPIC_JSON
+  EPIC_JSON=$(jq ".epics[$EPIC_INDEX]" "$PRD_FILE")
 
   echo ""
   echo "========================================================"
@@ -219,17 +297,12 @@ for EPIC_INDEX in $(seq 0 $((TOTAL_EPICS - 1))); do
   echo "  $(date)"
   echo "========================================================"
 
-  # Extract epic data as JSON for the team lead
-  EPIC_JSON=$(jq ".epics[$EPIC_INDEX]" "$PRD_FILE")
-
-  # Setup result file
-  RESULT_FILE="$(pwd)/results/result-${EPIC_ID}.txt"
-  EPIC_LOG="$(pwd)/logs/epic-${EPIC_ID}-$(date +%s).log"
+  local RESULT_FILE="$(pwd)/results/result-${EPIC_ID}.txt"
+  local EPIC_LOG="$(pwd)/logs/epic-${EPIC_ID}-$(date +%s).log"
   mkdir -p results logs
   rm -f "$RESULT_FILE"
 
-  # Build the prompt for team lead
-  TEAM_PROMPT="You are the Team Lead for this epic. Read the epic below and execute it.
+  local TEAM_PROMPT="You are the Team Lead for this epic. Read the epic below and execute it.
 
 ## Project
 $PROJECT
@@ -260,26 +333,23 @@ $EPIC_JSON
 
 Begin."
 
-  # Spawn team lead
-  AGENT_EXIT=0
+  local AGENT_EXIT=0
 
   if [ "$STREAM_FORMAT" = "stream-json" ]; then
-    # Claude: stream-json gives real-time structured output
     echo "$TEAM_PROMPT" | $AGENT_CMD $AGENT_FLAGS 2>&1 | while IFS= read -r line; do
       echo "$line" >> "$EPIC_LOG"
-      # Extract and display assistant text messages
+      local TEXT
       TEXT=$(echo "$line" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text // empty' 2>/dev/null || true)
       if [ -n "$TEXT" ]; then
         echo "$TEXT"
       fi
-      # Show tool use activity
+      local TOOL
       TOOL=$(echo "$line" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | "  -> \(.name): \(.input | tostring | .[0:100])"' 2>/dev/null || true)
       if [ -n "$TOOL" ]; then
         echo "$TOOL"
       fi
     done || AGENT_EXIT=$?
   else
-    # Copilot / text mode: run inside a PTY so streaming output is preserved
     COPILOT_TEAM_PROMPT="$TEAM_PROMPT" \
       script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent team-lead --allow-all --no-ask-user --stream on -p "$COPILOT_TEAM_PROMPT"' \
       2>&1 | tee "$EPIC_LOG" || AGENT_EXIT=$?
@@ -288,39 +358,79 @@ Begin."
   if [ "$AGENT_EXIT" -ne 0 ]; then
     echo "  Warning: $BACKEND exited with code $AGENT_EXIT for epic $EPIC_ID"
   fi
+}
 
-  # Result parsing: ONLY use the result file. Never grep logs.
-  if [ ! -f "$RESULT_FILE" ]; then
-    echo ""
-    echo "  [$EPIC_ID] FAILED — no result file found at $RESULT_FILE"
-    jq ".epics[$EPIC_INDEX].status = \"failed\"" "$PRD_FILE" > tmp.$$.json && mv tmp.$$.json "$PRD_FILE"
-    FAILED=$((FAILED + 1))
-    echo "[$EPIC_ID] FAILED (no result file) — $(date)" >> "$PROGRESS_FILE"
-    continue
-  fi
+WAVE_NUM=0
+while true; do
+  # Find all epics ready for this wave
+  WAVE_EPICS=()
 
-  RESULT=$(cat "$RESULT_FILE")
+  for EPIC_INDEX in $(seq 0 $((TOTAL_EPICS - 1))); do
+    EPIC_STATUS=$(jq -r ".epics[$EPIC_INDEX].status // \"pending\"" "$PRD_FILE")
+    [ "$EPIC_STATUS" != "pending" ] && continue
 
-  if echo "$RESULT" | grep -qi "^PASS$"; then
-    echo ""
-    echo "  [$EPIC_ID] PASSED — all stories completed"
-    jq ".epics[$EPIC_INDEX].status = \"completed\"" "$PRD_FILE" > tmp.$$.json && mv tmp.$$.json "$PRD_FILE"
-    COMPLETED=$((COMPLETED + 1))
-    echo "[$EPIC_ID] PASSED — $(date)" >> "$PROGRESS_FILE"
+    # Check all dependencies
+    ALL_DEPS_MET=true
+    DEPS=$(jq -r ".epics[$EPIC_INDEX].dependsOn // [] | .[]" "$PRD_FILE" 2>/dev/null || true)
+    for DEP in $DEPS; do
+      DEP_STATUS=$(jq -r ".epics[] | select(.id == \"$DEP\") | .status // \"pending\"" "$PRD_FILE")
+      if [ "$DEP_STATUS" = "failed" ] || [ "$DEP_STATUS" = "partial" ]; then
+        # Dependency failed — skip this epic permanently
+        EPIC_ID=$(jq -r ".epics[$EPIC_INDEX].id" "$PRD_FILE")
+        EPIC_TITLE=$(jq -r ".epics[$EPIC_INDEX].title" "$PRD_FILE")
+        echo "  [$EPIC_ID] $EPIC_TITLE — skipped (dependency $DEP has status: $DEP_STATUS)"
+        jq ".epics[$EPIC_INDEX].status = \"failed\"" "$PRD_FILE" > tmp.$$.json && mv tmp.$$.json "$PRD_FILE"
+        FAILED=$((FAILED + 1))
+        echo "[$EPIC_ID] SKIPPED (dependency $DEP failed) — $(date)" >> "$PROGRESS_FILE"
+        ALL_DEPS_MET=false
+        break
+      elif [ "$DEP_STATUS" != "completed" ]; then
+        ALL_DEPS_MET=false
+        break
+      fi
+    done
 
-  elif echo "$RESULT" | grep -qi "^PARTIAL"; then
-    echo ""
-    echo "  [$EPIC_ID] PARTIAL — $RESULT"
-    jq ".epics[$EPIC_INDEX].status = \"partial\"" "$PRD_FILE" > tmp.$$.json && mv tmp.$$.json "$PRD_FILE"
-    echo "[$EPIC_ID] PARTIAL — $(date) — $RESULT" >> "$PROGRESS_FILE"
+    [ "$ALL_DEPS_MET" = true ] && WAVE_EPICS+=("$EPIC_INDEX")
+  done
 
-  else
-    echo ""
-    echo "  [$EPIC_ID] FAILED — $RESULT"
-    jq ".epics[$EPIC_INDEX].status = \"failed\"" "$PRD_FILE" > tmp.$$.json && mv tmp.$$.json "$PRD_FILE"
-    FAILED=$((FAILED + 1))
-    echo "[$EPIC_ID] FAILED — $(date) — $RESULT" >> "$PROGRESS_FILE"
-  fi
+  # If no epics ready, we're done
+  [ ${#WAVE_EPICS[@]} -eq 0 ] && break
+
+  WAVE_NUM=$((WAVE_NUM + 1))
+  echo ""
+  echo "========================================================"
+  echo "  Wave $WAVE_NUM — ${#WAVE_EPICS[@]} epic(s)"
+  echo "========================================================"
+
+  # Log wave boundary to progress.txt
+  echo "" >> "$PROGRESS_FILE"
+  echo "=== Wave $WAVE_NUM — $(date) ===" >> "$PROGRESS_FILE"
+  for IDX in "${WAVE_EPICS[@]}"; do
+    W_EPIC_ID=$(jq -r ".epics[$IDX].id" "$PRD_FILE")
+    echo "  $W_EPIC_ID" >> "$PROGRESS_FILE"
+  done
+
+  # Process epics in this wave sequentially (US-002 will make this parallel)
+  for EPIC_INDEX in "${WAVE_EPICS[@]}"; do
+    # Check --max-epics limit
+    if [ "$PROCESSED" -ge "$MAX_EPICS" ]; then
+      echo "Reached max epics limit ($MAX_EPICS). Stopping."
+      break 2
+    fi
+
+    EPIC_STATUS=$(jq -r ".epics[$EPIC_INDEX].status // \"pending\"" "$PRD_FILE")
+    if [ "$EPIC_STATUS" = "completed" ]; then
+      EPIC_ID=$(jq -r ".epics[$EPIC_INDEX].id" "$PRD_FILE")
+      EPIC_TITLE=$(jq -r ".epics[$EPIC_INDEX].title" "$PRD_FILE")
+      echo "  [$EPIC_ID] $EPIC_TITLE — already completed, skipping"
+      COMPLETED=$((COMPLETED + 1))
+      continue
+    fi
+
+    PROCESSED=$((PROCESSED + 1))
+    spawn_epic "$EPIC_INDEX"
+    process_epic_result "$EPIC_INDEX"
+  done
 done
 
 # --- Summary ---

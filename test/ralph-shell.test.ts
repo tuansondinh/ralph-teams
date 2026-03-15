@@ -82,3 +82,175 @@ test('ralph.sh auto-commits dirty changes after confirmation and continues', () 
   assert.equal(execFileSync('git', ['status', '--short'], { cwd: tempDir, encoding: 'utf-8' }).trim(), '');
   assert.equal(execFileSync('git', ['branch', '--show-current'], { cwd: tempDir, encoding: 'utf-8' }).trim(), 'feature/test-run');
 });
+
+// ─── US-001: Wave Computation Helpers ────────────────────────────────────────
+
+/**
+ * Create a temp git repo with a smart mock claude binary.
+ * resultMap maps epic ID -> result string (e.g. 'PASS', 'FAIL: ...')
+ * Epics not in the map get no result file (treated as failure by ralph).
+ */
+function setupMultiEpicRepo(
+  epics: Array<{ id: string; title: string; status?: string; dependsOn?: string[] }>,
+  resultMap: Record<string, string> = {},
+) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-wave-'));
+  const binDir = path.join(tempDir, 'bin');
+  fs.mkdirSync(binDir);
+
+  // Smart mock claude: reads stdin, extracts epic ID, writes result file via env vars
+  const mockClaude = [
+    '#!/bin/sh',
+    'STDIN=$(cat)',
+    'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
+    'if [ -n "$EPIC_ID" ]; then',
+    '  ENV_KEY="MOCK_RESULT_$(printf "%s" "$EPIC_ID" | tr - _)"',
+    '  RESULT_VAL=$(printenv "$ENV_KEY" 2>/dev/null || true)',
+    '  if [ -n "$RESULT_VAL" ]; then',
+    '    mkdir -p results',
+    '    printf "%s\\n" "$RESULT_VAL" > "results/result-${EPIC_ID}.txt"',
+    '  fi',
+    'fi',
+    'exit 0',
+  ].join('\n');
+  fs.writeFileSync(path.join(binDir, 'claude'), mockClaude);
+  fs.chmodSync(path.join(binDir, 'claude'), 0o755);
+
+  execFileSync('git', ['init', '-b', 'main'], { cwd: tempDir });
+  execFileSync('git', ['config', 'user.name', 'Ralph Test'], { cwd: tempDir });
+  execFileSync('git', ['config', 'user.email', 'ralph@example.com'], { cwd: tempDir });
+
+  const prd = {
+    project: 'Wave Test',
+    epics: epics.map((e) => ({
+      id: e.id,
+      title: e.title,
+      status: e.status ?? 'pending',
+      ...(e.dependsOn ? { dependsOn: e.dependsOn } : {}),
+      userStories: [{ id: 'US-001', title: 'Story', passes: false }],
+    })),
+  };
+  fs.writeFileSync(path.join(tempDir, 'prd.json'), JSON.stringify(prd, null, 2));
+  fs.writeFileSync(path.join(tempDir, 'README.md'), 'initial\n');
+  execFileSync('git', ['add', '.'], { cwd: tempDir });
+  execFileSync('git', ['commit', '-m', 'chore: initial'], { cwd: tempDir });
+
+  // Build env with per-epic result values
+  const env: Record<string, string> = {
+    ...process.env as Record<string, string>,
+    PATH: `${binDir}:${process.env.PATH ?? ''}`,
+  };
+  for (const [epicId, result] of Object.entries(resultMap)) {
+    const envKey = `MOCK_RESULT_${epicId.replace(/-/g, '_')}`;
+    env[envKey] = result;
+  }
+
+  return { tempDir, binDir, env };
+}
+
+function runRalph(tempDir: string, env: Record<string, string>, args: string[] = []) {
+  return spawnSync('bash', [scriptPath, 'prd.json', ...args], {
+    cwd: tempDir,
+    encoding: 'utf-8',
+    env,
+  });
+}
+
+// ─── US-001 Tests ─────────────────────────────────────────────────────────────
+
+test('US-001: two independent epics run in the same wave', () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [
+      { id: 'EPIC-001', title: 'Alpha' },
+      { id: 'EPIC-002', title: 'Beta' },
+    ],
+    { 'EPIC-001': 'PASS', 'EPIC-002': 'PASS' },
+  );
+
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+
+  // Both epics should appear in wave 1
+  assert.match(result.stdout, /Wave 1 — 2 epic\(s\)/);
+  assert.doesNotMatch(result.stdout, /Wave 2/);
+
+  // Both should pass
+  assert.match(result.stdout, /\[EPIC-001\] PASSED/);
+  assert.match(result.stdout, /\[EPIC-002\] PASSED/);
+});
+
+test('US-001: dependent epic runs after its dependency completes', () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [
+      { id: 'EPIC-001', title: 'Alpha' },
+      { id: 'EPIC-002', title: 'Beta', dependsOn: ['EPIC-001'] },
+    ],
+    { 'EPIC-001': 'PASS', 'EPIC-002': 'PASS' },
+  );
+
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+
+  // Should have two separate waves
+  assert.match(result.stdout, /Wave 1 — 1 epic\(s\)/);
+  assert.match(result.stdout, /Wave 2 — 1 epic\(s\)/);
+
+  // EPIC-001 in wave 1, EPIC-002 in wave 2
+  const wave1Pos = result.stdout.indexOf('Wave 1');
+  const wave2Pos = result.stdout.indexOf('Wave 2');
+  const epic1Pos = result.stdout.indexOf('[EPIC-001] PASSED');
+  const epic2Pos = result.stdout.indexOf('[EPIC-002] PASSED');
+  assert.ok(wave1Pos < epic1Pos && epic1Pos < wave2Pos, 'EPIC-001 should complete before Wave 2 starts');
+  assert.ok(wave2Pos < epic2Pos, 'EPIC-002 should complete in Wave 2');
+});
+
+test('US-001: circular dependency detected — exits with code 1', () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [
+      { id: 'EPIC-001', title: 'Alpha', dependsOn: ['EPIC-002'] },
+      { id: 'EPIC-002', title: 'Beta', dependsOn: ['EPIC-001'] },
+    ],
+    {},
+  );
+
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 1, `Expected exit 1 for circular dep`);
+  // Error goes to stderr
+  const combined = result.stdout + result.stderr;
+  assert.match(combined, /[Cc]ircular dependency/);
+});
+
+test('US-001: failed dependency causes dependent to be skipped, independent still runs', () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [
+      { id: 'EPIC-001', title: 'Alpha' },          // will fail (no result file)
+      { id: 'EPIC-002', title: 'Beta', dependsOn: ['EPIC-001'] },  // should be skipped
+      { id: 'EPIC-003', title: 'Gamma' },           // independent — should pass
+    ],
+    { 'EPIC-003': 'PASS' },  // EPIC-001 gets no result → fails; EPIC-002 skipped; EPIC-003 passes
+  );
+
+  const result = runRalph(tempDir, env);
+  // EPIC-003 should complete even though EPIC-001 failed
+  assert.match(result.stdout, /\[EPIC-003\] PASSED/);
+  // EPIC-002 should be skipped
+  assert.match(result.stdout, /\[EPIC-002\].*[Ss]kipped/);
+});
+
+test('US-001: wave boundaries are logged to progress.txt', () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [
+      { id: 'EPIC-001', title: 'Alpha' },
+      { id: 'EPIC-002', title: 'Beta', dependsOn: ['EPIC-001'] },
+    ],
+    { 'EPIC-001': 'PASS', 'EPIC-002': 'PASS' },
+  );
+
+  runRalph(tempDir, env);
+
+  const progress = fs.readFileSync(path.join(tempDir, 'progress.txt'), 'utf-8');
+  assert.match(progress, /=== Wave 1 —/);
+  assert.match(progress, /=== Wave 2 —/);
+  assert.match(progress, /EPIC-001/);
+  assert.match(progress, /EPIC-002/);
+});
