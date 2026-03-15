@@ -440,50 +440,65 @@ merge_wave() {
       echo "  [$epic_id] Merge successful (clean)"
       echo "[$epic_id] MERGED (clean) — $(date)" >> "$PROGRESS_FILE"
     else
-      # Conflict detected — spawn merger agent for AI resolution
-      echo "  [$epic_id] Merge conflict detected — spawning merger agent"
+      # Conflicts detected — attempt AI resolution via merger agent
+      echo "  [$epic_id] conflicts detected — spawning merger agent..."
+      echo "[$epic_id] merge conflicts — attempting AI resolution — $(date)" >> "$PROGRESS_FILE"
 
-      local merge_prompt="Resolve the merge conflict for epic ${epic_id}.
-Branch being merged: ${branch_name}
-Target branch: ${target_branch}
-PRD file: ${PRD_ABS_PATH}
+      # Get conflicted files for the prompt
+      local conflicted_files
+      conflicted_files=$(git diff --name-only --diff-filter=U 2>/dev/null || true)
 
-The merge has already been started and conflicts exist. Use 'git diff' to see the conflicts.
-Resolve them by understanding the intent of both sides, then stage and commit.
-If you cannot resolve, run 'git merge --abort' and output MERGE_FAILED.
-Otherwise output MERGE_SUCCESS."
+      local merge_prompt="You are the Merger Agent. Resolve the git merge conflicts.
+
+## Context
+- Target branch: ${target_branch}
+- Source branch: ${branch_name}
+- Epic ID: ${epic_id}
+
+## Conflicted Files
+${conflicted_files}
+
+## Instructions
+1. For each conflicted file listed above, read the full file to see the conflict markers
+2. Run: git log --oneline ${target_branch}..${branch_name} (what the epic branch changed)
+3. Run: git log --oneline ${branch_name}..${target_branch} (what target changed since branch point)
+4. Resolve each conflict by combining both sides' intent
+5. Stage each resolved file with: git add <filename>
+6. Do NOT commit — ralph.sh will create the merge commit
+7. Do NOT run git merge --abort
+8. If you cannot safely resolve a conflict, leave the conflict markers in place
+
+Begin resolving."
 
       local merge_log="${ROOT_DIR}/logs/merge-${epic_id}-$(date +%s).log"
 
       case "$BACKEND" in
         claude)
-          echo "$merge_prompt" | $AGENT_CMD --agent merger --dangerously-skip-permissions --print --verbose --output-format stream-json > "$merge_log" 2>&1
+          echo "$merge_prompt" | $AGENT_CMD --agent merger --dangerously-skip-permissions --print --verbose --output-format stream-json > "$merge_log" 2>&1 || true
           ;;
         copilot)
           COPILOT_MERGE_PROMPT="$merge_prompt" \
             script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent merger --allow-all --no-ask-user --stream on -p "$COPILOT_MERGE_PROMPT"' \
-            > "$merge_log" 2>&1
+            > "$merge_log" 2>&1 || true
           ;;
       esac
 
-      # Check if merge was resolved — look for unresolved conflict markers
-      local unresolved_conflicts
-      unresolved_conflicts=$(git diff --name-only --diff-filter=U 2>/dev/null || true)
+      # Check for remaining unresolved conflicts
+      local remaining_conflicts
+      remaining_conflicts=$(git diff --name-only --diff-filter=U 2>/dev/null || true)
 
-      if [ -z "$unresolved_conflicts" ] && git diff --cached --quiet 2>/dev/null; then
-        # No staged changes and no unresolved conflicts — check if merge commit was made
-        if git log -1 --pretty=%s 2>/dev/null | grep -qi "merge"; then
-          echo "  [$epic_id] Merge resolved by AI"
-          echo "[$epic_id] MERGED (AI-resolved) — $(date)" >> "$PROGRESS_FILE"
-        else
-          echo "  [$epic_id] Merge resolved by AI"
-          echo "[$epic_id] MERGED (AI-resolved) — $(date)" >> "$PROGRESS_FILE"
-        fi
+      # Also check if agent aborted the merge (MERGE_HEAD won't exist)
+      if [ -z "$remaining_conflicts" ] && [ -f ".git/MERGE_HEAD" ]; then
+        # All conflicts resolved — complete the merge commit
+        git commit --no-edit 2>/dev/null || true
+        echo "  [$epic_id] merged (AI-resolved conflicts)"
+        echo "[$epic_id] MERGED (AI-resolved) — $(date)" >> "$PROGRESS_FILE"
+        git branch -d "${branch_name}" 2>/dev/null || true
       else
-        # AI couldn't resolve — abort merge
+        # AI failed or aborted — ensure clean state
         git merge --abort 2>/dev/null || true
-        echo "  [$epic_id] Merge FAILED — conflict could not be resolved"
-        echo "[$epic_id] MERGE FAILED — $(date)" >> "$PROGRESS_FILE"
+        echo "  [$epic_id] Merge FAILED — AI could not resolve conflicts in: ${conflicted_files}"
+        echo "[$epic_id] MERGE FAILED (AI resolution failed, files: ${conflicted_files}) — $(date)" >> "$PROGRESS_FILE"
         merge_failures=$((merge_failures + 1))
 
         # Update epic status to merge-failed
@@ -516,7 +531,7 @@ while true; do
     DEPS=$(jq -r ".epics[$EPIC_INDEX].dependsOn // [] | .[]" "$PRD_FILE" 2>/dev/null || true)
     for DEP in $DEPS; do
       DEP_STATUS=$(jq -r ".epics[] | select(.id == \"$DEP\") | .status // \"pending\"" "$PRD_FILE")
-      if [ "$DEP_STATUS" = "failed" ] || [ "$DEP_STATUS" = "partial" ]; then
+      if [ "$DEP_STATUS" = "failed" ] || [ "$DEP_STATUS" = "partial" ] || [ "$DEP_STATUS" = "merge-failed" ]; then
         # Dependency failed — skip this epic permanently
         EPIC_ID=$(jq -r ".epics[$EPIC_INDEX].id" "$PRD_FILE")
         EPIC_TITLE=$(jq -r ".epics[$EPIC_INDEX].title" "$PRD_FILE")

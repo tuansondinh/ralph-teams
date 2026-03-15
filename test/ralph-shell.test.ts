@@ -529,6 +529,135 @@ test('US-004: two independent epics both merge cleanly after wave', () => {
   assert.doesNotMatch(branches, /ralph\/EPIC-002/);
 });
 
+// ─── US-005 Tests ─────────────────────────────────────────────────────────────
+
+/**
+ * Sets up a repo with a merge conflict scenario:
+ * - Initial commit has README.md with "line one"
+ * - The mock claude (as team-lead) modifies README.md in the worktree (epic branch)
+ *   AND also commits a conflicting change to main using git -C to the root repo
+ * - When merge_wave runs, the merge will conflict on README.md
+ * - The mock claude (when called as merger agent) exits 0 without resolving conflicts
+ * - This simulates a failed AI merge resolution
+ */
+function setupConflictRepo() {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-conflict-'));
+  const binDir = path.join(tempDir, 'bin');
+  fs.mkdirSync(binDir);
+
+  execFileSync('git', ['init', '-b', 'main'], { cwd: tempDir });
+  execFileSync('git', ['config', 'user.name', 'Ralph Test'], { cwd: tempDir });
+  execFileSync('git', ['config', 'user.email', 'ralph@example.com'], { cwd: tempDir });
+
+  // Initial commit
+  fs.writeFileSync(path.join(tempDir, 'README.md'), 'line one\n');
+  const prd = {
+    project: 'Conflict Test',
+    epics: [
+      {
+        id: 'EPIC-001',
+        title: 'Conflict Epic',
+        status: 'pending',
+        userStories: [{ id: 'US-001', title: 'Story', passes: false }],
+      },
+    ],
+  };
+  fs.writeFileSync(path.join(tempDir, 'prd.json'), JSON.stringify(prd, null, 2));
+  execFileSync('git', ['add', '.'], { cwd: tempDir });
+  execFileSync('git', ['commit', '-m', 'chore: initial'], { cwd: tempDir });
+
+  // Mock claude: when acting as team-lead, modifies README.md in the worktree
+  // AND creates a conflicting commit on main. When acting as merger agent, does nothing.
+  // The result file is written regardless, so EPIC-001 reports PASS.
+  const mockClaude = [
+    '#!/bin/sh',
+    'STDIN=$(cat)',
+    'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
+    '# Only act as team-lead (prompt contains Working Directory)',
+    'WORKTREE=$(printf "%s" "$STDIN" | grep -oE "[^ ]*\\.worktrees/[^ ]*" | head -1)',
+    'if [ -n "$EPIC_ID" ] && [ -n "$WORKTREE" ] && [ -d "$WORKTREE" ]; then',
+    '  # Write conflicting content in the worktree (epic branch)',
+    '  printf "epic version\\n" > "$WORKTREE/README.md"',
+    '  git -C "$WORKTREE" add README.md',
+    '  git -C "$WORKTREE" commit -m "feat: epic change to README"',
+    '  # Also advance main with a conflicting change (creates divergence)',
+    '  ROOT=$(git -C "$WORKTREE" rev-parse --show-toplevel 2>/dev/null || true)',
+    '  # ROOT points to the worktree; find the main repo via git worktree list',
+    '  MAIN_ROOT=$(git -C "$WORKTREE" worktree list --porcelain | grep "^worktree" | head -1 | awk "{print \\$2}")',
+    '  if [ -n "$MAIN_ROOT" ] && [ -d "$MAIN_ROOT" ]; then',
+    '    printf "main version\\n" > "$MAIN_ROOT/README.md"',
+    '    git -C "$MAIN_ROOT" add README.md',
+    '    git -C "$MAIN_ROOT" -c user.name="Ralph Test" -c user.email="ralph@example.com" commit -m "chore: main change to README"',
+    '  fi',
+    '  mkdir -p results',
+    '  printf "PASS\\n" > "results/result-${EPIC_ID}.txt"',
+    'fi',
+    '# When called as merger agent (no WORKTREE), just exit without resolving',
+    'exit 0',
+  ].join('\n');
+  fs.writeFileSync(path.join(binDir, 'claude'), mockClaude);
+  fs.chmodSync(path.join(binDir, 'claude'), 0o755);
+
+  const env: Record<string, string> = {
+    ...process.env as Record<string, string>,
+    PATH: `${binDir}:${process.env.PATH ?? ''}`,
+  };
+
+  return { tempDir, binDir, env };
+}
+
+test('US-005: merge-failed status set when conflict cannot be resolved', () => {
+  const { tempDir, env } = setupConflictRepo();
+
+  // Run ralph — EPIC-001 is already completed, so it goes straight to merge_wave
+  // The mock claude won't resolve conflicts, so merge should fail
+  runRalph(tempDir, env);
+
+  const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
+  assert.equal(prd.epics[0].status, 'merge-failed', `Expected merge-failed, got: ${prd.epics[0].status}`);
+});
+
+test('US-005: conflict resolution attempt is logged to progress.txt', () => {
+  const { tempDir, env } = setupConflictRepo();
+
+  runRalph(tempDir, env);
+
+  const progress = fs.readFileSync(path.join(tempDir, 'progress.txt'), 'utf-8');
+  assert.match(progress, /\[EPIC-001\] merge conflicts/);
+  assert.match(progress, /\[EPIC-001\] MERGE FAILED/);
+});
+
+test('US-005: merge-failed epic does not block independent epics in later waves', () => {
+  // EPIC-001 is merge-failed (pre-set), EPIC-002 depends on it (should skip),
+  // EPIC-003 is independent (should run)
+  const { tempDir, env } = setupMultiEpicRepo(
+    [
+      { id: 'EPIC-001', title: 'Alpha', status: 'merge-failed' },
+      { id: 'EPIC-002', title: 'Beta', dependsOn: ['EPIC-001'] },
+      { id: 'EPIC-003', title: 'Gamma' },
+    ],
+    { 'EPIC-003': 'PASS' },
+  );
+
+  const result = runRalph(tempDir, env);
+
+  // EPIC-003 should run and pass
+  assert.match(result.stdout, /\[EPIC-003\] PASSED/);
+  // EPIC-002 should be skipped due to EPIC-001 being merge-failed
+  assert.match(result.stdout, /\[EPIC-002\].*[Ss]kipped/);
+});
+
+test('US-005: merge log file created when merger agent is spawned', () => {
+  const { tempDir, env } = setupConflictRepo();
+
+  runRalph(tempDir, env);
+
+  const logsDir = path.join(tempDir, 'logs');
+  assert.ok(fs.existsSync(logsDir), 'logs/ directory should exist');
+  const mergeLogs = fs.readdirSync(logsDir).filter((f) => f.startsWith('merge-EPIC-001'));
+  assert.ok(mergeLogs.length > 0, 'merge log file should be created when agent is spawned');
+});
+
 test('US-003: --max-epics with --parallel both respected', () => {
   const { tempDir, env } = setupMultiEpicRepo(
     [
