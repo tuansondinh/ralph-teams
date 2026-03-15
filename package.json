@@ -1,0 +1,22 @@
+{
+  "name": "ralph-claude",
+  "version": "0.1.0",
+  "description": "CLI tool for ralph + claude agent teams",
+  "bin": {
+    "ralph-claude": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}
