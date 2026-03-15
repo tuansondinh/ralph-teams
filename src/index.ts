@@ -37,7 +37,8 @@ program
   .command('run [path]')
   .description('Run ralph.sh with the given prd.json')
   .option('--backend <backend>', 'AI backend to use (claude or copilot)', 'claude')
-  .action((prdPath: string = './prd.json', options: { backend?: string }) => {
+  .option('--parallel <n>', 'Max epics to run in parallel per wave (default: sequential)')
+  .action((prdPath: string = './prd.json', options: { backend?: string; parallel?: string }) => {
     runCommand(prdPath, options);
   });
 

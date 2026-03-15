@@ -41,7 +41,7 @@ function isCommandInstalled(cmd: string, deps: RunDeps): boolean {
   return result.status === 0;
 }
 
-export function runCommand(prdPath: string, options: { backend?: string }, deps: RunDeps = defaultDeps): void {
+export function runCommand(prdPath: string, options: { backend?: string; parallel?: string }, deps: RunDeps = defaultDeps): void {
   const resolved = path.resolve(prdPath);
   const backend = options.backend || 'claude';
 
@@ -78,9 +78,17 @@ export function runCommand(prdPath: string, options: { backend?: string }, deps:
 
   console.log(chalk.dim(`Using PRD: ${resolved}`));
   console.log(chalk.dim(`Using backend: ${backend}`));
-  console.log(chalk.dim(`Using ralph.sh: ${ralphSh}\n`));
+  console.log(chalk.dim(`Using ralph.sh: ${ralphSh}`));
+  if (options.parallel) {
+    console.log(chalk.dim(`Parallel: ${options.parallel} epics per wave\n`));
+  } else {
+    console.log(chalk.dim('Mode: sequential\n'));
+  }
 
   const args = [resolved, '--backend', backend];
+  if (options.parallel) {
+    args.push('--parallel', options.parallel);
+  }
   const result = deps.spawnSync(ralphSh, args, {
     stdio: 'inherit',
     shell: false,

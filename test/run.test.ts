@@ -106,3 +106,66 @@ test('runCommand invokes ralph.sh with the resolved PRD path and backend', () =>
   assert.ok(logs.some(line => line.includes(`Using PRD: ${path.resolve(prdPath)}`)));
   assert.ok(logs.some(line => line.includes('Using backend: copilot')));
 });
+
+test('runCommand with --parallel passes flag to ralph.sh', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
+  const prdPath = path.join(tempDir, 'prd.json');
+  fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
+
+  const tempRalphSh = path.join(tempDir, 'ralph.sh');
+  fs.writeFileSync(tempRalphSh, '#!/bin/sh\n');
+
+  const calls: Array<{ command: string; args?: readonly string[] }> = [];
+  const deps = createRunDeps({
+    existsSync: (target: fs.PathLike) => fs.existsSync(target),
+    spawnSync: ((command: string, args?: readonly string[]) => {
+      calls.push({ command, args });
+      return { status: 0 } as ReturnType<NonNullable<Parameters<typeof runCommand>[2]>['spawnSync']>;
+    }) as NonNullable<Parameters<typeof runCommand>[2]>['spawnSync'],
+    chmodSync: (() => {}) as typeof fs.chmodSync,
+    cwd: () => tempDir,
+  });
+
+  assert.throws(() => runCommand(prdPath, { backend: 'claude', parallel: '3' }, deps), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 0);
+    return true;
+  });
+
+  // calls[0] is the backend check (command -v claude), calls[1] is ralph.sh
+  const ralphArgs = calls[1]?.args;
+  assert.ok(ralphArgs !== undefined, 'ralph.sh was not called');
+  assert.ok(ralphArgs.includes('--parallel'), 'args should include --parallel');
+  assert.ok(ralphArgs.includes('3'), 'args should include the parallel value');
+});
+
+test('runCommand without --parallel does not include --parallel in args', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
+  const prdPath = path.join(tempDir, 'prd.json');
+  fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
+
+  const tempRalphSh = path.join(tempDir, 'ralph.sh');
+  fs.writeFileSync(tempRalphSh, '#!/bin/sh\n');
+
+  const calls: Array<{ command: string; args?: readonly string[] }> = [];
+  const deps = createRunDeps({
+    existsSync: (target: fs.PathLike) => fs.existsSync(target),
+    spawnSync: ((command: string, args?: readonly string[]) => {
+      calls.push({ command, args });
+      return { status: 0 } as ReturnType<NonNullable<Parameters<typeof runCommand>[2]>['spawnSync']>;
+    }) as NonNullable<Parameters<typeof runCommand>[2]>['spawnSync'],
+    chmodSync: (() => {}) as typeof fs.chmodSync,
+    cwd: () => tempDir,
+  });
+
+  assert.throws(() => runCommand(prdPath, { backend: 'claude' }, deps), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 0);
+    return true;
+  });
+
+  const ralphArgs = calls[1]?.args;
+  assert.ok(ralphArgs !== undefined, 'ralph.sh was not called');
+  assert.ok(!ralphArgs.includes('--parallel'), 'args should NOT include --parallel');
+  assert.deepEqual(Array.from(ralphArgs).slice(1), ['--backend', 'claude']);
+});
