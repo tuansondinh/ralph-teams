@@ -1,5 +1,71 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import chalk from 'chalk';
 import { loadPrd, epicStatusColor } from '../prd-utils';
+
+/** A single wave's worth of data parsed from progress.txt */
+export interface WaveInfo {
+  waveNumber: number;
+  epicIds: string[];
+  results: Array<{ epicId: string; outcome: string }>;
+}
+
+/**
+ * Parse wave boundaries and results from progress.txt.
+ * Returns an empty array if the file does not exist or contains no wave data.
+ *
+ * Expected progress.txt format (written by ralph.sh):
+ *   === Wave N — <date> ===
+ *     EPIC-XXX
+ *     EPIC-YYY
+ *   [EPIC-XXX] OUTCOME — <date>
+ */
+export function parseWavesFromProgress(progressPath: string): WaveInfo[] {
+  if (!fs.existsSync(progressPath)) {
+    return [];
+  }
+
+  const lines = fs.readFileSync(progressPath, 'utf-8').split('\n');
+  const waves: WaveInfo[] = [];
+  let currentWave: WaveInfo | null = null;
+  let inWaveHeader = false; // true immediately after a wave header line
+
+  // Matches: === Wave 3 — Mon Jan 01 ... ===
+  const waveHeaderRe = /^===\s+Wave\s+(\d+)/;
+  // Matches indented epic IDs that follow the wave header (before any result lines)
+  const epicIdRe = /^\s{1,4}(EPIC-\d+)\s*$/;
+  // Matches result lines: [EPIC-XXX] OUTCOME — date
+  const resultRe = /^\[(EPIC-\d+)\]\s+(.+?)\s+—/;
+
+  for (const line of lines) {
+    const waveMatch = waveHeaderRe.exec(line);
+    if (waveMatch) {
+      currentWave = { waveNumber: parseInt(waveMatch[1], 10), epicIds: [], results: [] };
+      waves.push(currentWave);
+      inWaveHeader = true;
+      continue;
+    }
+
+    if (currentWave && inWaveHeader) {
+      const epicMatch = epicIdRe.exec(line);
+      if (epicMatch) {
+        currentWave.epicIds.push(epicMatch[1]);
+        continue;
+      }
+      // A non-blank, non-epic line ends the header section
+      if (line.trim() !== '') {
+        inWaveHeader = false;
+      }
+    }
+
+    const resultMatch = resultRe.exec(line);
+    if (resultMatch && currentWave) {
+      currentWave.results.push({ epicId: resultMatch[1], outcome: resultMatch[2].trim() });
+    }
+  }
+
+  return waves;
+}
 
 export function summaryCommand(prdPath: string): void {
   const { prd } = loadPrd(prdPath);
@@ -65,5 +131,32 @@ export function summaryCommand(prdPath: string): void {
     console.log(`  ${epicLabel}  ${statusPadded}  ${passRateStr}${blockedLabel}`);
   }
 
+  // Wave History — parsed from progress.txt if present
+  const progressPath = path.resolve(path.dirname(prdPath), 'progress.txt');
+  const waves = parseWavesFromProgress(progressPath);
+  if (waves.length > 0) {
+    console.log(chalk.bold('\nWave History:'));
+    for (const wave of waves) {
+      const epicList = wave.epicIds.length > 0 ? wave.epicIds.join(', ') : '(none)';
+      console.log(`  ${chalk.cyan.bold(`Wave ${wave.waveNumber}:`)} ${epicList} (${wave.epicIds.length} epic${wave.epicIds.length !== 1 ? 's' : ''})`);
+      for (const result of wave.results) {
+        const outcomeStr = formatOutcome(result.outcome);
+        console.log(`    ${chalk.bold(result.epicId)}: ${outcomeStr}`);
+      }
+    }
+  }
+
   console.log('');
+}
+
+/** Colorize an outcome string from progress.txt */
+function formatOutcome(outcome: string): string {
+  if (outcome.startsWith('PASSED')) return chalk.green(outcome);
+  if (outcome.startsWith('MERGED')) return chalk.blue(outcome);
+  if (outcome.startsWith('MERGE FAILED')) return chalk.red(outcome);
+  if (outcome.startsWith('FAILED')) return chalk.red(outcome);
+  if (outcome.startsWith('PARTIAL')) return chalk.yellow(outcome);
+  if (outcome.startsWith('SKIPPED')) return chalk.dim(outcome);
+  if (outcome.startsWith('AUTO-COMPLETED')) return chalk.green(outcome);
+  return outcome;
 }

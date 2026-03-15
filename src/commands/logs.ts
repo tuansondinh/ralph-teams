@@ -3,8 +3,15 @@ import * as path from 'path';
 import chalk from 'chalk';
 
 function colorizeLine(line: string): string {
+  // Wave boundaries (highest priority — check before PASS/FAIL substring matches)
+  if (/^===\s+Wave\s+\d+/.test(line)) return chalk.cyan.bold(line);
+  // Merge results
+  if (line.includes('MERGE FAILED')) return chalk.red(line);
+  if (line.includes('MERGED')) return chalk.blue(line);
+  // Pass/fail outcomes
   if (line.includes('PASS')) return chalk.green(line);
   if (line.includes('FAIL')) return chalk.red(line);
+  // Section headers
   if (line.startsWith('##')) return chalk.yellow(line);
   return line;
 }
