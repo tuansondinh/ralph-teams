@@ -2,7 +2,7 @@
 # Ralph Team Agents — Project Manager Shell Harness
 # Ralph never writes code. Ralph schedules epics and spawns teams.
 #
-# Usage: ./ralph.sh [prd.json] [--max-epics N] [--backend claude|copilot]
+# Usage: ./ralph.sh [prd.json] [--max-epics N] [--backend claude|copilot] [--timeout SECONDS]
 
 set -euo pipefail
 
@@ -11,6 +11,7 @@ PRD_FILE="${1:-prd.json}"
 MAX_EPICS=10
 PROGRESS_FILE="progress.txt"
 BACKEND="claude"
+EPIC_TIMEOUT=0  # seconds; 0 = no timeout
 
 # Parse flags — shift past the PRD_FILE arg first
 shift 2>/dev/null || true
@@ -20,6 +21,8 @@ while [[ $# -gt 0 ]]; do
     --max-epics=*) MAX_EPICS="${1#*=}"; shift ;;
     --backend) BACKEND="$2"; shift 2 ;;
     --backend=*) BACKEND="${1#*=}"; shift ;;
+    --timeout) EPIC_TIMEOUT="$2"; shift 2 ;;
+    --timeout=*) EPIC_TIMEOUT="${1#*=}"; shift ;;
     *) shift ;;
   esac
 done
@@ -138,6 +141,9 @@ echo "  Project: $PROJECT"
 echo "  Branch: ${BRANCH:-<not set>}"
 echo "  Epics: $TOTAL_EPICS"
 echo "  Backend: $BACKEND"
+if [ "$EPIC_TIMEOUT" -gt 0 ] 2>/dev/null; then
+  echo "  Timeout: ${EPIC_TIMEOUT}s per epic"
+fi
 echo "========================================================"
 
 # --- Ensure correct branch ---
@@ -245,9 +251,15 @@ Begin."
   # Spawn team lead
   AGENT_EXIT=0
 
+  # Prefix with timeout if set
+  TIMEOUT_PREFIX=""
+  if [ "$EPIC_TIMEOUT" -gt 0 ] 2>/dev/null; then
+    TIMEOUT_PREFIX="timeout ${EPIC_TIMEOUT}s"
+  fi
+
   if [ "$STREAM_FORMAT" = "stream-json" ]; then
     # Claude: stream-json gives real-time structured output
-    echo "$TEAM_PROMPT" | $AGENT_CMD $AGENT_FLAGS 2>&1 | while IFS= read -r line; do
+    echo "$TEAM_PROMPT" | $TIMEOUT_PREFIX $AGENT_CMD $AGENT_FLAGS 2>&1 | while IFS= read -r line; do
       echo "$line" >> "$EPIC_LOG"
       # Extract and display assistant text messages
       TEXT=$(echo "$line" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text // empty' 2>/dev/null || true)
@@ -262,10 +274,12 @@ Begin."
     done || AGENT_EXIT=$?
   else
     # Copilot / text mode: -p takes the prompt as argument, plain text output
-    $AGENT_CMD $AGENT_FLAGS "$TEAM_PROMPT" 2>&1 | tee "$EPIC_LOG" || AGENT_EXIT=$?
+    $TIMEOUT_PREFIX $AGENT_CMD $AGENT_FLAGS "$TEAM_PROMPT" 2>&1 | tee "$EPIC_LOG" || AGENT_EXIT=$?
   fi
 
-  if [ "$AGENT_EXIT" -ne 0 ]; then
+  if [ "$AGENT_EXIT" -eq 124 ] && [ "$EPIC_TIMEOUT" -gt 0 ]; then
+    echo "  Warning: epic $EPIC_ID timed out after ${EPIC_TIMEOUT}s"
+  elif [ "$AGENT_EXIT" -ne 0 ]; then
     echo "  Warning: $BACKEND exited with code $AGENT_EXIT for epic $EPIC_ID"
   fi
 
@@ -279,7 +293,7 @@ Begin."
     continue
   fi
 
-  RESULT=$(cat "$RESULT_FILE")
+  RESULT=$(head -1 "$RESULT_FILE" | tr -d '\r' | xargs)
 
   if echo "$RESULT" | grep -qi "^PASS$"; then
     echo ""
