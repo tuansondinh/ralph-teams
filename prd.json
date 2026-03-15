@@ -1,0 +1,179 @@
+{
+  "project": "ralph-team-agents",
+  "branchName": "ralph/ralph-team-agents-cli",
+  "description": "CLI tool for Ralph Team Agents. Create PRDs, trigger team runs, and check progress.",
+  "epics": [
+    {
+      "id": "EPIC-001",
+      "title": "ralph-team-agents CLI",
+      "description": "Build a TypeScript CLI that wraps the Ralph Team Agents system with three commands: init (create PRD), run (trigger ralph loop), status (show progress)",
+      "status": "completed",
+      "dependsOn": [],
+      "userStories": [
+        {
+          "id": "US-001",
+          "title": "Project setup and CLI skeleton",
+          "description": "As a developer, I need a TypeScript project with a CLI entry point so I can build commands on top of it.",
+          "acceptanceCriteria": [
+            "package.json with name 'ralph-team-agents', bin field pointing to dist/index.js",
+            "TypeScript with strict mode, compiles with npm run build",
+            "Dependencies: commander, chalk",
+            "Dev dependencies: typescript, tsx, @types/node",
+            "src/index.ts with Commander program that shows help with --help",
+            "npm run dev runs via tsx, npm run build compiles to dist/",
+            "Typecheck passes with npm run typecheck"
+          ],
+          "priority": 1,
+          "passes": true
+        },
+        {
+          "id": "US-002",
+          "title": "status command",
+          "description": "As a user, I want to see the current progress of my epics and stories so I know what's done and what's left.",
+          "acceptanceCriteria": [
+            "ralph-team-agents status [path] reads a prd.json file (default: ./prd.json)",
+            "Displays each epic with its status (pending/completed/partial/failed)",
+            "Under each epic, lists user stories with pass/fail status",
+            "Shows summary: X/Y stories passed, Z epics completed",
+            "Uses chalk colors: green for passed, red for failed, yellow for pending",
+            "Shows helpful error if prd.json not found",
+            "Typecheck passes"
+          ],
+          "priority": 2,
+          "passes": true
+        },
+        {
+          "id": "US-003",
+          "title": "init command",
+          "description": "As a user, I want to create a prd.json interactively so I don't have to write JSON by hand.",
+          "acceptanceCriteria": [
+            "ralph-team-agents init starts interactive prompts",
+            "Asks for: project name, branch name, epic title, epic description",
+            "Asks to add user stories one at a time (title, description, acceptance criteria)",
+            "Asks 'Add another story?' after each story, stops when user says no",
+            "Generates valid prd.json in current directory",
+            "Generated JSON matches the prd.json schema (epics array, userStories with id/title/description/acceptanceCriteria/priority/passes)",
+            "Auto-generates IDs (EPIC-001, US-001, US-002, etc.)",
+            "Typecheck passes"
+          ],
+          "priority": 3,
+          "passes": true
+        },
+        {
+          "id": "US-004",
+          "title": "run command",
+          "description": "As a user, I want to trigger the ralph loop from the CLI so I don't have to call ralph.sh directly.",
+          "acceptanceCriteria": [
+            "ralph-team-agents run [path] triggers ralph.sh with the given prd.json",
+            "Defaults to ./prd.json if no path given",
+            "Locates ralph.sh relative to the CLI package (bundled with it)",
+            "Passes through stdout/stderr from ralph.sh in real-time",
+            "Exits with ralph.sh's exit code",
+            "Shows helpful error if prd.json not found",
+            "Shows helpful error if claude CLI is not installed",
+            "Typecheck passes"
+          ],
+          "priority": 4,
+          "passes": true
+        },
+        {
+          "id": "US-005",
+          "title": "Global install and README",
+          "description": "As a user, I want to install ralph-team-agents globally so I can use it from any project.",
+          "acceptanceCriteria": [
+            "npm link successfully makes ralph-team-agents available globally",
+            "ralph-team-agents --help shows all three commands with descriptions",
+            "ralph-team-agents --version shows package version",
+            "README.md with: what it is, install instructions, usage for each command, prd.json format example",
+            "Typecheck passes"
+          ],
+          "priority": 5,
+          "passes": true
+        }
+      ]
+    },
+    {
+      "id": "EPIC-002",
+      "title": "CLI Monitoring and Logs",
+      "description": "Add monitoring, log viewing, and epic management commands so users can track and control team runs",
+      "status": "completed",
+      "dependsOn": [
+        "EPIC-001"
+      ],
+      "userStories": [
+        {
+          "id": "US-006",
+          "title": "logs command",
+          "description": "As a user, I want to view the progress log so I can see what the teams have done.",
+          "acceptanceCriteria": [
+            "ralph-team-agents logs shows the contents of progress.txt",
+            "Supports --tail N flag to show last N entries",
+            "Colorizes output: green for PASS, red for FAIL, yellow for headings",
+            "Shows helpful message if progress.txt doesn't exist yet",
+            "Typecheck passes"
+          ],
+          "priority": 1,
+          "passes": true
+        },
+        {
+          "id": "US-007",
+          "title": "reset command",
+          "description": "As a user, I want to reset a failed or partial epic so I can re-run it.",
+          "acceptanceCriteria": [
+            "ralph-team-agents reset EPIC-001 sets the epic status back to pending",
+            "Also resets all userStories passes to false within that epic",
+            "Shows confirmation of what was reset",
+            "Shows error if epic ID not found",
+            "Typecheck passes"
+          ],
+          "priority": 2,
+          "passes": true
+        },
+        {
+          "id": "US-008",
+          "title": "add-epic command",
+          "description": "As a user, I want to add a new epic to an existing prd.json without recreating everything.",
+          "acceptanceCriteria": [
+            "ralph-team-agents add-epic [path] starts interactive prompts for a new epic",
+            "Asks for: epic title, description, dependencies (shows existing epic IDs)",
+            "Asks to add user stories one at a time",
+            "Appends the new epic to the existing prd.json epics array",
+            "Auto-generates next epic ID and story IDs (continues from existing)",
+            "Typecheck passes"
+          ],
+          "priority": 3,
+          "passes": true
+        },
+        {
+          "id": "US-009",
+          "title": "validate command",
+          "description": "As a user, I want to validate my prd.json before running so I catch errors early.",
+          "acceptanceCriteria": [
+            "ralph-team-agents validate [path] checks prd.json structure",
+            "Validates: required fields exist, IDs are unique, dependsOn references valid epic IDs, no circular dependencies",
+            "Prints all errors found (doesn't stop at first)",
+            "Exits 0 if valid, 1 if errors",
+            "Typecheck passes"
+          ],
+          "priority": 4,
+          "passes": true
+        },
+        {
+          "id": "US-010",
+          "title": "summary command with dependency tree",
+          "description": "As a user, I want to see a visual overview of my epics and their dependencies.",
+          "acceptanceCriteria": [
+            "ralph-team-agents summary [path] shows a tree view of epics",
+            "Shows dependency arrows between epics (e.g. EPIC-001 → EPIC-002)",
+            "Shows story count and pass rate per epic",
+            "Highlights blocked epics (deps not met)",
+            "Uses chalk colors for status",
+            "Typecheck passes"
+          ],
+          "priority": 5,
+          "passes": true
+        }
+      ]
+    }
+  ]
+}

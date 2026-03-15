@@ -31,7 +31,7 @@ interface Prd {
 export async function initCommand(): Promise<void> {
   const rl = createRl();
 
-  console.log(chalk.bold('\nralph-claude init\n'));
+  console.log(chalk.bold('\nralph-team-agents init\n'));
 
   const project = await ask(rl, chalk.cyan('Project name: '));
   const branchName = await ask(rl, chalk.cyan('Branch name: '));

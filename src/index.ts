@@ -14,8 +14,8 @@ import { summaryCommand } from './commands/summary';
 const program = new Command();
 
 program
-  .name('ralph-claude')
-  .description(chalk.bold('CLI for ralph + claude agent teams'))
+  .name('ralph-team-agents')
+  .description(chalk.bold('CLI for Ralph Team Agents'))
   .version('0.1.0');
 
 program
@@ -35,8 +35,9 @@ program
 program
   .command('run [path]')
   .description('Run ralph.sh with the given prd.json')
-  .action((prdPath: string = './prd.json') => {
-    runCommand(prdPath);
+  .option('--backend <backend>', 'AI backend to use (claude or copilot)', 'claude')
+  .action((prdPath: string = './prd.json', options: { backend?: string }) => {
+    runCommand(prdPath, options);
   });
 
 program

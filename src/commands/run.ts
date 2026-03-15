@@ -20,23 +20,30 @@ function findRalphSh(): string | null {
   return null;
 }
 
-function isClaudeInstalled(): boolean {
-  const result = spawnSync('command', ['-v', 'claude'], { shell: true });
+function isCommandInstalled(cmd: string): boolean {
+  const result = spawnSync('command', ['-v', cmd], { shell: true });
   return result.status === 0;
 }
 
-export function runCommand(prdPath: string): void {
+export function runCommand(prdPath: string, options: { backend?: string }): void {
   const resolved = path.resolve(prdPath);
+  const backend = options.backend || 'claude';
 
   if (!fs.existsSync(resolved)) {
     console.error(chalk.red(`Error: prd.json not found at ${resolved}`));
-    console.error(chalk.dim('Run `ralph-claude init` to create one.'));
+    console.error(chalk.dim('Run `ralph-team-agents init` to create one.'));
     process.exit(1);
   }
 
-  if (!isClaudeInstalled()) {
+  if (backend === 'claude' && !isCommandInstalled('claude')) {
     console.error(chalk.red('Error: claude CLI is not installed or not in PATH.'));
     console.error(chalk.dim('Install Claude Code: https://claude.ai/code'));
+    process.exit(1);
+  }
+
+  if (backend === 'copilot' && !isCommandInstalled('gh')) {
+    console.error(chalk.red('Error: gh CLI is not installed or not in PATH.'));
+    console.error(chalk.dim('Install GitHub CLI: https://cli.github.com'));
     process.exit(1);
   }
 
@@ -54,9 +61,11 @@ export function runCommand(prdPath: string): void {
   }
 
   console.log(chalk.dim(`Using PRD: ${resolved}`));
+  console.log(chalk.dim(`Using backend: ${backend}`));
   console.log(chalk.dim(`Using ralph.sh: ${ralphSh}\n`));
 
-  const result = spawnSync(ralphSh, [resolved], {
+  const args = [resolved, '--backend', backend];
+  const result = spawnSync(ralphSh, args, {
     stdio: 'inherit',
     shell: false,
   });

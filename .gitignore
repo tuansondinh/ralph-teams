@@ -1,0 +1,20 @@
+node_modules/
+
+# Build output
+dist/
+
+# Runtime artifacts
+logs/
+plans/
+results/
+progress.txt
+result.txt
+
+# Generated diagram exports
+flow.png
+ralph-flow.png
+ralph-team-agents.png
+ralph-team-agents.svg
+
+# OS files
+.DS_Store
