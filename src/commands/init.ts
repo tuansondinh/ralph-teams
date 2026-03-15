@@ -23,7 +23,7 @@ function findPrdExample(): string | null {
   return null;
 }
 
-function buildInitPrompt(prdExample: string, outputPath: string): string {
+export function buildInitPrompt(prdExample: string, outputPath: string): string {
   return [
     'You are a PRD creation agent for Ralph Teams.',
     'Your job is to help the user create a valid prd.json through conversation.',
@@ -37,21 +37,31 @@ function buildInitPrompt(prdExample: string, outputPath: string): string {
     '- Ask follow-up questions to clarify scope, users, workflows, constraints, and priorities.',
     '- Keep the discussion practical and product-oriented.',
     '',
-    '### Phase 2: Design Discussion',
-    'Before generating any epics, discuss open design and implementation questions with the user:',
-    '- Identify architectural decisions that affect how epics are structured (e.g. "should X be a separate service or part of Y?")',
-    '- Ask about constraints, trade-offs, and preferences the user has for the implementation approach.',
-    '- Propose your recommended approach and let the user weigh in.',
-    '- Discuss how the work should be broken into epics and what depends on what.',
-    '- Explicitly ask: "Which epics need to complete before others can start?" to establish the dependency graph.',
-    '- If the user is unsure about dependencies, recommend a sensible ordering and explain why.',
+    '### Phase 2: Design & Dependency Discussion',
+    'Before generating any epics, you MUST discuss these topics with the user:',
+    '',
+    '**Design Questions:**',
+    '- Identify 2-4 open architectural or implementation questions that affect how the work should be structured.',
+    '- Present them to the user and discuss before moving on.',
+    '- Examples: "Should X be a separate service?", "Do you want server-side or client-side rendering for Y?", "Should we use an existing library for Z or build custom?"',
+    '',
+    '**Epic Ordering & Dependencies:**',
+    '- Propose how you would break the work into epics (just titles and one-line descriptions at this stage).',
+    '- For each epic, explain what it depends on and why.',
+    '- Present the dependency graph explicitly, e.g.:',
+    '  "EPIC-001 (no deps) -> EPIC-002 (needs EPIC-001) -> EPIC-003 (needs EPIC-002)"',
+    '  "EPIC-001 (no deps) -> EPIC-004 (needs EPIC-001, can run parallel with EPIC-002)"',
+    '- Ask: "Does this ordering make sense? Would you change any dependencies?"',
+    '- Do NOT proceed until the user confirms the dependency structure.',
     '',
     '### Phase 3: PRD Structure Review',
-    '- Propose the epic structure with story counts and dependency graph.',
-    '- Let the user challenge whether stories are too granular or too large.',
-    '- A good story is a meaningful, testable chunk of work — not a single function call or config change.',
-    '- Consolidate related work into fewer, meatier stories rather than splitting into many tiny ones.',
-    '- Only proceed to generation once the user approves the structure.',
+    '- Present the full epic structure: epic titles, story titles (no full descriptions yet), and dependency graph.',
+    '- Each epic should have 2-5 stories. Err on the side of fewer, larger stories.',
+    '- A story should represent a meaningful, testable increment — NOT a single function, config change, or file edit.',
+    '- Bad example: "Add migration for users table" (too granular)',
+    '- Good example: "User data model, API endpoints, and basic CRUD" (meaningful chunk)',
+    '- If the user thinks stories are too granular, consolidate aggressively.',
+    '- Only proceed to generation once the user approves.',
     '',
     '### Phase 4: Generation',
     '- Generate the full prd.json and write it.',
@@ -66,7 +76,9 @@ function buildInitPrompt(prdExample: string, outputPath: string): string {
     '- Use sequential IDs like EPIC-001 and US-001.',
     '- Set new epic status values to "pending".',
     '- Set all new story passes values to false.',
-    '- dependsOn must be explicitly set for every epic based on the dependency discussion. Use [] for epics with no dependencies.',
+    '- dependsOn MUST be set for every epic. Use [] for epics with no dependencies.',
+    '- The dependsOn values must exactly match the dependency graph agreed upon in Phase 2.',
+    '- If an epic can run in parallel with others (no real dependency), its dependsOn should be [] or only include true prerequisites.',
     '- Before writing the final file, summarize the proposed PRD structure and let the user correct anything important.',
     '- Only finish once the PRD has been written, or the user cancels.',
     '',
@@ -121,7 +133,8 @@ export async function initCommand(options: InitOptions = {}): Promise<void> {
 
   console.log(chalk.bold('\nralph-teams init\n'));
   console.log(chalk.dim(`Starting interactive PRD creator with ${backend}...`));
-  console.log(chalk.dim(`The agent will discuss requirements with you and write ${outputPath}\n`));
+  console.log(chalk.dim(`The agent will discuss requirements with you and write ${outputPath}`));
+  console.log(chalk.dim('The agent will discuss design decisions and dependencies before generating.\n'));
 
   ensureBackendAvailable(backend);
 
