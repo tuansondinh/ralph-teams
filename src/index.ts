@@ -7,6 +7,7 @@ import { initCommand } from './commands/init';
 import { runCommand } from './commands/run';
 import { logsCommand } from './commands/logs';
 import { resetCommand } from './commands/reset';
+import { addEpicCommand } from './commands/add-epic';
 
 const program = new Command();
 
@@ -49,6 +50,13 @@ program
   .description('Reset an epic status back to pending')
   .action((epicId: string, prdPath: string = './prd.json') => {
     resetCommand(epicId, prdPath);
+  });
+
+program
+  .command('add-epic [path]')
+  .description('Interactively add a new epic to prd.json')
+  .action(async (prdPath: string = './prd.json') => {
+    await addEpicCommand(prdPath);
   });
 
 program.parse(process.argv);
