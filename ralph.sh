@@ -263,6 +263,18 @@ cleanup_all_worktrees() {
   done
 }
 
+terminate_process_tree() {
+  local pid="$1"
+  local child_pids
+  child_pids=$(pgrep -P "$pid" 2>/dev/null || true)
+
+  for child_pid in $child_pids; do
+    terminate_process_tree "$child_pid"
+  done
+
+  kill "$pid" 2>/dev/null || true
+}
+
 # --- Process Epics (Wave-based) ---
 COMPLETED=0
 FAILED=0
@@ -394,6 +406,102 @@ Begin."
   LAST_SPAWN_PID=$!
 }
 
+# merge_wave: merges completed epic branches back to the target branch sequentially.
+# Takes epic IDs as arguments. Clean merges succeed without AI intervention.
+# On conflict, spawns the merger agent. Logs all outcomes to progress.txt.
+merge_wave() {
+  local -a completed_epic_ids=("$@")
+
+  if [ ${#completed_epic_ids[@]} -eq 0 ]; then
+    return 0
+  fi
+
+  echo ""
+  echo "  --- Merging completed epic branches ---"
+
+  local merge_failures=0
+  local target_branch
+  target_branch=$(jq -r '.branchName // empty' "$PRD_FILE")
+  [ -z "$target_branch" ] && target_branch=$(git branch --show-current)
+
+  for epic_id in "${completed_epic_ids[@]}"; do
+    local branch_name="ralph/${epic_id}"
+
+    # Check if branch exists
+    if ! git show-ref --verify --quiet "refs/heads/${branch_name}"; then
+      echo "  [$epic_id] No branch ${branch_name} found — skipping merge"
+      continue
+    fi
+
+    echo "  [$epic_id] Merging ${branch_name} → ${target_branch}"
+
+    # Attempt clean merge first
+    if git merge "${branch_name}" --no-edit 2>/dev/null; then
+      echo "  [$epic_id] Merge successful (clean)"
+      echo "[$epic_id] MERGED (clean) — $(date)" >> "$PROGRESS_FILE"
+    else
+      # Conflict detected — spawn merger agent for AI resolution
+      echo "  [$epic_id] Merge conflict detected — spawning merger agent"
+
+      local merge_prompt="Resolve the merge conflict for epic ${epic_id}.
+Branch being merged: ${branch_name}
+Target branch: ${target_branch}
+PRD file: ${PRD_ABS_PATH}
+
+The merge has already been started and conflicts exist. Use 'git diff' to see the conflicts.
+Resolve them by understanding the intent of both sides, then stage and commit.
+If you cannot resolve, run 'git merge --abort' and output MERGE_FAILED.
+Otherwise output MERGE_SUCCESS."
+
+      local merge_log="${ROOT_DIR}/logs/merge-${epic_id}-$(date +%s).log"
+
+      case "$BACKEND" in
+        claude)
+          echo "$merge_prompt" | $AGENT_CMD --agent merger --dangerously-skip-permissions --print --verbose --output-format stream-json > "$merge_log" 2>&1
+          ;;
+        copilot)
+          COPILOT_MERGE_PROMPT="$merge_prompt" \
+            script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent merger --allow-all --no-ask-user --stream on -p "$COPILOT_MERGE_PROMPT"' \
+            > "$merge_log" 2>&1
+          ;;
+      esac
+
+      # Check if merge was resolved — look for unresolved conflict markers
+      local unresolved_conflicts
+      unresolved_conflicts=$(git diff --name-only --diff-filter=U 2>/dev/null || true)
+
+      if [ -z "$unresolved_conflicts" ] && git diff --cached --quiet 2>/dev/null; then
+        # No staged changes and no unresolved conflicts — check if merge commit was made
+        if git log -1 --pretty=%s 2>/dev/null | grep -qi "merge"; then
+          echo "  [$epic_id] Merge resolved by AI"
+          echo "[$epic_id] MERGED (AI-resolved) — $(date)" >> "$PROGRESS_FILE"
+        else
+          echo "  [$epic_id] Merge resolved by AI"
+          echo "[$epic_id] MERGED (AI-resolved) — $(date)" >> "$PROGRESS_FILE"
+        fi
+      else
+        # AI couldn't resolve — abort merge
+        git merge --abort 2>/dev/null || true
+        echo "  [$epic_id] Merge FAILED — conflict could not be resolved"
+        echo "[$epic_id] MERGE FAILED — $(date)" >> "$PROGRESS_FILE"
+        merge_failures=$((merge_failures + 1))
+
+        # Update epic status to merge-failed
+        local epic_index
+        epic_index=$(jq --arg id "$epic_id" '.epics | to_entries[] | select(.value.id == $id) | .key' "$PRD_FILE")
+        if [ -n "$epic_index" ]; then
+          jq ".epics[$epic_index].status = \"merge-failed\"" "$PRD_FILE" > tmp.$$.json && mv tmp.$$.json "$PRD_FILE"
+        fi
+      fi
+    fi
+
+    # Clean up the merged branch
+    git branch -d "${branch_name}" 2>/dev/null || true
+  done
+
+  return $merge_failures
+}
+
 WAVE_NUM=0
 while true; do
   # Find all epics ready for this wave
@@ -453,6 +561,8 @@ while true; do
   # active_pids[i] and active_indices[i] track running background processes
   declare -a active_pids=()
   declare -a active_indices=()
+  # wave_completed_ids collects epic IDs that completed successfully (for merge_wave)
+  declare -a wave_completed_ids=()
   queue_pos=0
 
   # Helper: wait_for_one_slot — polls active_pids until a slot is free,
@@ -460,14 +570,31 @@ while true; do
   wait_for_one_slot() {
     while true; do
       for slot in "${!active_pids[@]}"; do
+        local finished_epic_id
+        finished_epic_id=$(jq -r ".epics[${active_indices[$slot]}].id" "$PRD_FILE")
+        local result_file="${ROOT_DIR}/results/result-${finished_epic_id}.txt"
+        local process_finished=false
+
         if ! kill -0 "${active_pids[$slot]}" 2>/dev/null; then
-          # This process has finished
+          process_finished=true
+        fi
+
+        if [ "$process_finished" = true ] || [ -f "$result_file" ]; then
+          # If the result file exists, the epic is complete even if the backend
+          # session is still idling. Terminate the lingering job and advance.
+          if [ "$process_finished" = false ]; then
+            terminate_process_tree "${active_pids[$slot]}"
+          fi
           wait "${active_pids[$slot]}" 2>/dev/null || true
-          local finished_epic_id
-          finished_epic_id=$(jq -r ".epics[${active_indices[$slot]}].id" "$PRD_FILE")
           echo "  [$finished_epic_id] finished — processing result"
           cleanup_epic_worktree "$finished_epic_id"
           process_epic_result "${active_indices[$slot]}"
+          # Track completed epics for merge_wave
+          local post_status
+          post_status=$(jq -r ".epics[${active_indices[$slot]}].status // \"pending\"" "$PRD_FILE")
+          if [ "$post_status" = "completed" ]; then
+            wave_completed_ids+=("$finished_epic_id")
+          fi
           unset 'active_pids[$slot]'
           unset 'active_indices[$slot]'
           active_pids=("${active_pids[@]+"${active_pids[@]}"}")
@@ -513,6 +640,11 @@ while true; do
   while [ "${#active_pids[@]}" -gt 0 ]; do
     wait_for_one_slot
   done
+
+  # Merge completed epic branches back to starting branch
+  if [ ${#wave_completed_ids[@]} -gt 0 ]; then
+    merge_wave "${wave_completed_ids[@]}"
+  fi
 
   # If we hit --max-epics mid-wave, stop processing further waves
   if [ "$PROCESSED" -ge "$MAX_EPICS" ] && [ "$queue_pos" -lt "${#WAVE_EPICS[@]}" ]; then

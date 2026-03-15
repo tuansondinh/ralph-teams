@@ -106,9 +106,14 @@ function setupMultiEpicRepo(
     'if [ -n "$EPIC_ID" ]; then',
     '  ENV_KEY="MOCK_RESULT_$(printf "%s" "$EPIC_ID" | tr - _)"',
     '  RESULT_VAL=$(printenv "$ENV_KEY" 2>/dev/null || true)',
+    '  HANG_KEY="MOCK_HANG_$(printf "%s" "$EPIC_ID" | tr - _)"',
+    '  HANG_VAL=$(printenv "$HANG_KEY" 2>/dev/null || true)',
     '  if [ -n "$RESULT_VAL" ]; then',
     '    mkdir -p results',
     '    printf "%s\\n" "$RESULT_VAL" > "results/result-${EPIC_ID}.txt"',
+    '  fi',
+    '  if [ "$HANG_VAL" = "1" ]; then',
+    '    sleep 30',
     '  fi',
     'fi',
     'exit 0',
@@ -266,9 +271,10 @@ test('US-002: worktree and branch are created per epic', () => {
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
 
-  // The branch ralph/EPIC-001 should exist after execution
-  const branches = execFileSync('git', ['branch'], { cwd: tempDir, encoding: 'utf-8' });
-  assert.match(branches, /ralph\/EPIC-001/);
+  // Ralph should report spawning the epic in a worktree (branch creation is logged)
+  assert.match(result.stdout, /Spawning \[EPIC-001\] in worktree/);
+  // The epic should complete (confirming the worktree + branch were usable)
+  assert.match(result.stdout, /\[EPIC-001\] PASSED/);
 });
 
 test('US-002: worktrees are cleaned up after wave completes', () => {
@@ -324,6 +330,31 @@ test('US-002: epics in a wave run in parallel (both finish)', () => {
   assert.match(result.stdout, /\[EPIC-003\] PASSED/);
 });
 
+test('US-002: result file completion advances even if backend session lingers', () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [
+      { id: 'EPIC-001', title: 'Alpha' },
+      { id: 'EPIC-002', title: 'Beta', dependsOn: ['EPIC-001'] },
+    ],
+    { 'EPIC-001': 'PASS', 'EPIC-002': 'PASS' },
+  );
+
+  env.MOCK_HANG_EPIC_001 = '1';
+
+  const result = spawnSync('bash', [scriptPath, 'prd.json'], {
+    cwd: tempDir,
+    encoding: 'utf-8',
+    env,
+    timeout: 5000,
+  });
+
+  assert.equal(result.error, undefined, `expected Ralph to finish before timeout; got ${result.error}`);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.match(result.stdout, /\[EPIC-001\] PASSED/);
+  assert.match(result.stdout, /Wave 2 — 1 epic\(s\)/);
+  assert.match(result.stdout, /\[EPIC-002\] PASSED/);
+});
+
 // ─── US-003 Tests ─────────────────────────────────────────────────────────────
 
 test('US-003: --parallel flag is parsed and shown in banner', () => {
@@ -365,6 +396,137 @@ test('US-003: --parallel 1 runs all epics in wave sequentially and all pass', ()
   assert.match(result.stdout, /\[EPIC-001\] PASSED/);
   assert.match(result.stdout, /\[EPIC-002\] PASSED/);
   assert.match(result.stdout, /\[EPIC-003\] PASSED/);
+});
+
+// ─── US-004 Tests ─────────────────────────────────────────────────────────────
+
+/**
+ * Sets up a repo where epic branches have actual commits (different files),
+ * so they can be cleanly merged back to main. Uses a mock claude that writes
+ * result files AND creates a commit on the epic branch before reporting.
+ */
+function setupMergeRepo(
+  epics: Array<{ id: string; title: string; fileName: string }>,
+) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-merge-'));
+  const binDir = path.join(tempDir, 'bin');
+  fs.mkdirSync(binDir);
+
+  execFileSync('git', ['init', '-b', 'main'], { cwd: tempDir });
+  execFileSync('git', ['config', 'user.name', 'Ralph Test'], { cwd: tempDir });
+  execFileSync('git', ['config', 'user.email', 'ralph@example.com'], { cwd: tempDir });
+
+  // Initial commit on main
+  fs.writeFileSync(path.join(tempDir, 'README.md'), 'initial\n');
+  const prd = {
+    project: 'Merge Test',
+    epics: epics.map((e) => ({
+      id: e.id,
+      title: e.title,
+      status: 'pending',
+      userStories: [{ id: 'US-001', title: 'Story', passes: false }],
+    })),
+  };
+  fs.writeFileSync(path.join(tempDir, 'prd.json'), JSON.stringify(prd, null, 2));
+  execFileSync('git', ['add', '.'], { cwd: tempDir });
+  execFileSync('git', ['commit', '-m', 'chore: initial'], { cwd: tempDir });
+
+  // Mock claude: creates a unique file on the epic branch, then writes PASS result
+  // This ensures each epic branch has a distinct commit that can be cleanly merged
+  const mockClaude = [
+    '#!/bin/sh',
+    'STDIN=$(cat)',
+    'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
+    'if [ -n "$EPIC_ID" ]; then',
+    '  ENV_KEY="MOCK_FILE_$(printf "%s" "$EPIC_ID" | tr - _)"',
+    '  FILE_NAME=$(printenv "$ENV_KEY" 2>/dev/null || true)',
+    '  if [ -n "$FILE_NAME" ]; then',
+    '    printf "content for %s\\n" "$EPIC_ID" > "$FILE_NAME"',
+    '    git add "$FILE_NAME"',
+    '    git commit -m "feat: add $FILE_NAME for $EPIC_ID"',
+    '  fi',
+    '  mkdir -p results',
+    '  printf "PASS\\n" > "results/result-${EPIC_ID}.txt"',
+    'fi',
+    'exit 0',
+  ].join('\n');
+  fs.writeFileSync(path.join(binDir, 'claude'), mockClaude);
+  fs.chmodSync(path.join(binDir, 'claude'), 0o755);
+
+  const env: Record<string, string> = {
+    ...process.env as Record<string, string>,
+    PATH: `${binDir}:${process.env.PATH ?? ''}`,
+  };
+  // Tell the mock which file to create per epic
+  for (const e of epics) {
+    const envKey = `MOCK_FILE_${e.id.replace(/-/g, '_')}`;
+    env[envKey] = e.fileName;
+  }
+
+  return { tempDir, binDir, env };
+}
+
+test('US-004: merge is attempted after wave completes — progress.txt contains merge entry', () => {
+  const { tempDir, env } = setupMergeRepo([
+    { id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' },
+  ]);
+
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+
+  const progress = fs.readFileSync(path.join(tempDir, 'progress.txt'), 'utf-8');
+  assert.match(progress, /\[EPIC-001\] MERGED/);
+});
+
+test('US-004: clean merge succeeds without spawning merger agent', () => {
+  const { tempDir, env } = setupMergeRepo([
+    { id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' },
+  ]);
+
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+
+  // Should report clean merge in stdout
+  assert.match(result.stdout, /\[EPIC-001\] Merge successful \(clean\)/);
+
+  // No merger agent log should exist (clean merge doesn't spawn agent)
+  const logsDir = path.join(tempDir, 'logs');
+  if (fs.existsSync(logsDir)) {
+    const mergeLogs = fs.readdirSync(logsDir).filter((f) => f.startsWith('merge-'));
+    assert.equal(mergeLogs.length, 0, 'clean merge should not create a merge agent log');
+  }
+});
+
+test('US-004: epic branch is deleted after successful merge', () => {
+  const { tempDir, env } = setupMergeRepo([
+    { id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' },
+  ]);
+
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+
+  // Branch ralph/EPIC-001 should be deleted after merge
+  const branches = execFileSync('git', ['branch'], { cwd: tempDir, encoding: 'utf-8' });
+  assert.doesNotMatch(branches, /ralph\/EPIC-001/, 'epic branch should be deleted after merge');
+});
+
+test('US-004: two independent epics both merge cleanly after wave', () => {
+  const { tempDir, env } = setupMergeRepo([
+    { id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' },
+    { id: 'EPIC-002', title: 'Beta', fileName: 'beta.txt' },
+  ]);
+
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+
+  const progress = fs.readFileSync(path.join(tempDir, 'progress.txt'), 'utf-8');
+  assert.match(progress, /\[EPIC-001\] MERGED/);
+  assert.match(progress, /\[EPIC-002\] MERGED/);
+
+  // Both branches should be cleaned up
+  const branches = execFileSync('git', ['branch'], { cwd: tempDir, encoding: 'utf-8' });
+  assert.doesNotMatch(branches, /ralph\/EPIC-001/);
+  assert.doesNotMatch(branches, /ralph\/EPIC-002/);
 });
 
 test('US-003: --max-epics with --parallel both respected', () => {
