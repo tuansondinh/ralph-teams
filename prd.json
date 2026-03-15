@@ -96,7 +96,7 @@
       "id": "EPIC-002",
       "title": "CLI Monitoring and Logs",
       "description": "Add monitoring, log viewing, and epic management commands so users can track and control team runs",
-      "status": "completed",
+      "status": "pending",
       "dependsOn": [
         "EPIC-001"
       ],
@@ -171,7 +171,7 @@
             "Typecheck passes"
           ],
           "priority": 5,
-          "passes": true
+          "passes": false
         }
       ]
     }
