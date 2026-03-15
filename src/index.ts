@@ -8,6 +8,7 @@ import { runCommand } from './commands/run';
 import { logsCommand } from './commands/logs';
 import { resetCommand } from './commands/reset';
 import { addEpicCommand } from './commands/add-epic';
+import { validateCommand } from './commands/validate';
 
 const program = new Command();
 
@@ -57,6 +58,13 @@ program
   .description('Interactively add a new epic to prd.json')
   .action(async (prdPath: string = './prd.json') => {
     await addEpicCommand(prdPath);
+  });
+
+program
+  .command('validate [path]')
+  .description('Validate prd.json structure and references')
+  .action((prdPath: string = './prd.json') => {
+    validateCommand(prdPath);
   });
 
 program.parse(process.argv);
