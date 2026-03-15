@@ -254,3 +254,72 @@ test('US-001: wave boundaries are logged to progress.txt', () => {
   assert.match(progress, /EPIC-001/);
   assert.match(progress, /EPIC-002/);
 });
+
+// ─── US-002 Tests ─────────────────────────────────────────────────────────────
+
+test('US-002: worktree and branch are created per epic', () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    { 'EPIC-001': 'PASS' },
+  );
+
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+
+  // The branch ralph/EPIC-001 should exist after execution
+  const branches = execFileSync('git', ['branch'], { cwd: tempDir, encoding: 'utf-8' });
+  assert.match(branches, /ralph\/EPIC-001/);
+});
+
+test('US-002: worktrees are cleaned up after wave completes', () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    { 'EPIC-001': 'PASS' },
+  );
+
+  runRalph(tempDir, env);
+
+  // .worktrees/EPIC-001 should NOT exist after cleanup
+  assert.equal(fs.existsSync(path.join(tempDir, '.worktrees', 'EPIC-001')), false);
+});
+
+test('US-002: two independent epics each get separate log files', () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [
+      { id: 'EPIC-001', title: 'Alpha' },
+      { id: 'EPIC-002', title: 'Beta' },
+    ],
+    { 'EPIC-001': 'PASS', 'EPIC-002': 'PASS' },
+  );
+
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+
+  const logsDir = path.join(tempDir, 'logs');
+  assert.ok(fs.existsSync(logsDir), 'logs/ directory should exist');
+  const logFiles = fs.readdirSync(logsDir);
+  const epic1Logs = logFiles.filter((f) => f.includes('EPIC-001'));
+  const epic2Logs = logFiles.filter((f) => f.includes('EPIC-002'));
+  assert.ok(epic1Logs.length > 0, 'should have a log file for EPIC-001');
+  assert.ok(epic2Logs.length > 0, 'should have a log file for EPIC-002');
+});
+
+test('US-002: epics in a wave run in parallel (both finish)', () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [
+      { id: 'EPIC-001', title: 'Alpha' },
+      { id: 'EPIC-002', title: 'Beta' },
+      { id: 'EPIC-003', title: 'Gamma' },
+    ],
+    { 'EPIC-001': 'PASS', 'EPIC-002': 'PASS', 'EPIC-003': 'PASS' },
+  );
+
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+
+  // All three should be spawned in Wave 1 (no deps)
+  assert.match(result.stdout, /Wave 1 — 3 epic\(s\)/);
+  assert.match(result.stdout, /\[EPIC-001\] PASSED/);
+  assert.match(result.stdout, /\[EPIC-002\] PASSED/);
+  assert.match(result.stdout, /\[EPIC-003\] PASSED/);
+});

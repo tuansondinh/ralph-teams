@@ -229,6 +229,36 @@ if [ -n "$BRANCH" ] && [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
   git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH"
 fi
 
+# --- Worktree Management ---
+# Creates a git worktree at .worktrees/<epic_id> on branch ralph/<epic_id>.
+# Deletes any stale branch/worktree from a prior run first.
+create_epic_worktree() {
+  local epic_id="$1"
+  local branch_name="ralph/${epic_id}"
+  local worktree_path=".worktrees/${epic_id}"
+
+  # Remove stale worktree entry if it exists
+  git worktree remove "$worktree_path" --force 2>/dev/null || true
+  # Remove stale branch if it exists
+  git branch -D "$branch_name" 2>/dev/null || true
+
+  git worktree add "$worktree_path" -b "$branch_name" >/dev/null 2>&1
+  echo "$worktree_path"
+}
+
+# Removes a worktree. The branch is kept for potential merge by a later agent.
+cleanup_epic_worktree() {
+  local epic_id="$1"
+  git worktree remove ".worktrees/${epic_id}" --force 2>/dev/null || true
+}
+
+# Removes ALL .worktrees/* entries (used on EXIT).
+cleanup_all_worktrees() {
+  for dir in .worktrees/*/; do
+    [ -d "$dir" ] && git worktree remove "$dir" --force 2>/dev/null || true
+  done
+}
+
 # --- Process Epics (Wave-based) ---
 COMPLETED=0
 FAILED=0
@@ -236,9 +266,13 @@ PROCESSED=0
 
 # Resolve absolute path to PRD file so team lead always has the correct path
 PRD_ABS_PATH="$(cd "$(dirname "$PRD_FILE")" && pwd)/$(basename "$PRD_FILE")"
+ROOT_DIR="$(pwd)"
 
 # Detect circular dependencies before starting
 detect_circular_deps "$PRD_FILE" "$TOTAL_EPICS"
+
+# Cleanup worktrees on exit (Ctrl+C, error, or normal finish)
+trap 'cleanup_all_worktrees; kill $(jobs -p) 2>/dev/null || true' EXIT
 
 # process_epic_result: parse result file and update PRD status for a given epic index
 process_epic_result() {
@@ -281,8 +315,10 @@ process_epic_result() {
   fi
 }
 
-# spawn_epic: build prompt and run team lead for a given epic index (foreground)
-spawn_epic() {
+# spawn_epic_bg: create worktree, build prompt, and run team lead in the background.
+# Sets LAST_SPAWN_PID to the background PID.
+# Callers must wait on that PID and then call cleanup_epic_worktree + process_epic_result.
+spawn_epic_bg() {
   local EPIC_INDEX="$1"
   local EPIC_ID
   EPIC_ID=$(jq -r ".epics[$EPIC_INDEX].id" "$PRD_FILE")
@@ -291,21 +327,27 @@ spawn_epic() {
   local EPIC_JSON
   EPIC_JSON=$(jq ".epics[$EPIC_INDEX]" "$PRD_FILE")
 
-  echo ""
-  echo "========================================================"
-  echo "  Spawning team for: [$EPIC_ID] $EPIC_TITLE"
-  echo "  $(date)"
-  echo "========================================================"
-
-  local RESULT_FILE="$(pwd)/results/result-${EPIC_ID}.txt"
-  local EPIC_LOG="$(pwd)/logs/epic-${EPIC_ID}-$(date +%s).log"
-  mkdir -p results logs
+  local RESULT_FILE="${ROOT_DIR}/results/result-${EPIC_ID}.txt"
+  local EPIC_LOG="${ROOT_DIR}/logs/epic-${EPIC_ID}-$(date +%s).log"
+  mkdir -p "${ROOT_DIR}/results" "${ROOT_DIR}/logs"
   rm -f "$RESULT_FILE"
+
+  # Create isolated worktree for this epic
+  local WORKTREE_PATH
+  WORKTREE_PATH=$(create_epic_worktree "$EPIC_ID")
+  local WORKTREE_ABS_PATH
+  WORKTREE_ABS_PATH="$(cd "${ROOT_DIR}/${WORKTREE_PATH}" && pwd)"
+
+  echo "  Spawning [$EPIC_ID] in worktree $WORKTREE_PATH"
 
   local TEAM_PROMPT="You are the Team Lead for this epic. Read the epic below and execute it.
 
 ## Project
 $PROJECT
+
+## Working Directory
+ALL work for this epic MUST happen in this directory: $WORKTREE_ABS_PATH
+Do NOT modify files outside this directory.
 
 ## PRD File Path
 $PRD_ABS_PATH
@@ -333,31 +375,19 @@ $EPIC_JSON
 
 Begin."
 
-  local AGENT_EXIT=0
-
+  # Run agent in background; write all output to log file (no console streaming in parallel mode)
   if [ "$STREAM_FORMAT" = "stream-json" ]; then
-    echo "$TEAM_PROMPT" | $AGENT_CMD $AGENT_FLAGS 2>&1 | while IFS= read -r line; do
-      echo "$line" >> "$EPIC_LOG"
-      local TEXT
-      TEXT=$(echo "$line" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text // empty' 2>/dev/null || true)
-      if [ -n "$TEXT" ]; then
-        echo "$TEXT"
-      fi
-      local TOOL
-      TOOL=$(echo "$line" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | "  -> \(.name): \(.input | tostring | .[0:100])"' 2>/dev/null || true)
-      if [ -n "$TOOL" ]; then
-        echo "$TOOL"
-      fi
-    done || AGENT_EXIT=$?
+    (
+      echo "$TEAM_PROMPT" | $AGENT_CMD $AGENT_FLAGS > "$EPIC_LOG" 2>&1
+    ) &
   else
-    COPILOT_TEAM_PROMPT="$TEAM_PROMPT" \
-      script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent team-lead --allow-all --no-ask-user --stream on -p "$COPILOT_TEAM_PROMPT"' \
-      2>&1 | tee "$EPIC_LOG" || AGENT_EXIT=$?
+    (
+      COPILOT_TEAM_PROMPT="$TEAM_PROMPT" \
+        script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent team-lead --allow-all --no-ask-user --stream on -p "$COPILOT_TEAM_PROMPT"' \
+        > "$EPIC_LOG" 2>&1
+    ) &
   fi
-
-  if [ "$AGENT_EXIT" -ne 0 ]; then
-    echo "  Warning: $BACKEND exited with code $AGENT_EXIT for epic $EPIC_ID"
-  fi
+  LAST_SPAWN_PID=$!
 }
 
 WAVE_NUM=0
@@ -410,7 +440,9 @@ while true; do
     echo "  $W_EPIC_ID" >> "$PROGRESS_FILE"
   done
 
-  # Process epics in this wave sequentially (US-002 will make this parallel)
+  # Spawn all epics in this wave in parallel (background processes)
+  declare -a WAVE_PIDS=()
+  declare -a WAVE_INDICES=()
   for EPIC_INDEX in "${WAVE_EPICS[@]}"; do
     # Check --max-epics limit
     if [ "$PROCESSED" -ge "$MAX_EPICS" ]; then
@@ -428,8 +460,18 @@ while true; do
     fi
 
     PROCESSED=$((PROCESSED + 1))
-    spawn_epic "$EPIC_INDEX"
-    process_epic_result "$EPIC_INDEX"
+    spawn_epic_bg "$EPIC_INDEX"
+    WAVE_PIDS+=("$LAST_SPAWN_PID")
+    WAVE_INDICES+=("$EPIC_INDEX")
+  done
+
+  # Wait for all background processes in this wave to complete
+  for i in "${!WAVE_PIDS[@]}"; do
+    wait "${WAVE_PIDS[$i]}" 2>/dev/null || true
+    local_epic_id=$(jq -r ".epics[${WAVE_INDICES[$i]}].id" "$PRD_FILE")
+    echo "  [$local_epic_id] finished — processing result"
+    cleanup_epic_worktree "$local_epic_id"
+    process_epic_result "${WAVE_INDICES[$i]}"
   done
 done
 
