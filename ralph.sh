@@ -35,8 +35,8 @@ case "$BACKEND" in
     AGENT_CMD="gh"
     # Copilot uses -p for non-interactive, --allow-all for full permissions
     # --agent team-lead loads .github/agents/team-lead.agent.md
-    # --no-ask-user for autonomous execution, --silent for clean output
-    AGENT_FLAGS="copilot -- --agent team-lead --allow-all --no-ask-user --silent -p"
+    # --no-ask-user for autonomous execution, --stream on for live output
+    AGENT_FLAGS="copilot -- --agent team-lead --allow-all --no-ask-user --stream on -p"
     STREAM_FORMAT="text"
     ;;
   *)
@@ -261,8 +261,10 @@ Begin."
       fi
     done || AGENT_EXIT=$?
   else
-    # Copilot / text mode: -p takes the prompt as argument, plain text output
-    $AGENT_CMD $AGENT_FLAGS "$TEAM_PROMPT" 2>&1 | tee "$EPIC_LOG" || AGENT_EXIT=$?
+    # Copilot / text mode: run inside a PTY so streaming output is preserved
+    COPILOT_TEAM_PROMPT="$TEAM_PROMPT" \
+      script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent team-lead --allow-all --no-ask-user --stream on -p "$COPILOT_TEAM_PROMPT"' \
+      2>&1 | tee "$EPIC_LOG" || AGENT_EXIT=$?
   fi
 
   if [ "$AGENT_EXIT" -ne 0 ]; then

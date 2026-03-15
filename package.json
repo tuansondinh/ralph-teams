@@ -1,13 +1,14 @@
 {
   "name": "ralph-team-agents",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CLI tool for Ralph Team Agents",
   "bin": {
     "ralph-team-agents": "dist/index.js"
   },
   "files": [
     "dist",
-    "ralph.sh"
+    "ralph.sh",
+    "prd.json.example"
   ],
   "scripts": {
     "build": "tsc",

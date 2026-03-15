@@ -9,6 +9,7 @@ plans/
 results/
 progress.txt
 result.txt
+prd.json
 
 # Generated diagram exports
 flow.png
