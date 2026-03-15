@@ -12,6 +12,7 @@ MAX_EPICS=10
 PROGRESS_FILE="progress.txt"
 BACKEND="claude"
 PARALLEL=0  # 0 means unlimited (all epics in wave at once)
+HEARTBEAT_SECONDS="${RALPH_HEARTBEAT_SECONDS:-10}"
 
 # Parse flags — shift past the PRD_FILE arg first
 shift 2>/dev/null || true
@@ -275,6 +276,29 @@ terminate_process_tree() {
   kill "$pid" 2>/dev/null || true
 }
 
+emit_new_log_output() {
+  local epic_id="$1"
+  local log_file="$2"
+  local previous_line_count="$3"
+
+  [ -f "$log_file" ] || {
+    LAST_LOG_LINE_COUNT="$previous_line_count"
+    return
+  }
+
+  local current_line_count
+  current_line_count=$(wc -l < "$log_file")
+
+  if [ "$current_line_count" -gt "$previous_line_count" ]; then
+    sed -n "$((previous_line_count + 1)),${current_line_count}p" "$log_file" 2>/dev/null \
+      | while IFS= read -r log_line; do
+          [ -n "$log_line" ] && echo "  [$epic_id] live: $log_line"
+        done
+  fi
+
+  LAST_LOG_LINE_COUNT="$current_line_count"
+}
+
 # --- Process Epics (Wave-based) ---
 COMPLETED=0
 FAILED=0
@@ -284,8 +308,45 @@ PROCESSED=0
 PRD_ABS_PATH="$(cd "$(dirname "$PRD_FILE")" && pwd)/$(basename "$PRD_FILE")"
 ROOT_DIR="$(pwd)"
 
+normalize_epic_statuses() {
+  local updated=false
+
+  for epic_index in $(seq 0 $((TOTAL_EPICS - 1))); do
+    local epic_status
+    epic_status=$(jq -r ".epics[$epic_index].status // \"pending\"" "$PRD_FILE")
+    [ "$epic_status" != "pending" ] && continue
+
+    local story_count
+    story_count=$(jq ".epics[$epic_index].userStories | length" "$PRD_FILE")
+    [ "$story_count" -eq 0 ] && continue
+
+    local passed_count
+    passed_count=$(jq "[.epics[$epic_index].userStories[] | select(.passes == true)] | length" "$PRD_FILE")
+
+    if [ "$passed_count" -eq "$story_count" ]; then
+      local epic_id
+      epic_id=$(jq -r ".epics[$epic_index].id" "$PRD_FILE")
+      echo "  [$epic_id] all stories already pass — marking epic completed"
+      jq ".epics[$epic_index].status = \"completed\"" "$PRD_FILE" > tmp.$$.json && mv tmp.$$.json "$PRD_FILE"
+      echo "[$epic_id] AUTO-COMPLETED (all stories already passed) — $(date)" >> "$PROGRESS_FILE"
+      updated=true
+    fi
+  done
+
+  if [ "$updated" = true ]; then
+    echo "Resume state refreshed from PRD story pass flags."
+  fi
+}
+
+initialize_counters() {
+  COMPLETED=$(jq '[.epics[] | select((.status // "pending") == "completed")] | length' "$PRD_FILE")
+  FAILED=$(jq '[.epics[] | select((.status // "pending") == "failed" or (.status // "pending") == "merge-failed")] | length' "$PRD_FILE")
+}
+
 # Detect circular dependencies before starting
 detect_circular_deps "$PRD_FILE" "$TOTAL_EPICS"
+normalize_epic_statuses
+initialize_counters
 
 # Cleanup worktrees on exit (Ctrl+C, error, or normal finish)
 trap 'cleanup_all_worktrees; kill $(jobs -p) 2>/dev/null || true' EXIT
@@ -381,11 +442,12 @@ $EPIC_JSON
    - Example: PASS
    - Example: PARTIAL: 3/5 stories passed. Failed: US-003, US-005
    - Example: FAIL: 0/5 stories passed.
+6. Immediately after writing the result file, print the same single-line result and exit the session. Do not remain idle.
 
 ## Critical Rules
 - Do NOT stop after the first story — process ALL stories before writing the result file
 - Idle or waiting messages from teammates are NORMAL — they do not mean the session should end
-- NEVER send shutdown_request messages — the session ending handles cleanup automatically
+- Once the final result is written, end the session immediately. Do not wait for more input.
 - Process stories sequentially: build → validate → next. Do not stop early.
 - After each story result (pass or fail), update $PRD_ABS_PATH to set passes: true/false for that story
 
@@ -404,6 +466,8 @@ Begin."
     ) &
   fi
   LAST_SPAWN_PID=$!
+  LAST_SPAWN_LOG="$EPIC_LOG"
+  LAST_SPAWN_STARTED_AT="$(date +%s)"
 }
 
 # merge_wave: merges completed epic branches back to the target branch sequentially.
@@ -576,6 +640,10 @@ while true; do
   # active_pids[i] and active_indices[i] track running background processes
   declare -a active_pids=()
   declare -a active_indices=()
+  declare -a active_logs=()
+  declare -a active_started_at=()
+  declare -a active_log_lines=()
+  declare -a active_last_signal_at=()
   # wave_completed_ids collects epic IDs that completed successfully (for merge_wave)
   declare -a wave_completed_ids=()
   queue_pos=0
@@ -589,6 +657,9 @@ while true; do
         finished_epic_id=$(jq -r ".epics[${active_indices[$slot]}].id" "$PRD_FILE")
         local result_file="${ROOT_DIR}/results/result-${finished_epic_id}.txt"
         local process_finished=false
+
+        emit_new_log_output "$finished_epic_id" "${active_logs[$slot]}" "${active_log_lines[$slot]:-0}"
+        active_log_lines[$slot]="$LAST_LOG_LINE_COUNT"
 
         if ! kill -0 "${active_pids[$slot]}" 2>/dev/null; then
           process_finished=true
@@ -615,6 +686,16 @@ while true; do
           active_pids=("${active_pids[@]+"${active_pids[@]}"}")
           active_indices=("${active_indices[@]+"${active_indices[@]}"}")
           return
+        fi
+
+        local now
+        now=$(date +%s)
+        local last_signal_at="${active_last_signal_at[$slot]:-0}"
+        if [ $((now - last_signal_at)) -ge "$HEARTBEAT_SECONDS" ]; then
+          local started_at="${active_started_at[$slot]:-$now}"
+          local elapsed=$((now - started_at))
+          echo "  [$finished_epic_id] still running (${elapsed}s) — waiting for more session output"
+          active_last_signal_at[$slot]="$now"
         fi
       done
       sleep 1
@@ -649,6 +730,10 @@ while true; do
     spawn_epic_bg "$EPIC_INDEX"
     active_pids+=("$LAST_SPAWN_PID")
     active_indices+=("$EPIC_INDEX")
+    active_logs+=("$LAST_SPAWN_LOG")
+    active_started_at+=("$LAST_SPAWN_STARTED_AT")
+    active_log_lines+=("0")
+    active_last_signal_at+=("0")
   done
 
   # Wait for all remaining active processes to finish

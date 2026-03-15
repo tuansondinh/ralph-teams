@@ -24,7 +24,6 @@ When the Team Lead assigns you a verification task:
    - If NO, what specifically is wrong or missing?
 5. **Browser verification** (for UI stories) — If the story has UI changes and browser tools are available (Playwright MCP), verify visually
 6. **Report verdict** — Message the Team Lead with your findings
-7. **Update task** — Mark verification task as completed via `TaskUpdate`
 
 ## Verdict Format
 

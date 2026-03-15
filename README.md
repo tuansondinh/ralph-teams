@@ -378,6 +378,7 @@ The current execution contract is:
 - already-passed stories are skipped
 - each story gets at most two build/validate cycles
 - the validator checks output independently from the builder's reasoning
+- after writing `results/result-EPIC-xxx.txt`, the team lead must print the same result and exit the session immediately
 
 ## Troubleshooting
 
