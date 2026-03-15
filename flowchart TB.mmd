@@ -1,0 +1,43 @@
+flowchart TB
+    U[User runs CLI] --> C[run command]
+    C --> S[ralph.sh]
+    S --> V[Validate PRD and tools]
+    V --> E[Read next epic from PRD]
+    E --> B{Epic ready}
+    B -->|No| K[Skip epic]
+    B -->|Yes| TL
+
+    subgraph CS[Claude session: team agents for one epic]
+        direction TB
+        TL[Team lead]
+        P[Planner creates plan]
+        Q{Story already passed}
+        BU[Builder implements]
+        VA[Validator checks]
+        R{Validation passed}
+        W[Mark story passed in PRD]
+        F[Record failure]
+        M{More stories}
+        RF[Write result file]
+
+        TL --> P
+        P --> Q
+        Q -->|Yes| M
+        Q -->|No| BU
+        BU --> VA
+        VA --> R
+        R -->|Yes| W
+        R -->|Retry left| BU
+        R -->|No retry left| F
+        W --> M
+        F --> M
+        M -->|Yes| Qmake
+        M -->|No| RF
+    end
+
+    K --> ME{More epics}
+    RF --> P2[Update epic status]
+    P2 --> L[Append progress log]
+    L --> ME
+    ME -->|Yes| E
+    ME -->|No| D[Finish run]

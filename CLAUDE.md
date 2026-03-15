@@ -28,7 +28,7 @@ ralph.sh (shell harness — scheduling, persistence, dependency graph)
 - Teams never schedule themselves — only implement assigned epics
 - Validator never sees Builder reasoning — only code output (via commit SHA diff)
 - 2-cycle hard limit per story (first attempt + 1 retry = 2 total) — no human escalation, just document and continue
-- Epics are ~5 user stories each
+- Epics should target ~5 user stories each when the scope supports it
 - Team Lead must NOT stop early — all stories must be processed before writing the result file
 
 ## PRD Format

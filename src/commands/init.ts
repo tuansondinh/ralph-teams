@@ -40,6 +40,7 @@ function buildInitPrompt(prdExample: string, outputPath: string): string {
     '- Use the example below as the schema and style reference.',
     '- Include project, branchName, description, and epics.',
     '- Generate epics and user stories automatically based on the discussion.',
+    '- Design the PRD so each epic has about 5 user stories when the scope reasonably allows it; only use fewer when the work is genuinely smaller or cannot be split cleanly.',
     '- Use sequential IDs like EPIC-001 and US-001.',
     '- Set new epic status values to "pending".',
     '- Set all new story passes values to false.',

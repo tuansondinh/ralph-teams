@@ -51,6 +51,7 @@ export async function addEpicCommand(prdPath: string): Promise<void> {
   let storyIndex = maxStoryNum + 1;
 
   console.log(chalk.bold('\nAdd user stories to this epic.\n'));
+  console.log(chalk.dim('Target about 5 user stories for an epic when the scope supports it.\n'));
 
   while (true) {
     const storyId = `US-${String(storyIndex).padStart(3, '0')}`;

@@ -3,59 +3,75 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import chalk from 'chalk';
 
-function findRalphSh(): string | null {
+interface RunDeps {
+  existsSync: typeof fs.existsSync;
+  chmodSync: typeof fs.chmodSync;
+  spawnSync: typeof spawnSync;
+  exit: (code?: number) => never;
+  cwd: () => string;
+}
+
+const defaultDeps: RunDeps = {
+  existsSync: fs.existsSync,
+  chmodSync: fs.chmodSync,
+  spawnSync,
+  exit: (code?: number) => process.exit(code),
+  cwd: () => process.cwd(),
+};
+
+function findRalphSh(deps: RunDeps): string | null {
   // When installed as a package, ralph.sh is bundled at the package root
   // __dirname will be dist/commands/, so package root is two levels up
   const candidates = [
     path.resolve(__dirname, '../../ralph.sh'),
     path.resolve(__dirname, '../ralph.sh'),
-    path.resolve(process.cwd(), 'ralph.sh'),
+    path.resolve(deps.cwd(), 'ralph.sh'),
   ];
 
   for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
+    if (deps.existsSync(candidate)) {
       return candidate;
     }
   }
   return null;
 }
 
-function isCommandInstalled(cmd: string): boolean {
-  const result = spawnSync('command', ['-v', cmd], { shell: true });
+function isCommandInstalled(cmd: string, deps: RunDeps): boolean {
+  const result = deps.spawnSync('command', ['-v', cmd], { shell: true });
   return result.status === 0;
 }
 
-export function runCommand(prdPath: string, options: { backend?: string }): void {
+export function runCommand(prdPath: string, options: { backend?: string }, deps: RunDeps = defaultDeps): void {
   const resolved = path.resolve(prdPath);
   const backend = options.backend || 'claude';
 
-  if (!fs.existsSync(resolved)) {
+  if (!deps.existsSync(resolved)) {
     console.error(chalk.red(`Error: prd.json not found at ${resolved}`));
     console.error(chalk.dim('Run `ralph-team-agents init` to create one.'));
-    process.exit(1);
+    deps.exit(1);
   }
 
-  if (backend === 'claude' && !isCommandInstalled('claude')) {
+  if (backend === 'claude' && !isCommandInstalled('claude', deps)) {
     console.error(chalk.red('Error: claude CLI is not installed or not in PATH.'));
     console.error(chalk.dim('Install Claude Code: https://claude.ai/code'));
-    process.exit(1);
+    deps.exit(1);
   }
 
-  if (backend === 'copilot' && !isCommandInstalled('gh')) {
+  if (backend === 'copilot' && !isCommandInstalled('gh', deps)) {
     console.error(chalk.red('Error: gh CLI is not installed or not in PATH.'));
     console.error(chalk.dim('Install GitHub CLI: https://cli.github.com'));
-    process.exit(1);
+    deps.exit(1);
   }
 
-  const ralphSh = findRalphSh();
+  const ralphSh = findRalphSh(deps);
   if (!ralphSh) {
     console.error(chalk.red('Error: ralph.sh not found. Cannot run.'));
-    process.exit(1);
+    deps.exit(1);
   }
 
   // Ensure ralph.sh is executable
   try {
-    fs.chmodSync(ralphSh, 0o755);
+    deps.chmodSync(ralphSh, 0o755);
   } catch {
     // ignore chmod errors
   }
@@ -65,10 +81,10 @@ export function runCommand(prdPath: string, options: { backend?: string }): void
   console.log(chalk.dim(`Using ralph.sh: ${ralphSh}\n`));
 
   const args = [resolved, '--backend', backend];
-  const result = spawnSync(ralphSh, args, {
+  const result = deps.spawnSync(ralphSh, args, {
     stdio: 'inherit',
     shell: false,
   });
 
-  process.exit(result.status ?? 1);
+  deps.exit(result.status ?? 1);
 }

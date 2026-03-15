@@ -175,6 +175,7 @@ Notes:
 
 - `init` is grounded by `prd.json.example`
 - the agent generates epics and user stories automatically
+- the agent should aim for about 5 user stories per epic when the scope supports it
 - `--backend` controls whether the interview/generation uses `claude` or `copilot`
 - the discussion itself is handled by the agent, not by a hardcoded questionnaire in the CLI
 
@@ -345,6 +346,11 @@ Important fields:
 - `epics[].status`: `pending` | `completed` | `partial` | `failed`
 - `epics[].dependsOn`: epic IDs that must be completed first
 - `userStories[].passes`: whether the story is currently marked as passing
+
+Authoring guideline:
+
+- aim for about 5 user stories per epic when the scope can be split cleanly
+- use fewer only when the epic is genuinely small or further splitting would be artificial
 
 The `init` command uses [prd.json.example](/Users/sonwork/Workspace/ralph-team-agents/prd.json.example) as schema and style guidance when generating a new PRD.
 
