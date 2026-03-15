@@ -2,7 +2,7 @@
 # Ralph Team Agents — Project Manager Shell Harness
 # Ralph never writes code. Ralph schedules epics and spawns teams.
 #
-# Usage: ./ralph.sh [prd.json] [--max-epics N] [--backend claude|copilot] [--timeout SECONDS]
+# Usage: ./ralph.sh [prd.json] [--max-epics N] [--backend claude|copilot] [--idle-timeout SECONDS]
 
 set -euo pipefail
 
@@ -11,7 +11,7 @@ PRD_FILE="${1:-prd.json}"
 MAX_EPICS=10
 PROGRESS_FILE="progress.txt"
 BACKEND="claude"
-EPIC_TIMEOUT=0  # seconds; 0 = no timeout
+IDLE_TIMEOUT=0  # seconds of silence before killing agent; 0 = no timeout
 
 # Parse flags — shift past the PRD_FILE arg first
 shift 2>/dev/null || true
@@ -21,8 +21,8 @@ while [[ $# -gt 0 ]]; do
     --max-epics=*) MAX_EPICS="${1#*=}"; shift ;;
     --backend) BACKEND="$2"; shift 2 ;;
     --backend=*) BACKEND="${1#*=}"; shift ;;
-    --timeout) EPIC_TIMEOUT="$2"; shift 2 ;;
-    --timeout=*) EPIC_TIMEOUT="${1#*=}"; shift ;;
+    --idle-timeout) IDLE_TIMEOUT="$2"; shift 2 ;;
+    --idle-timeout=*) IDLE_TIMEOUT="${1#*=}"; shift ;;
     *) shift ;;
   esac
 done
@@ -141,8 +141,8 @@ echo "  Project: $PROJECT"
 echo "  Branch: ${BRANCH:-<not set>}"
 echo "  Epics: $TOTAL_EPICS"
 echo "  Backend: $BACKEND"
-if [ "$EPIC_TIMEOUT" -gt 0 ] 2>/dev/null; then
-  echo "  Timeout: ${EPIC_TIMEOUT}s per epic"
+if [ "$IDLE_TIMEOUT" -gt 0 ] 2>/dev/null; then
+  echo "  Idle timeout: ${IDLE_TIMEOUT}s (kill if no output for this long)"
 fi
 echo "========================================================"
 
@@ -250,35 +250,59 @@ Begin."
 
   # Spawn team lead
   AGENT_EXIT=0
+  AGENT_IDLE_KILLED=false
 
-  # Prefix with timeout if set
-  TIMEOUT_PREFIX=""
-  if [ "$EPIC_TIMEOUT" -gt 0 ] 2>/dev/null; then
-    TIMEOUT_PREFIX="timeout ${EPIC_TIMEOUT}s"
-  fi
+  # Use a FIFO so we can read with a per-line timeout (idle detection).
+  # The agent runs in the background; we kill it if it goes silent for
+  # $IDLE_TIMEOUT seconds. A wall-clock timeout would wrongly kill
+  # legitimate long-running epics — idle timeout only fires when stuck.
+  AGENT_FIFO="$(mktemp -u /tmp/ralph-agent-$$.XXXXXX)"
+  mkfifo "$AGENT_FIFO"
 
   if [ "$STREAM_FORMAT" = "stream-json" ]; then
-    # Claude: stream-json gives real-time structured output
-    echo "$TEAM_PROMPT" | $TIMEOUT_PREFIX $AGENT_CMD $AGENT_FLAGS 2>&1 | while IFS= read -r line; do
-      echo "$line" >> "$EPIC_LOG"
-      # Extract and display assistant text messages
-      TEXT=$(echo "$line" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text // empty' 2>/dev/null || true)
-      if [ -n "$TEXT" ]; then
-        echo "$TEXT"
-      fi
-      # Show tool use activity
-      TOOL=$(echo "$line" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | "  -> \(.name): \(.input | tostring | .[0:100])"' 2>/dev/null || true)
-      if [ -n "$TOOL" ]; then
-        echo "$TOOL"
-      fi
-    done || AGENT_EXIT=$?
+    echo "$TEAM_PROMPT" | $AGENT_CMD $AGENT_FLAGS > "$AGENT_FIFO" 2>&1 &
   else
-    # Copilot / text mode: -p takes the prompt as argument, plain text output
-    $TIMEOUT_PREFIX $AGENT_CMD $AGENT_FLAGS "$TEAM_PROMPT" 2>&1 | tee "$EPIC_LOG" || AGENT_EXIT=$?
+    $AGENT_CMD $AGENT_FLAGS "$TEAM_PROMPT" > "$AGENT_FIFO" 2>&1 &
   fi
+  AGENT_PID=$!
 
-  if [ "$AGENT_EXIT" -eq 124 ] && [ "$EPIC_TIMEOUT" -gt 0 ]; then
-    echo "  Warning: epic $EPIC_ID timed out after ${EPIC_TIMEOUT}s"
+  # Open FIFO once for reading (fd 3) so the loop doesn't re-block on open
+  exec 3< "$AGENT_FIFO"
+
+  # Read from FIFO; use read -t for idle detection when IDLE_TIMEOUT > 0
+  while true; do
+    if [ "$IDLE_TIMEOUT" -gt 0 ]; then
+      if ! IFS= read -r -t "$IDLE_TIMEOUT" -u 3 line; then
+        # read timed out — agent has been silent for $IDLE_TIMEOUT seconds
+        if kill -0 "$AGENT_PID" 2>/dev/null; then
+          echo "  Warning: [$EPIC_ID] agent idle for ${IDLE_TIMEOUT}s — killing"
+          kill "$AGENT_PID" 2>/dev/null || true
+          AGENT_IDLE_KILLED=true
+        fi
+        break
+      fi
+    else
+      IFS= read -r -u 3 line || break
+    fi
+
+    echo "$line" >> "$EPIC_LOG"
+
+    if [ "$STREAM_FORMAT" = "stream-json" ]; then
+      TEXT=$(echo "$line" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text // empty' 2>/dev/null || true)
+      [ -n "$TEXT" ] && echo "$TEXT"
+      TOOL=$(echo "$line" | jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | "  -> \(.name): \(.input | tostring | .[0:100])"' 2>/dev/null || true)
+      [ -n "$TOOL" ] && echo "$TOOL"
+    else
+      echo "$line"
+    fi
+  done
+
+  exec 3<&-   # close fd 3
+  rm -f "$AGENT_FIFO"
+  wait "$AGENT_PID" 2>/dev/null && AGENT_EXIT=0 || AGENT_EXIT=$?
+
+  if [ "$AGENT_IDLE_KILLED" = true ]; then
+    echo "  Warning: $BACKEND was killed after ${IDLE_TIMEOUT}s of no output for epic $EPIC_ID"
   elif [ "$AGENT_EXIT" -ne 0 ]; then
     echo "  Warning: $BACKEND exited with code $AGENT_EXIT for epic $EPIC_ID"
   fi
