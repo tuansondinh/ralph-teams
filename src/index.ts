@@ -3,6 +3,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { statusCommand } from './commands/status';
+import { initCommand } from './commands/init';
 
 const program = new Command();
 
@@ -16,6 +17,13 @@ program
   .description('Show status of epics and user stories from a prd.json file')
   .action((prdPath: string = './prd.json') => {
     statusCommand(prdPath);
+  });
+
+program
+  .command('init')
+  .description('Interactively create a new prd.json file')
+  .action(async () => {
+    await initCommand();
   });
 
 program.parse(process.argv);
