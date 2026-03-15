@@ -2,7 +2,7 @@
 # Ralph Teams — Project Manager Shell Harness
 # Ralph never writes code. Ralph schedules epics and spawns teams.
 #
-# Usage: ./ralph.sh [prd.json] [--max-epics N] [--backend claude|copilot]
+# Usage: ./ralph.sh [prd.json] [--max-epics N] [--backend claude|copilot] [--parallel N]
 
 set -euo pipefail
 
@@ -11,6 +11,7 @@ PRD_FILE="${1:-prd.json}"
 MAX_EPICS=10
 PROGRESS_FILE="progress.txt"
 BACKEND="claude"
+PARALLEL=0  # 0 means unlimited (all epics in wave at once)
 
 # Parse flags — shift past the PRD_FILE arg first
 shift 2>/dev/null || true
@@ -20,6 +21,8 @@ while [[ $# -gt 0 ]]; do
     --max-epics=*) MAX_EPICS="${1#*=}"; shift ;;
     --backend) BACKEND="$2"; shift 2 ;;
     --backend=*) BACKEND="${1#*=}"; shift ;;
+    --parallel) PARALLEL="$2"; shift 2 ;;
+    --parallel=*) PARALLEL="${1#*=}"; shift ;;
     *) shift ;;
   esac
 done
@@ -195,6 +198,7 @@ echo "  Project: $PROJECT"
 echo "  Branch: ${BRANCH:-<not set>}"
 echo "  Epics: $TOTAL_EPICS"
 echo "  Backend: $BACKEND"
+echo "  Parallel: $([ "$PARALLEL" -eq 0 ] && echo 'unlimited' || echo "$PARALLEL")"
 echo "========================================================"
 
 prompt_to_commit_dirty_worktree() {
@@ -440,39 +444,80 @@ while true; do
     echo "  $W_EPIC_ID" >> "$PROGRESS_FILE"
   done
 
-  # Spawn all epics in this wave in parallel (background processes)
-  declare -a WAVE_PIDS=()
-  declare -a WAVE_INDICES=()
-  for EPIC_INDEX in "${WAVE_EPICS[@]}"; do
+  # Process epics in this wave with optional concurrency limit (PARALLEL).
+  # Uses kill -0 polling to detect when a slot frees up, then starts the next
+  # queued epic. All result processing happens after each epic finishes.
+  local_max_slots="$PARALLEL"
+  [ "$local_max_slots" -eq 0 ] && local_max_slots=${#WAVE_EPICS[@]}
+
+  # active_pids[i] and active_indices[i] track running background processes
+  declare -a active_pids=()
+  declare -a active_indices=()
+  queue_pos=0
+
+  # Helper: wait_for_one_slot — polls active_pids until a slot is free,
+  # processes its result, and removes it from the arrays.
+  wait_for_one_slot() {
+    while true; do
+      for slot in "${!active_pids[@]}"; do
+        if ! kill -0 "${active_pids[$slot]}" 2>/dev/null; then
+          # This process has finished
+          wait "${active_pids[$slot]}" 2>/dev/null || true
+          local finished_epic_id
+          finished_epic_id=$(jq -r ".epics[${active_indices[$slot]}].id" "$PRD_FILE")
+          echo "  [$finished_epic_id] finished — processing result"
+          cleanup_epic_worktree "$finished_epic_id"
+          process_epic_result "${active_indices[$slot]}"
+          unset 'active_pids[$slot]'
+          unset 'active_indices[$slot]'
+          active_pids=("${active_pids[@]+"${active_pids[@]}"}")
+          active_indices=("${active_indices[@]+"${active_indices[@]}"}")
+          return
+        fi
+      done
+      sleep 1
+    done
+  }
+
+  while [ "$queue_pos" -lt "${#WAVE_EPICS[@]}" ]; do
+    EPIC_INDEX="${WAVE_EPICS[$queue_pos]}"
+    queue_pos=$((queue_pos + 1))
+
     # Check --max-epics limit
     if [ "$PROCESSED" -ge "$MAX_EPICS" ]; then
       echo "Reached max epics limit ($MAX_EPICS). Stopping."
-      break 2
+      break
     fi
 
     EPIC_STATUS=$(jq -r ".epics[$EPIC_INDEX].status // \"pending\"" "$PRD_FILE")
     if [ "$EPIC_STATUS" = "completed" ]; then
-      EPIC_ID=$(jq -r ".epics[$EPIC_INDEX].id" "$PRD_FILE")
-      EPIC_TITLE=$(jq -r ".epics[$EPIC_INDEX].title" "$PRD_FILE")
-      echo "  [$EPIC_ID] $EPIC_TITLE — already completed, skipping"
+      local_epic_id=$(jq -r ".epics[$EPIC_INDEX].id" "$PRD_FILE")
+      local_epic_title=$(jq -r ".epics[$EPIC_INDEX].title" "$PRD_FILE")
+      echo "  [$local_epic_id] $local_epic_title — already completed, skipping"
       COMPLETED=$((COMPLETED + 1))
       continue
     fi
 
+    # Wait for a free slot if at capacity
+    while [ "${#active_pids[@]}" -ge "$local_max_slots" ]; do
+      wait_for_one_slot
+    done
+
     PROCESSED=$((PROCESSED + 1))
     spawn_epic_bg "$EPIC_INDEX"
-    WAVE_PIDS+=("$LAST_SPAWN_PID")
-    WAVE_INDICES+=("$EPIC_INDEX")
+    active_pids+=("$LAST_SPAWN_PID")
+    active_indices+=("$EPIC_INDEX")
   done
 
-  # Wait for all background processes in this wave to complete
-  for i in "${!WAVE_PIDS[@]}"; do
-    wait "${WAVE_PIDS[$i]}" 2>/dev/null || true
-    local_epic_id=$(jq -r ".epics[${WAVE_INDICES[$i]}].id" "$PRD_FILE")
-    echo "  [$local_epic_id] finished — processing result"
-    cleanup_epic_worktree "$local_epic_id"
-    process_epic_result "${WAVE_INDICES[$i]}"
+  # Wait for all remaining active processes to finish
+  while [ "${#active_pids[@]}" -gt 0 ]; do
+    wait_for_one_slot
   done
+
+  # If we hit --max-epics mid-wave, stop processing further waves
+  if [ "$PROCESSED" -ge "$MAX_EPICS" ] && [ "$queue_pos" -lt "${#WAVE_EPICS[@]}" ]; then
+    break
+  fi
 done
 
 # --- Summary ---

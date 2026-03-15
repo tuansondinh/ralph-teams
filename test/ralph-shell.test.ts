@@ -323,3 +323,72 @@ test('US-002: epics in a wave run in parallel (both finish)', () => {
   assert.match(result.stdout, /\[EPIC-002\] PASSED/);
   assert.match(result.stdout, /\[EPIC-003\] PASSED/);
 });
+
+// ─── US-003 Tests ─────────────────────────────────────────────────────────────
+
+test('US-003: --parallel flag is parsed and shown in banner', () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    { 'EPIC-001': 'PASS' },
+  );
+
+  const result = runRalph(tempDir, env, ['--parallel', '2']);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.match(result.stdout, /Parallel: 2/);
+});
+
+test('US-003: default (no --parallel) shows unlimited in banner', () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    { 'EPIC-001': 'PASS' },
+  );
+
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.match(result.stdout, /Parallel: unlimited/);
+});
+
+test('US-003: --parallel 1 runs all epics in wave sequentially and all pass', () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [
+      { id: 'EPIC-001', title: 'Alpha' },
+      { id: 'EPIC-002', title: 'Beta' },
+      { id: 'EPIC-003', title: 'Gamma' },
+    ],
+    { 'EPIC-001': 'PASS', 'EPIC-002': 'PASS', 'EPIC-003': 'PASS' },
+  );
+
+  const result = runRalph(tempDir, env, ['--parallel', '1']);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+
+  // All three should still complete
+  assert.match(result.stdout, /\[EPIC-001\] PASSED/);
+  assert.match(result.stdout, /\[EPIC-002\] PASSED/);
+  assert.match(result.stdout, /\[EPIC-003\] PASSED/);
+});
+
+test('US-003: --max-epics with --parallel both respected', () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [
+      { id: 'EPIC-001', title: 'Alpha' },
+      { id: 'EPIC-002', title: 'Beta' },
+      { id: 'EPIC-003', title: 'Gamma' },
+      { id: 'EPIC-004', title: 'Delta' },
+      { id: 'EPIC-005', title: 'Epsilon' },
+    ],
+    {
+      'EPIC-001': 'PASS',
+      'EPIC-002': 'PASS',
+      'EPIC-003': 'PASS',
+      'EPIC-004': 'PASS',
+      'EPIC-005': 'PASS',
+    },
+  );
+
+  // 5 independent epics, parallel=2, max-epics=3 — only 3 should be processed
+  const result = runRalph(tempDir, env, ['--parallel', '2', '--max-epics', '3']);
+  // Should stop after 3 processed regardless of wave size
+  const passedCount = (result.stdout.match(/PASSED/g) ?? []).length;
+  assert.ok(passedCount <= 3, `Expected at most 3 PASSEDs, got ${passedCount}\nstdout: ${result.stdout}`);
+  assert.match(result.stdout, /Reached max epics limit/);
+});
