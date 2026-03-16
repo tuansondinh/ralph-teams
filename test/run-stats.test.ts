@@ -16,8 +16,8 @@ import {
   RunStats,
 } from '../src/run-stats';
 import { TokenUsage } from '../src/token-parser';
-import { DEFAULT_CONFIG } from '../src/config';
-import { validateConfig } from '../src/config';
+import { DEFAULT_CONFIG, validateConfig } from '../src/config';
+import { formatDuration } from '../src/time-utils';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -409,4 +409,127 @@ test('validateConfig rejects pricing section that is not an object', () => {
   assert.ok(errors.length > 0);
   const joined = errors.join('\n');
   assert.match(joined, /pricing/);
+});
+
+// ---------------------------------------------------------------------------
+// Time tracking — story level
+// ---------------------------------------------------------------------------
+
+test('aggregateEpicStats derives time from story startedAt and completedAt', () => {
+  const stories: StoryStats[] = [
+    makeStory({
+      storyId: 'US-001',
+      startedAt: '2024-01-01T10:00:00.000Z',
+      completedAt: '2024-01-01T10:05:00.000Z',  // +5 min
+    }),
+  ];
+
+  const epic = aggregateEpicStats('EPIC-001', stories);
+
+  assert.equal(epic.startedAt, '2024-01-01T10:00:00.000Z');
+  assert.equal(epic.completedAt, '2024-01-01T10:05:00.000Z');
+  assert.equal(epic.durationMs, 300_000);
+  assert.equal(epic.durationFormatted, '5m 0s');
+});
+
+test('aggregateEpicStats uses min(startedAt) and max(completedAt) across stories', () => {
+  const stories: StoryStats[] = [
+    makeStory({
+      storyId: 'US-001',
+      startedAt: '2024-01-01T10:00:00.000Z',
+      completedAt: '2024-01-01T10:04:00.000Z',
+    }),
+    makeStory({
+      storyId: 'US-002',
+      startedAt: '2024-01-01T10:02:00.000Z',   // later start
+      completedAt: '2024-01-01T10:08:00.000Z',  // later end
+    }),
+  ];
+
+  const epic = aggregateEpicStats('EPIC-001', stories);
+
+  assert.equal(epic.startedAt, '2024-01-01T10:00:00.000Z');  // min
+  assert.equal(epic.completedAt, '2024-01-01T10:08:00.000Z');  // max
+  assert.equal(epic.durationMs, 480_000);  // 8 minutes
+  assert.equal(epic.durationFormatted, '8m 0s');
+});
+
+test('aggregateEpicStats leaves time null when stories have no timestamps', () => {
+  const stories: StoryStats[] = [
+    makeStory({ storyId: 'US-001', startedAt: null, completedAt: null }),
+    makeStory({ storyId: 'US-002', startedAt: null, completedAt: null }),
+  ];
+
+  const epic = aggregateEpicStats('EPIC-001', stories);
+
+  assert.equal(epic.startedAt, null);
+  assert.equal(epic.completedAt, null);
+  assert.equal(epic.durationMs, null);
+  assert.equal(epic.durationFormatted, null);
+});
+
+// ---------------------------------------------------------------------------
+// Time tracking — total level
+// ---------------------------------------------------------------------------
+
+test('aggregateTotalStats derives time from epic startedAt and completedAt', () => {
+  const epic1 = aggregateEpicStats('EPIC-001', [
+    makeStory({
+      storyId: 'US-001',
+      startedAt: '2024-01-01T09:00:00.000Z',
+      completedAt: '2024-01-01T09:30:00.000Z',
+    }),
+  ]);
+  const epic2 = aggregateEpicStats('EPIC-002', [
+    makeStory({
+      storyId: 'US-002',
+      startedAt: '2024-01-01T09:10:00.000Z',
+      completedAt: '2024-01-01T09:50:00.000Z',
+    }),
+  ]);
+
+  const totals = aggregateTotalStats([epic1, epic2]);
+
+  assert.equal(totals.startedAt, '2024-01-01T09:00:00.000Z');  // min of epic starts
+  // completedAt = max of epic ends; epic2 ends at 09:50
+  assert.equal(totals.durationMs, 50 * 60 * 1000);  // 50 minutes
+  assert.equal(totals.durationFormatted, '50m 0s');
+});
+
+test('aggregateTotalStats leaves time null when no epics have timestamps', () => {
+  const epic1 = aggregateEpicStats('EPIC-001', [
+    makeStory({ storyId: 'US-001', startedAt: null, completedAt: null }),
+  ]);
+
+  const totals = aggregateTotalStats([epic1]);
+
+  assert.equal(totals.startedAt, null);
+  assert.equal(totals.durationMs, null);
+  assert.equal(totals.durationFormatted, null);
+});
+
+// ---------------------------------------------------------------------------
+// Time tracking — end-to-end via updateStoryStats
+// ---------------------------------------------------------------------------
+
+test('updateStoryStats propagates time from story through epic to totals', () => {
+  const stats = createEmptyRunStats();
+
+  const story = makeStory({
+    storyId: 'US-001',
+    epicId: 'EPIC-001',
+    startedAt: '2024-06-01T12:00:00.000Z',
+    completedAt: '2024-06-01T12:10:30.000Z',  // +10m 30s = 630s = 630000ms
+  });
+
+  const updated = updateStoryStats(stats, story);
+
+  assert.equal(updated.epics[0].startedAt, '2024-06-01T12:00:00.000Z');
+  assert.equal(updated.epics[0].completedAt, '2024-06-01T12:10:30.000Z');
+  assert.equal(updated.epics[0].durationMs, 630_000);
+  assert.equal(updated.epics[0].durationFormatted, '10m 30s');
+
+  assert.equal(updated.totals.startedAt, '2024-06-01T12:00:00.000Z');
+  assert.equal(updated.totals.durationMs, 630_000);
+  assert.equal(updated.totals.durationFormatted, '10m 30s');
 });

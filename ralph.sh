@@ -910,12 +910,25 @@ while true; do
           # Update run stats (failures are non-fatal — stats tracking must not break the run)
           local epic_passed="false"
           [ "$post_status" = "completed" ] && epic_passed="true"
+          local _epic_end_time
+          _epic_end_time=$(date +%s)
+          local _epic_start_time="${active_start_times[$slot]:-$_epic_end_time}"
+          # Convert epoch seconds to ISO 8601 (macOS: date -r, Linux: date -d @)
+          local _started_at _completed_at
+          _started_at=$(date -u -r "$_epic_start_time" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+            || date -u -d "@${_epic_start_time}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+            || echo "")
+          _completed_at=$(date -u -r "$_epic_end_time" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+            || date -u -d "@${_epic_end_time}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+            || echo "")
           ralph-teams update-stats \
             --epic-id "$finished_epic_id" \
             --story-id "all" \
             --log-file "${active_logs[$slot]}" \
             --passed "$epic_passed" \
-            --backend "$BACKEND" 2>/dev/null || true
+            --backend "$BACKEND" \
+            ${_started_at:+--started-at "$_started_at"} \
+            ${_completed_at:+--completed-at "$_completed_at"} 2>/dev/null || true
           unset 'active_pids[$slot]'
           unset 'active_indices[$slot]'
           unset 'active_start_times[$slot]'

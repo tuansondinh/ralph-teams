@@ -2,6 +2,7 @@ import * as path from 'node:path';
 import { loadConfig, DEFAULT_CONFIG } from '../config';
 import { parseTokenUsageFromFile } from '../token-parser';
 import { calculateCost, loadRunStats, saveRunStats, updateStoryStats, StoryStats } from '../run-stats';
+import { formatDuration } from '../time-utils';
 
 /** Options accepted by the update-stats CLI command. */
 export interface UpdateStatsOptions {
@@ -77,6 +78,20 @@ export function updateStatsCommand(
   // Load existing stats
   const existingStats = deps.loadRunStats(statsPath);
 
+  // Calculate wall-clock duration when both timestamps are available
+  const startedAt = options.startedAt ?? null;
+  const completedAt = options.completedAt ?? null;
+  let durationMs: number | null = null;
+  let durationFormatted: string | null = null;
+
+  if (startedAt !== null && completedAt !== null) {
+    const ms = new Date(completedAt).getTime() - new Date(startedAt).getTime();
+    if (ms >= 0) {
+      durationMs = ms;
+      durationFormatted = formatDuration(ms);
+    }
+  }
+
   // Build story stats entry
   const storyEntry: StoryStats = {
     storyId,
@@ -86,10 +101,10 @@ export function updateStatsCommand(
     cacheCreationInputTokens: tokenUsage.cacheCreationInputTokens,
     cacheReadInputTokens: tokenUsage.cacheReadInputTokens,
     costUsd,
-    startedAt: options.startedAt ?? null,
-    completedAt: options.completedAt ?? null,
-    durationMs: null,
-    durationFormatted: null,
+    startedAt,
+    completedAt,
+    durationMs,
+    durationFormatted,
     passed: passed === 'true',
   };
 

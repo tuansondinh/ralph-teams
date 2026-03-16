@@ -48,6 +48,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { TokenUsage } from './token-parser';
 import { RalphConfig } from './config';
+import { formatDuration } from './time-utils';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -237,8 +238,43 @@ function sumNullable(...values: (number | null)[]): number | null {
 }
 
 /**
+ * Returns the earliest non-null ISO 8601 timestamp from an array, or null if none.
+ */
+function minIso(timestamps: (string | null)[]): string | null {
+  const valid = timestamps.filter((t): t is string => t !== null);
+  if (valid.length === 0) return null;
+  return valid.reduce((min, t) => (t < min ? t : min));
+}
+
+/**
+ * Returns the latest non-null ISO 8601 timestamp from an array, or null if none.
+ */
+function maxIso(timestamps: (string | null)[]): string | null {
+  const valid = timestamps.filter((t): t is string => t !== null);
+  if (valid.length === 0) return null;
+  return valid.reduce((max, t) => (t > max ? t : max));
+}
+
+/**
+ * Derives durationMs and durationFormatted from ISO 8601 start/end timestamps.
+ * Returns null for both if either timestamp is missing.
+ */
+function deriveDuration(startedAt: string | null, completedAt: string | null): {
+  durationMs: number | null;
+  durationFormatted: string | null;
+} {
+  if (startedAt === null || completedAt === null) {
+    return { durationMs: null, durationFormatted: null };
+  }
+  const ms = new Date(completedAt).getTime() - new Date(startedAt).getTime();
+  if (ms < 0) return { durationMs: null, durationFormatted: null };
+  return { durationMs: ms, durationFormatted: formatDuration(ms) };
+}
+
+/**
  * Builds an EpicStats object from a list of StoryStats, summing token counts,
- * cost, and pass counts. Time fields are left null here (populated by US-008).
+ * cost, and pass counts. Time fields are derived from min(startedAt) and
+ * max(completedAt) across all stories.
  *
  * @param epicId - The epic identifier
  * @param stories - All stories belonging to this epic
@@ -249,16 +285,20 @@ export function aggregateEpicStats(epicId: string, stories: StoryStats[]): EpicS
   const totalCostUsd = sumNullable(...stories.map(s => s.costUsd));
   const storiesPassed = stories.filter(s => s.passed).length;
 
+  const startedAt = minIso(stories.map(s => s.startedAt));
+  const completedAt = maxIso(stories.map(s => s.completedAt));
+  const { durationMs, durationFormatted } = deriveDuration(startedAt, completedAt);
+
   return {
     epicId,
     stories,
     totalInputTokens,
     totalOutputTokens,
     totalCostUsd,
-    startedAt: null,
-    completedAt: null,
-    durationMs: null,
-    durationFormatted: null,
+    startedAt,
+    completedAt,
+    durationMs,
+    durationFormatted,
     storiesPassed,
     storiesTotal: stories.length,
   };
@@ -266,7 +306,7 @@ export function aggregateEpicStats(epicId: string, stories: StoryStats[]): EpicS
 
 /**
  * Sums all epic-level stats into total run-level aggregates.
- * Time fields are left null here (populated by US-008).
+ * Time fields are derived from min(epic.startedAt) and max(epic.completedAt).
  *
  * @param epics - All EpicStats in the run
  */
@@ -277,15 +317,19 @@ export function aggregateTotalStats(epics: EpicStats[]): RunStats['totals'] {
   const storiesPassed = epics.reduce((sum, e) => sum + e.storiesPassed, 0);
   const storiesTotal = epics.reduce((sum, e) => sum + e.storiesTotal, 0);
 
+  const startedAt = minIso(epics.map(e => e.startedAt));
+  const completedAt = maxIso(epics.map(e => e.completedAt));
+  const { durationMs, durationFormatted } = deriveDuration(startedAt, completedAt);
+
   return {
     inputTokens,
     outputTokens,
     costUsd,
     storiesPassed,
     storiesTotal,
-    startedAt: null,
-    durationMs: null,
-    durationFormatted: null,
+    startedAt,
+    durationMs,
+    durationFormatted,
   };
 }
 
@@ -324,27 +368,13 @@ export function updateStoryStats(stats: RunStats, storyStats: StoryStats): RunSt
     updatedStories = [...epicEntry.stories, storyStats];
   }
 
-  // Recalculate epic aggregates, preserving any time fields already set
-  const freshEpic = aggregateEpicStats(epicId, updatedStories);
-  // Preserve existing time fields from the old epic entry if new ones aren't provided
-  const mergedEpic: EpicStats = {
-    ...freshEpic,
-    startedAt: epicEntry.startedAt,
-    completedAt: epicEntry.completedAt,
-    durationMs: epicEntry.durationMs,
-    durationFormatted: epicEntry.durationFormatted,
-  };
+  // Recalculate epic aggregates (time fields derived from story timestamps)
+  const mergedEpic = aggregateEpicStats(epicId, updatedStories);
 
   const updatedEpics = stats.epics.map(e => (e.epicId === epicId ? mergedEpic : e));
 
-  // Recalculate totals, preserving existing time fields
-  const freshTotals = aggregateTotalStats(updatedEpics);
-  const mergedTotals: RunStats['totals'] = {
-    ...freshTotals,
-    startedAt: stats.totals.startedAt,
-    durationMs: stats.totals.durationMs,
-    durationFormatted: stats.totals.durationFormatted,
-  };
+  // Recalculate totals (time fields derived from epic timestamps)
+  const mergedTotals = aggregateTotalStats(updatedEpics);
 
   return {
     ...stats,
