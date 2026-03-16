@@ -41,7 +41,8 @@ program
   .description('Run ralph.sh with the given prd.json')
   .option('--backend <backend>', 'AI backend to use (claude or copilot)', 'claude')
   .option('--parallel <n>', 'Max epics to run in parallel per wave (default: sequential)')
-  .action((prdPath: string = './prd.json', options: { backend?: string; parallel?: string }) => {
+  .option('--no-dashboard', 'Disable TUI dashboard, show raw output')
+  .action((prdPath: string = './prd.json', options: { backend?: string; parallel?: string; dashboard?: boolean }) => {
     runCommand(prdPath, options);
   });
 

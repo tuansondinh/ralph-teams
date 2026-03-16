@@ -1,13 +1,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawnSync } from 'child_process';
+import { spawnSync, spawn, SpawnSyncReturns, ChildProcess } from 'child_process';
 import chalk from 'chalk';
 import { loadConfig, mergeCliOverrides } from '../config';
+import { startDashboard, resolveDashboardOptions } from '../dashboard';
 
 interface RunDeps {
   existsSync: typeof fs.existsSync;
   chmodSync: typeof fs.chmodSync;
   spawnSync: typeof spawnSync;
+  spawn: typeof spawn;
   exit: (code?: number) => never;
   cwd: () => string;
   /** Override for config loading — used in tests to inject a mock loader. */
@@ -18,6 +20,7 @@ const defaultDeps: RunDeps = {
   existsSync: fs.existsSync,
   chmodSync: fs.chmodSync,
   spawnSync,
+  spawn,
   exit: (code?: number) => process.exit(code),
   cwd: () => process.cwd(),
   loadConfig,
@@ -53,9 +56,15 @@ function parseParallel(parallel: string): number | null {
   return parseInt(parallel, 10);
 }
 
-export function runCommand(prdPath: string, options: { backend?: string; parallel?: string }, deps: RunDeps = defaultDeps): void {
+export function runCommand(
+  prdPath: string,
+  options: { backend?: string; parallel?: string; dashboard?: boolean },
+  deps: RunDeps = defaultDeps,
+): void {
   const resolved = path.resolve(prdPath);
   const parallel = options.parallel;
+  // Commander sets --no-dashboard as dashboard: false, default is true
+  const useDashboard = options.dashboard !== false;
 
   if (!deps.existsSync(resolved)) {
     console.error(chalk.red(`Error: prd.json not found at ${resolved}`));
@@ -149,11 +158,35 @@ export function runCommand(prdPath: string, options: { backend?: string; paralle
     RALPH_BACKEND: resolvedConfig.execution.backend,
   };
 
-  const result = deps.spawnSync(ralphSh, args, {
-    stdio: 'inherit',
-    shell: false,
-    env: spawnEnv,
-  });
+  if (!useDashboard) {
+    // --no-dashboard: fall back to synchronous spawnSync with stdio:inherit
+    const result = deps.spawnSync(ralphSh, args, {
+      stdio: 'inherit',
+      shell: false,
+      env: spawnEnv,
+    });
 
-  deps.exit(result.status ?? 1);
+    deps.exit(result.status ?? 1);
+  } else {
+    // Default: launch async with piped stdio and start dashboard
+    const dashboardOptions = resolveDashboardOptions(resolved, deps.cwd());
+    const dashboard = startDashboard(dashboardOptions);
+
+    const child: ChildProcess = deps.spawn(ralphSh, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: false,
+      env: spawnEnv,
+    });
+
+    child.on('close', (code: number | null) => {
+      dashboard.stop();
+      deps.exit(code ?? 1);
+    });
+
+    child.on('error', (err: Error) => {
+      dashboard.stop();
+      console.error(chalk.red(`Error: ${err.message}`));
+      deps.exit(1);
+    });
+  }
 }
