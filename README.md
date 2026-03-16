@@ -26,11 +26,17 @@ Current backends:
 flowchart TB
     U[User runs CLI] --> C[run command]
     C --> S[ralph.sh]
-    S --> V[Validate PRD and tools]
-    V --> E[Read next epic from PRD]
-    E --> B{Epic ready}
-    B -->|No| K[Skip epic]
-    B -->|Yes| TL
+    S --> V[Validate PRD, backend, and rjq]
+    V --> PF{Parallel flag set?}
+    PF -->|No| M1[Sequential mode]
+    PF -->|Yes| M2[Wave mode]
+    M1 --> E[Find next runnable epic]
+    M2 --> E
+    E --> B{Ready epics found?}
+    B -->|No| D[Finish run]
+    B -->|Yes| X{Dependency failed?}
+    X -->|Yes| K[Mark blocked epic failed]
+    X -->|No| T[Spawn epic worktree and team lead]
 
     subgraph CS[Agent session: team agents for one epic]
         direction TB
@@ -40,7 +46,7 @@ flowchart TB
         BU[Builder implements]
         VA[Validator checks]
         R{Validation passed}
-        W[Mark story passed in PRD]
+        SP[Mark story passed in PRD]
         F[Record failure]
         M{More stories}
         RF[Write result file]
@@ -51,21 +57,22 @@ flowchart TB
         Q -->|No| BU
         BU --> VA
         VA --> R
-        R -->|Yes| W
+        R -->|Yes| SP
         R -->|Retry left| BU
         R -->|No retry left| F
-        W --> M
+        SP --> M
         F --> M
         M -->|Yes| Q
         M -->|No| RF
     end
 
-    K --> ME{More epics}
-    RF --> P2[Update epic status]
-    P2 --> L[Append progress log]
-    L --> ME
-    ME -->|Yes| E
-    ME -->|No| D[Finish run]
+    T --> TL
+    K --> E
+    RF --> P2[Update PRD status and progress log]
+    P2 --> G{Epic completed?}
+    G -->|No| E
+    G -->|Yes| H[Merge epic branch into target branch]
+    H --> E
 ```
 
 ## Requirements
