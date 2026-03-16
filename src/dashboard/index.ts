@@ -6,7 +6,7 @@
  */
 
 import * as path from 'path';
-import { DashboardOptions, DashboardState } from './types';
+import { DashboardOptions, DashboardState, PostRunCallbacks } from './types';
 import { createDashboardScreen, DashboardScreen } from './screen';
 import { createPoller } from './poller';
 
@@ -23,9 +23,10 @@ export interface Dashboard {
  * the screen renderer. Returns a handle to stop and clean up.
  *
  * @param options - Dashboard configuration (paths, poll interval)
+ * @param postRunCallbacks - Optional callbacks for the post-run interactive menu
  * @returns Dashboard handle with a stop() method
  */
-export function startDashboard(options: DashboardOptions): Dashboard {
+export function startDashboard(options: DashboardOptions, postRunCallbacks?: PostRunCallbacks): Dashboard {
   let dashScreen: DashboardScreen | null = null;
 
   function onExit(): void {
@@ -37,7 +38,7 @@ export function startDashboard(options: DashboardOptions): Dashboard {
     process.exit(0);
   }
 
-  dashScreen = createDashboardScreen(onExit, options.logsDir);
+  dashScreen = createDashboardScreen(onExit, options.logsDir, postRunCallbacks);
 
   const poller = createPoller(options, (state: DashboardState) => {
     if (dashScreen) {

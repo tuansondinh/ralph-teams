@@ -99,7 +99,7 @@ export function computeRunSummary(state: DashboardState): RunSummary {
  * Renders the final run summary screen as a multi-line string.
  *
  * Layout:
- *   [Run Complete — press q to quit]
+ *   [Run Complete]
  *   ────────────────────────────────────────────
  *   Run Summary
  *   Epics:   3 total  |  2 completed  |  0 failed  |  1 partial
@@ -110,9 +110,13 @@ export function computeRunSummary(state: DashboardState): RunSummary {
  *     x EPIC-001 (Foundation Epic) — US-002: My Story — reason: typecheck error
  *   (or "(none)" if all stories passed)
  *
+ *   [d] discuss a story  [r] retry all failed  [q] quit
+ *   (or "All stories passed! Press q to exit." when no failures)
+ *
  * @param summary - Computed RunSummary
+ * @param hasFailures - When true, shows the interactive post-run menu; when false (default), shows all-passed message
  */
-export function renderSummaryView(summary: RunSummary): string {
+export function renderSummaryView(summary: RunSummary, hasFailures: boolean = false): string {
   const sep = '─'.repeat(72);
 
   const costStr = summary.totalCost !== null
@@ -120,7 +124,7 @@ export function renderSummaryView(summary: RunSummary): string {
     : '--';
 
   const lines: string[] = [
-    '[Run Complete — press q to quit]',
+    '[Run Complete]',
     '',
     'Run Summary',
     sep,
@@ -138,6 +142,13 @@ export function renderSummaryView(summary: RunSummary): string {
       const reasonStr = detail.failureReason ? ` — reason: ${detail.failureReason}` : '';
       lines.push(`    x ${detail.epicId} (${detail.epicTitle}) — ${detail.storyId}: ${detail.storyTitle}${reasonStr}`);
     }
+  }
+
+  lines.push('');
+  if (hasFailures) {
+    lines.push('  [d] discuss a story  [r] retry all failed  [q] quit');
+  } else {
+    lines.push('  All stories passed! press q to quit');
   }
 
   return lines.join('\n');

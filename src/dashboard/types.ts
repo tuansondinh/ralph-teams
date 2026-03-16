@@ -15,6 +15,22 @@ export interface DashboardOptions {
   pollIntervalMs: number;
 }
 
+/**
+ * Callbacks invoked when the user interacts with the post-run menu
+ * (shown in summary view when there are failed stories).
+ */
+export interface PostRunCallbacks {
+  /**
+   * Called when the user presses 'd' to discuss a failed story.
+   * Receives the storyId of the first failed story (or empty string if unavailable).
+   */
+  onDiscuss: (storyId: string) => void;
+  /** Called when the user presses 'r' to retry all failed stories. */
+  onRetry: () => void;
+  /** Called when the user presses 'q' to quit after the run is complete. */
+  onQuit: () => void;
+}
+
 export interface DashboardState {
   projectName: string;
   currentWave: number;

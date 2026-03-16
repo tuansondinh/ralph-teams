@@ -15,7 +15,7 @@
  */
 
 import * as blessed from 'blessed';
-import { DashboardState } from './types';
+import { DashboardState, PostRunCallbacks } from './types';
 import {
   renderHeader,
   renderEpicList,
@@ -43,10 +43,12 @@ export interface DashboardScreen {
  *
  * @param onExit - Callback when user presses q/Escape/C-c (from dashboard view)
  * @param logsDir - Directory containing epic log files (for epic-detail log tail)
+ * @param postRunCallbacks - Optional callbacks for the post-run interactive menu (summary view)
  */
 export function createDashboardScreen(
   onExit: () => void,
   logsDir: string = '',
+  postRunCallbacks?: PostRunCallbacks,
 ): DashboardScreen {
   // Mutable view state — owned by screen, not the poller
   let currentState: DashboardState | null = null;
@@ -168,7 +170,7 @@ export function createDashboardScreen(
 
       case 'summary': {
         const summary = computeRunSummary(state);
-        epicListBox.setContent(renderSummaryView(summary));
+        epicListBox.setContent(renderSummaryView(summary, hasFailedStories));
         break;
       }
 
@@ -193,7 +195,8 @@ export function createDashboardScreen(
   });
 
   // 'q' / Escape: context-sensitive quit/back
-  //   - dashboard or summary → exit
+  //   - dashboard → exit
+  //   - summary → invoke onQuit callback if set, otherwise exit
   //   - discuss → return to summary
   //   - logs, epic-detail → return to dashboard
   screen.key(['q', 'Q', 'escape'], () => {
@@ -201,8 +204,14 @@ export function createDashboardScreen(
       onExit();
       return;
     }
-    if (currentState.viewMode === 'dashboard' || currentState.viewMode === 'summary') {
+    if (currentState.viewMode === 'dashboard') {
       onExit();
+    } else if (currentState.viewMode === 'summary') {
+      if (postRunCallbacks) {
+        postRunCallbacks.onQuit();
+      } else {
+        onExit();
+      }
     } else if (currentState.viewMode === 'discuss') {
       currentState = { ...currentState, viewMode: 'summary' };
       render();
@@ -214,15 +223,29 @@ export function createDashboardScreen(
   });
 
   // 'd': context-sensitive
-  //   - summary mode with failed stories → enter discuss view (US-018 stub)
+  //   - summary mode with failed stories → invoke onDiscuss callback (or enter discuss view stub)
   //   - dashboard/logs → toggle between dashboard and log view
   //   - other modes → no-op
   screen.key(['d', 'D'], () => {
     if (!currentState) return;
     if (currentState.viewMode === 'summary') {
       if (computeHasFailedStories(currentState)) {
-        currentState = { ...currentState, viewMode: 'discuss' };
-        render();
+        if (postRunCallbacks) {
+          // Find the first failed story ID to pass to the callback
+          let firstFailedStoryId = '';
+          for (const epic of currentState.epics) {
+            const failedStory = epic.stories.find(s => s.state === 'fail');
+            if (failedStory) {
+              firstFailedStoryId = failedStory.id;
+              break;
+            }
+          }
+          postRunCallbacks.onDiscuss(firstFailedStoryId);
+        } else {
+          // Stub: enter discuss view when no callbacks provided
+          currentState = { ...currentState, viewMode: 'discuss' };
+          render();
+        }
       }
       return;
     }
@@ -274,7 +297,7 @@ export function createDashboardScreen(
   });
 
   // 'r': context-sensitive
-  //   - summary mode with failed stories → retry all failed (no-op stub for US-020)
+  //   - summary mode with failed stories → invoke onRetry callback (or no-op stub)
   //   - other modes → manual refresh
   screen.key(['r', 'R'], () => {
     if (!currentState) {
@@ -282,7 +305,10 @@ export function createDashboardScreen(
       return;
     }
     if (currentState.viewMode === 'summary') {
-      // no-op: retry logic will be implemented in US-020
+      if (computeHasFailedStories(currentState) && postRunCallbacks) {
+        postRunCallbacks.onRetry();
+      }
+      // no-op when no callbacks or no failures
       return;
     }
     render();
