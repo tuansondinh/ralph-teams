@@ -131,8 +131,21 @@ export function renderFooter(): string {
 }
 
 /**
+ * Formats the current-activity sub-line for an active epic.
+ * Only shown for epics that are not yet in a terminal state (completed/failed/merge-failed).
+ *
+ * Format: `    > editing src/api.ts`
+ */
+export function renderActivityLine(epic: EpicDisplayData): string | null {
+  const terminal = ['completed', 'failed', 'merge-failed'];
+  if (terminal.includes(epic.status)) return null;
+  if (!epic.currentActivity || epic.currentActivity === 'pending') return null;
+  return `    > ${epic.currentActivity}`;
+}
+
+/**
  * Builds the full epic list content string for the blessed box.
- * Renders each epic row followed by indented story rows.
+ * Renders each epic row, then an optional activity line, then story rows.
  */
 export function renderEpicList(state: DashboardState): string {
   if (state.epics.length === 0) {
@@ -140,11 +153,18 @@ export function renderEpicList(state: DashboardState): string {
   }
 
   return state.epics.map(epic => {
-    const epicRow = renderEpicRow(epic);
-    if (epic.stories.length === 0) {
-      return epicRow;
+    const parts: string[] = [renderEpicRow(epic)];
+
+    // Activity line for active epics
+    const activityLine = renderActivityLine(epic);
+    if (activityLine) parts.push(activityLine);
+
+    // Story rows
+    if (epic.stories.length > 0) {
+      const storyRows = epic.stories.map(story => renderStoryRow(story)).join('\n');
+      parts.push(storyRows);
     }
-    const storyRows = epic.stories.map(story => renderStoryRow(story)).join('\n');
-    return `${epicRow}\n${storyRows}`;
+
+    return parts.join('\n');
   }).join('\n');
 }

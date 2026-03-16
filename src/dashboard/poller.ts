@@ -17,6 +17,11 @@ import {
   filterProgressLinesForStory,
   StoryStateInput,
 } from './story-state-parser';
+import {
+  findLatestEpicLog,
+  readLogTail,
+  parseLatestActivity,
+} from './activity-parser';
 
 /** mtime cache to avoid re-parsing unchanged files */
 interface MtimeCache {
@@ -38,12 +43,21 @@ export interface PollerDeps {
   existsSync: typeof fs.existsSync;
   readFileSync: typeof fs.readFileSync;
   statSync: typeof fs.statSync;
+  /** Reads the tail of a log file. Defaults to readLogTail. */
+  readLogTail?: typeof readLogTail;
+  /** Finds the latest log file for an epic. Defaults to findLatestEpicLog. */
+  findLatestEpicLog?: typeof findLatestEpicLog;
+  /** Backend name for activity parsing ('claude' | 'copilot'). Defaults to 'claude'. */
+  backend?: string;
 }
 
 const defaultPollerDeps: PollerDeps = {
   existsSync: fs.existsSync,
   readFileSync: fs.readFileSync,
   statSync: fs.statSync,
+  readLogTail,
+  findLatestEpicLog,
+  backend: 'claude',
 };
 
 /**
@@ -53,11 +67,13 @@ const defaultPollerDeps: PollerDeps = {
  * @param content - Raw prd.json file content
  * @param statsEpics - Parsed epic stats from ralph-run-stats.json
  * @param progressContent - Raw progress.txt content (or null if unavailable)
+ * @param activityMap - Map from epicId to current activity string (from log polling)
  */
 export function parseEpicsFromPrd(
   content: string,
   statsEpics: RunStats['epics'],
   progressContent: string | null = null,
+  activityMap: Map<string, string> = new Map(),
 ): EpicDisplayData[] {
   let prd: Prd;
   try {
@@ -71,6 +87,9 @@ export function parseEpicsFromPrd(
     const storyStatsMap = buildStoryStatsMap(statsEpic?.stories ?? []);
     const stories = buildStoryDisplayData(epic, storyStatsMap, progressContent);
 
+    // Use log-derived activity if available, otherwise infer from epic status
+    const currentActivity = activityMap.get(epic.id) ?? inferCurrentActivity(epic);
+
     return {
       id: epic.id,
       title: epic.title,
@@ -78,7 +97,7 @@ export function parseEpicsFromPrd(
       storiesPassed: epic.userStories.filter(s => s.passes).length,
       storiesTotal: epic.userStories.length,
       stories,
-      currentActivity: inferCurrentActivity(epic),
+      currentActivity,
       costActual: statsEpic?.totalCostUsd ?? null,
       costEstimate: null,
       timeActual: statsEpic?.durationFormatted ?? null,
@@ -184,12 +203,19 @@ export function computeElapsed(startedAt: string | null): string {
 /**
  * Builds DashboardState from raw file contents.
  * Any file can be null (missing/unreadable), in which case defaults are used.
+ *
+ * @param prdContent - Raw prd.json content (or null)
+ * @param progressContent - Raw progress.txt content (or null)
+ * @param statsContent - Raw ralph-run-stats.json content (or null)
+ * @param projectName - Fallback project name when prd.json has no project field
+ * @param activityMap - Map from epicId to current activity string (from log polling)
  */
 export function buildStateFromFiles(
   prdContent: string | null,
   progressContent: string | null,
   statsContent: string | null,
   projectName: string,
+  activityMap: Map<string, string> = new Map(),
 ): DashboardState {
   let statsData: RunStats | null = null;
   if (statsContent) {
@@ -201,7 +227,9 @@ export function buildStateFromFiles(
   }
 
   const statsEpics = statsData?.epics ?? [];
-  const epics = prdContent ? parseEpicsFromPrd(prdContent, statsEpics, progressContent) : [];
+  const epics = prdContent
+    ? parseEpicsFromPrd(prdContent, statsEpics, progressContent, activityMap)
+    : [];
 
   // Extract project name from prd if available
   let resolvedProjectName = projectName;
@@ -236,6 +264,10 @@ export function buildStateFromFiles(
  * Creates a polling engine that reads data files and calls onUpdate.
  * Uses mtime caching to avoid re-parsing unchanged files.
  *
+ * Also polls epic log files on every tick to update currentActivity for
+ * active epics. Log polling always runs (no mtime gate) since logs grow
+ * continuously and we always want the latest tail.
+ *
  * @param options - Dashboard configuration (paths, interval)
  * @param onUpdate - Called with full new state on each poll tick
  * @param deps - Injectable filesystem deps (for testing)
@@ -252,6 +284,14 @@ export function createPoller(
   let cachedPrd: string | null = null;
   let cachedProgress: string | null = null;
   let cachedStats: string | null = null;
+
+  // Activity state: always re-polled since logs grow continuously
+  const activityMap = new Map<string, string>();
+
+  // Resolve injectable helpers with fallbacks
+  const doReadLogTail = deps.readLogTail ?? readLogTail;
+  const doFindLatestEpicLog = deps.findLatestEpicLog ?? findLatestEpicLog;
+  const backend = deps.backend ?? 'claude';
 
   function getMtime(filePath: string): number {
     try {
@@ -283,12 +323,43 @@ export function createPoller(
     }
   }
 
+  /**
+   * Polls the log file for each epic whose status is 'pending' (actively running).
+   * Updates activityMap in place. Returns true if any activity changed.
+   */
+  function pollActivityFromLogs(): boolean {
+    if (!cachedPrd) return false;
+
+    let prd: Prd;
+    try {
+      prd = JSON.parse(cachedPrd) as Prd;
+    } catch {
+      return false;
+    }
+
+    let anyChanged = false;
+    for (const epic of prd.epics ?? []) {
+      // Only poll active (pending/partial) epics
+      if (epic.status !== 'pending' && epic.status !== 'partial') continue;
+
+      const logFile = doFindLatestEpicLog(options.logsDir, epic.id);
+      if (!logFile) continue;
+
+      const tail = doReadLogTail(logFile, 50);
+      const activity = parseLatestActivity(tail, backend);
+      const previous = activityMap.get(epic.id);
+      if (previous !== activity) {
+        activityMap.set(epic.id, activity);
+        anyChanged = true;
+      }
+    }
+    return anyChanged;
+  }
+
   function poll(): void {
     const prdResult = readIfChanged(options.prdPath, mtimes.prd, cachedPrd);
     const progressResult = readIfChanged(options.progressPath, mtimes.progress, cachedProgress);
     const statsResult = readIfChanged(options.statsPath, mtimes.stats, cachedStats);
-
-    const anyChanged = prdResult.changed || progressResult.changed || statsResult.changed;
 
     // Update caches
     if (prdResult.changed) {
@@ -304,12 +375,18 @@ export function createPoller(
       cachedStats = statsResult.content;
     }
 
-    if (anyChanged) {
+    const fileChanged = prdResult.changed || progressResult.changed || statsResult.changed;
+
+    // Always poll logs for active epics (spinner needs to advance each tick)
+    const activityChanged = pollActivityFromLogs();
+
+    if (fileChanged || activityChanged) {
       const state = buildStateFromFiles(
         cachedPrd,
         cachedProgress,
         cachedStats,
         '(loading...)',
+        new Map(activityMap), // snapshot to avoid mutation during render
       );
       onUpdate(state);
     }

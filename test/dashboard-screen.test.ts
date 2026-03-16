@@ -17,6 +17,7 @@ import {
   renderEpicList,
   renderStoryRow,
   storyStateIcon,
+  renderActivityLine,
 } from '../src/dashboard/renderer';
 import type { StoryDisplayData } from '../src/dashboard/types';
 import type { DashboardState, EpicDisplayData } from '../src/dashboard/types';
@@ -335,6 +336,57 @@ test('renderFooter includes expected keys', () => {
 });
 
 // ---------------------------------------------------------------------------
+// renderActivityLine
+// ---------------------------------------------------------------------------
+
+test('renderActivityLine returns null for completed epic', () => {
+  const epic = makeEpic({ status: 'completed', currentActivity: 'editing foo.ts' });
+  assert.equal(renderActivityLine(epic), null);
+});
+
+test('renderActivityLine returns null for failed epic', () => {
+  const epic = makeEpic({ status: 'failed', currentActivity: 'editing foo.ts' });
+  assert.equal(renderActivityLine(epic), null);
+});
+
+test('renderActivityLine returns null for merge-failed epic', () => {
+  const epic = makeEpic({ status: 'merge-failed', currentActivity: 'editing foo.ts' });
+  assert.equal(renderActivityLine(epic), null);
+});
+
+test('renderActivityLine returns null when currentActivity is "pending"', () => {
+  const epic = makeEpic({ status: 'pending', currentActivity: 'pending' });
+  assert.equal(renderActivityLine(epic), null);
+});
+
+test('renderActivityLine returns null when currentActivity is empty', () => {
+  const epic = makeEpic({ status: 'pending', currentActivity: '' });
+  assert.equal(renderActivityLine(epic), null);
+});
+
+test('renderActivityLine returns activity line for active epic', () => {
+  const epic = makeEpic({ status: 'pending', currentActivity: 'editing api.ts' });
+  const line = renderActivityLine(epic);
+  assert.ok(line !== null, 'should return activity line for pending epic');
+  assert.ok(line!.includes('editing api.ts'), `line should include activity: "${line}"`);
+  assert.ok(line!.startsWith('    > '), `line should be indented with "> " prefix: "${line}"`);
+});
+
+test('renderActivityLine returns activity line for partial epic', () => {
+  const epic = makeEpic({ status: 'partial', currentActivity: 'running tests' });
+  const line = renderActivityLine(epic);
+  assert.ok(line !== null);
+  assert.ok(line!.includes('running tests'));
+});
+
+test('renderActivityLine includes idle spinner text', () => {
+  const epic = makeEpic({ status: 'pending', currentActivity: 'idle -' });
+  const line = renderActivityLine(epic);
+  assert.ok(line !== null);
+  assert.ok(line!.includes('idle'), 'should include idle text');
+});
+
+// ---------------------------------------------------------------------------
 // renderEpicList
 // ---------------------------------------------------------------------------
 
@@ -389,4 +441,33 @@ test('renderEpicList story rows appear after epic row', () => {
   const epicIdx = content.indexOf('EPIC-001');
   const storyIdx = content.indexOf('US-001');
   assert.ok(epicIdx < storyIdx, 'epic row should appear before story row');
+});
+
+test('renderEpicList shows activity line under active (pending) epic', () => {
+  const state = makeState({
+    epics: [
+      makeEpic({
+        id: 'EPIC-001',
+        status: 'pending',
+        currentActivity: 'editing main.ts',
+      }),
+    ],
+  });
+  const content = renderEpicList(state);
+  assert.ok(content.includes('editing main.ts'), 'should include activity');
+  assert.ok(content.includes('> editing'), 'activity should be prefixed with >');
+});
+
+test('renderEpicList does NOT show activity line for completed epic', () => {
+  const state = makeState({
+    epics: [
+      makeEpic({
+        id: 'EPIC-001',
+        status: 'completed',
+        currentActivity: 'editing main.ts',
+      }),
+    ],
+  });
+  const content = renderEpicList(state);
+  assert.ok(!content.includes('editing main.ts'), 'completed epic should not show activity');
 });
