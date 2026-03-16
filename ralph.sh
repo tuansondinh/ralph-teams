@@ -6,6 +6,8 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # --- Config ---
 PRD_FILE="${1:-prd.json}"
 MAX_EPICS=10
@@ -37,6 +39,11 @@ fi
 EPIC_TIMEOUT="${RALPH_EPIC_TIMEOUT:-3600}"
 IDLE_TIMEOUT="${RALPH_IDLE_TIMEOUT:-300}"
 VALIDATOR_MAX_PUSHBACKS="${RALPH_VALIDATOR_MAX_PUSHBACKS:-1}"
+MODEL_TEAM_LEAD="${RALPH_MODEL_TEAM_LEAD:-opus}"
+MODEL_PLANNER="${RALPH_MODEL_PLANNER:-opus}"
+MODEL_BUILDER="${RALPH_MODEL_BUILDER:-sonnet}"
+MODEL_VALIDATOR="${RALPH_MODEL_VALIDATOR:-sonnet}"
+MODEL_MERGER="${RALPH_MODEL_MERGER:-sonnet}"
 # Only apply RALPH_PARALLEL env var if --parallel flag was not provided
 if [ -z "$PARALLEL" ] && [ -n "${RALPH_PARALLEL:-}" ] && [ "${RALPH_PARALLEL}" != "0" ]; then
   PARALLEL="$RALPH_PARALLEL"
@@ -46,7 +53,7 @@ fi
 case "$BACKEND" in
   claude)
     AGENT_CMD="claude"
-    AGENT_FLAGS="--agent team-lead --dangerously-skip-permissions --print --verbose --output-format stream-json"
+    AGENT_FLAGS="--agent team-lead --model $MODEL_TEAM_LEAD --dangerously-skip-permissions --print --verbose --output-format stream-json"
     STREAM_FORMAT="stream-json"
     ;;
   copilot)
@@ -259,6 +266,7 @@ if [ -n "$PARALLEL" ]; then
 else
   echo "  Mode: sequential"
 fi
+echo "  Models: team-lead=$MODEL_TEAM_LEAD  planner=$MODEL_PLANNER  builder=$MODEL_BUILDER  validator=$MODEL_VALIDATOR  merger=$MODEL_MERGER"
 echo "========================================================"
 
 prompt_to_commit_dirty_worktree() {
@@ -418,12 +426,31 @@ emit_new_log_output() {
                   [ -n "$text_line" ] && echo "  [$epic_id] $text_line"
                 done
           elif [ "$STREAM_FORMAT" = "text" ]; then
+            if [ "$BACKEND" = "codex" ] && is_codex_noise_line "$log_line"; then
+              continue
+            fi
             echo "  [$epic_id] $log_line"
           fi
         done
   fi
 
   LAST_LOG_LINE_COUNT="$current_line_count"
+}
+
+is_codex_noise_line() {
+  local line="$1"
+  local trimmed
+  trimmed=$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+
+  [ -z "$trimmed" ] && return 0
+
+  # Codex can emit one bare repo-relative path per tool step, which is useful
+  # in the raw log but too noisy in the main progress stream.
+  if [[ "$trimmed" =~ ^\./[^[:space:]]+$ || "$trimmed" =~ ^src/[^[:space:]]+$ || "$trimmed" =~ ^test/[^[:space:]]+$ ]]; then
+    return 0
+  fi
+
+  return 1
 }
 
 # --- Process Epics (Wave-based) ---
@@ -444,7 +471,7 @@ CURRENT_STORY_ID=""
 # Resolve absolute path to PRD file so team lead always has the correct path
 PRD_ABS_PATH="$(cd "$(dirname "$PRD_FILE")" && pwd)/$(basename "$PRD_FILE")"
 ROOT_DIR="$(pwd)"
-CODEX_AGENT_DIR="${ROOT_DIR}/.codex/agents"
+CODEX_AGENT_DIR="${SCRIPT_DIR}/.codex/agents"
 
 run_codex_exec() {
   local workdir="$1"
@@ -679,6 +706,9 @@ spawn_epic_bg() {
   EPIC_TITLE=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].title")
   local EPIC_JSON
   EPIC_JSON=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX]")
+  local PENDING_STORIES_JSON
+  PENDING_STORIES_JSON=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].userStories" | \
+    node -e 'const fs=require("fs"); const stories=JSON.parse(fs.readFileSync(0,"utf8")); process.stdout.write(JSON.stringify(stories.filter(s => s.passes !== true)));')
 
   local RESULT_FILE="${ROOT_DIR}/results/result-${EPIC_ID}.txt"
   local EPIC_LOG="${ROOT_DIR}/logs/epic-${EPIC_ID}-$(date +%s).log"
@@ -708,13 +738,32 @@ $PRD_ABS_PATH
 ## Epic
 $EPIC_JSON
 
+## Plan File
+If this epic has planned=true in the PRD, the canonical implementation plan is:
+$ROOT_DIR/plans/plan-${EPIC_ID}.md
+
+## Stories To Plan And Execute
+Only these stories should be planned or worked in this run. Stories omitted here are already passed and must be treated as done context only.
+$PENDING_STORIES_JSON
+
 ## Instructions
-1. Spawn the Planner first and wait for the plan to be written to plans/plan-${EPIC_ID}.md
+1. **Planner decision.**
+   - If this epic has planned=true in the PRD: do NOT spawn the Planner. Read $ROOT_DIR/plans/plan-${EPIC_ID}.md and follow that plan.
+   - If this epic does not have planned=true: ask yourself: \"Could a developer implement every story in this epic without any design decisions, just by following the acceptance criteria literally?\" If YES → do NOT spawn the Planner. If NO → spawn it and wait for plans/plan-${EPIC_ID}.md.
+   - DO NOT spawn for: adding/removing lines in named files, adding console.log statements, changing config values, renaming things
+   - SPAWN for: new features, new files/modules, refactors, anything requiring architectural judgment
    - If your agent runtime supports named sub-agents, use the dedicated planner role for this
 2. Process ALL user stories in priority order — do NOT stop until every story has been attempted
-3. For each story: check if passes=true in the PRD (skip those — they are already done), then Builder implements → Validator verifies → max 2 total cycles
-   - If your agent runtime supports named sub-agents, use the dedicated builder and validator roles for these handoffs
+3. For each story: check if passes=true in the PRD (skip those — they are already done), then Builder implements → verify → max 2 total cycles
+   - If your agent runtime supports named sub-agents, use the dedicated builder role for implementation
    - Before assigning each story, check if guidance/guidance-{story-id}.md exists (e.g. guidance/guidance-US-003.md). If it does, explicitly include this in your Builder assignment: Guidance file for this story: guidance/guidance-{story-id}.md — read it before implementing and follow the instructions in it.
+   - **Validator — only spawn if truly needed.** Ask yourself: \"Can I verify this story is correct just by reading the changed files?\" If YES → do NOT spawn the Validator — self-verify by reading the files and checking each criterion. If NO → spawn the Validator.
+   - DO NOT spawn Validator for: adding a line to a named file (read the file, check the line is there), build/typecheck (trust Builder output or run the command yourself)
+   - SPAWN Validator for: logic correctness, new behaviour, API contracts, anything requiring judgment to verify
+   - If your agent runtime supports named sub-agents, use the dedicated validator role when spawning
+   - After each story attempt, update the story object in $PRD_ABS_PATH:
+     - if the story passes, set passes=true and failureReason=null
+     - if the story fails, set passes=false and failureReason to a short concrete reason string from the validator feedback
 4. Document any failures and move on to the next story
 5. When ALL stories have been processed (or skipped because already passed), write your result to: $RESULT_FILE
    - Write ONLY one line: PASS, PARTIAL, or FAIL with details
@@ -728,7 +777,7 @@ $EPIC_JSON
 - Idle or waiting messages from teammates are NORMAL — they do not mean the session should end
 - Once the final result is written, end the session immediately. Do not wait for more input.
 - Process stories sequentially: build → validate → next. Do not stop early.
-- After each story result (pass or fail), update $PRD_ABS_PATH to set passes: true/false for that story
+- After each story result (pass or fail), update $PRD_ABS_PATH to keep both passes and failureReason accurate for that story
 
 Begin."
 
@@ -822,7 +871,7 @@ Begin resolving."
 
       case "$BACKEND" in
         claude)
-          echo "$merge_prompt" | $AGENT_CMD --agent merger --dangerously-skip-permissions --print --verbose --output-format stream-json > "$merge_log" 2>&1 || true
+          echo "$merge_prompt" | $AGENT_CMD --agent merger --model "$MODEL_MERGER" --dangerously-skip-permissions --print --verbose --output-format stream-json > "$merge_log" 2>&1 || true
           ;;
         copilot)
           COPILOT_MERGE_PROMPT="$merge_prompt" \
@@ -916,12 +965,20 @@ while true; do
   CURRENT_WAVE=$WAVE_NUM
   echo ""
   echo "========================================================"
-  echo "  Wave $WAVE_NUM — ${#WAVE_EPICS[@]} epic(s)"
+  if [ -n "$PARALLEL" ]; then
+    echo "  Wave $WAVE_NUM — ${#WAVE_EPICS[@]} epic(s), $PARALLEL at a time"
+  else
+    echo "  ${#WAVE_EPICS[@]} epic(s) queued"
+  fi
   echo "========================================================"
 
   # Log wave boundary to progress.txt
   echo "" >> "$PROGRESS_FILE"
-  echo "=== Wave $WAVE_NUM — $(date) ===" >> "$PROGRESS_FILE"
+  if [ -n "$PARALLEL" ]; then
+    echo "=== Wave $WAVE_NUM — $(date) ===" >> "$PROGRESS_FILE"
+  else
+    echo "=== Run — $(date) ===" >> "$PROGRESS_FILE"
+  fi
   for IDX in "${WAVE_EPICS[@]}"; do
     W_EPIC_ID=$(rjq read "$PRD_FILE" ".epics[$IDX].id")
     echo "  $W_EPIC_ID" >> "$PROGRESS_FILE"
@@ -938,14 +995,14 @@ while true; do
   fi
 
   # Reset script-level active tracking arrays for this wave
-  # (active_pids, active_indices, and active_start_times are script-level so SIGINT handler can access them)
+  # (all are script-level so SIGINT handler and nested functions can access them)
   active_pids=()
   active_indices=()
   active_start_times=()
-  declare -a active_logs=()
-  declare -a active_log_lines=()
+  active_logs=()
+  active_log_lines=()
   # wave_completed_ids collects epic IDs that completed successfully (for merge_wave)
-  declare -a wave_completed_ids=()
+  wave_completed_ids=()
   queue_pos=0
 
   # Helper: wait_for_one_slot — polls active_pids until a slot is free,
@@ -986,6 +1043,8 @@ while true; do
           active_pids=("${active_pids[@]+"${active_pids[@]}"}")
           active_indices=("${active_indices[@]+"${active_indices[@]}"}")
           active_start_times=("${active_start_times[@]+"${active_start_times[@]}"}")
+          active_logs=("${active_logs[@]+"${active_logs[@]}"}")
+          active_log_lines=("${active_log_lines[@]+"${active_log_lines[@]}"}")
           return
         fi
 
@@ -1020,6 +1079,8 @@ while true; do
           active_pids=("${active_pids[@]+"${active_pids[@]}"}")
           active_indices=("${active_indices[@]+"${active_indices[@]}"}")
           active_start_times=("${active_start_times[@]+"${active_start_times[@]}"}")
+          active_logs=("${active_logs[@]+"${active_logs[@]}"}")
+          active_log_lines=("${active_log_lines[@]+"${active_log_lines[@]}"}")
           return
         fi
 
@@ -1074,6 +1135,8 @@ while true; do
           active_pids=("${active_pids[@]+"${active_pids[@]}"}")
           active_indices=("${active_indices[@]+"${active_indices[@]}"}")
           active_start_times=("${active_start_times[@]+"${active_start_times[@]}"}")
+          active_logs=("${active_logs[@]+"${active_logs[@]}"}")
+          active_log_lines=("${active_log_lines[@]+"${active_log_lines[@]}"}")
           return
         fi
 

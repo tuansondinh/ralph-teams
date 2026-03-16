@@ -81,6 +81,7 @@ export async function addEpicCommand(prdPath: string): Promise<void> {
       acceptanceCriteria: criteria,
       priority: userStories.length + 1,
       passes: false,
+      failureReason: null,
     });
 
     storyIndex++;
@@ -95,6 +96,7 @@ export async function addEpicCommand(prdPath: string): Promise<void> {
     title: epicTitle,
     description: epicDescription,
     status: 'pending',
+    planned: false,
     dependsOn,
     userStories,
   };

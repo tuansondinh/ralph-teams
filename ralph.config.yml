@@ -1,0 +1,15 @@
+timeouts:
+  epicTimeout: 3600
+  idleTimeout: 300
+
+execution:
+  backend: claude
+  parallel: 0
+  validatorMaxPushbacks: 1
+
+agents:
+  teamLead: sonnet
+  planner: sonnet
+  builder: sonnet
+  validator: sonnet
+  merger: sonnet

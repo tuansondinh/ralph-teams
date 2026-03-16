@@ -1,0 +1,449 @@
+# Ralph Teams Architecture
+
+## Overview
+
+`ralph-teams` is a hybrid Bash + TypeScript system for orchestrating AI agent teams against a mutable `prd.json`.
+
+The architecture is intentionally split:
+
+- The Node CLI is the control plane for user-facing commands, config loading, validation, stats, and the TUI dashboard.
+- `ralph.sh` is the execution engine. It owns the run loop, git worktrees, backend process lifecycle, timeouts, merges, and resume state.
+- External agent CLIs (`claude`, `gh copilot`, `codex`) do the implementation work. This repo provides prompts, agent role definitions, and orchestration around them.
+
+The most important design choice is that `prd.json` is not just input. It becomes mutable runtime state:
+
+- story `passes` flags record story-level completion
+- story `failureReason` fields capture the latest failed attempt at story level
+- epic `status` records orchestration outcome
+- epic `planned` records whether the implementation plan has already been agreed and saved
+- dependency resolution is evaluated directly from current PRD state
+
+Everything else is either a derived view or a recovery artifact.
+
+## High-Level Runtime
+
+```mermaid
+flowchart LR
+    U[User] --> CLI[src/index.ts commands]
+    CLI --> RUN[src/commands/run.ts]
+    RUN --> SH[ralph.sh]
+    SH --> WT[Git worktrees]
+    SH --> AGENTS[Backend agent CLI]
+    AGENTS --> LOGS[logs/*.log]
+    AGENTS --> RESULT[results/result-EPIC.txt]
+    SH --> PRD[prd.json]
+    SH --> PROGRESS[progress.txt]
+    SH --> STATE[ralph-state.json]
+    SH --> STATS[ralph-run-stats.json]
+    RUN --> DASH[src/dashboard/*]
+    DASH --> PRD
+    DASH --> PROGRESS
+    DASH --> LOGS
+    DASH --> STATS
+```
+
+## Main Layers
+
+### 1. CLI layer
+
+Entry point: `src/index.ts`
+
+Responsibilities:
+
+- defines commands with `commander`
+- dispatches to focused command modules in `src/commands`
+- keeps most command handlers thin
+
+Important commands:
+
+- `run`: `src/commands/run.ts`
+- `resume`: `src/commands/resume.ts`
+- `init`: `src/commands/init.ts`
+- `plan`: `src/commands/plan.ts`
+- `validate`: `src/commands/validate.ts`
+- `status`, `summary`, `logs`, `stats`, `reset`
+- `update-stats`: internal helper command called from `ralph.sh`
+
+The CLI does not directly implement epic execution. It either prepares inputs for `ralph.sh` or renders derived views over files that `ralph.sh` maintains.
+
+### 2. Execution engine
+
+Main file: `ralph.sh`
+
+This is the operational core of the project. It is responsible for:
+
+- validating backend dependencies and the PRD
+- creating or switching to the loop branch
+- creating one git worktree per active epic
+- spawning the team lead agent for each epic
+- enforcing epic timeout and idle timeout
+- reading result files and mutating `prd.json`
+- writing progress and resume artifacts
+- merging completed epic branches back into the loop branch
+
+The Bash layer is stateful and process-oriented. That is why it owns:
+
+- PID tracking
+- trap handlers
+- child process cleanup
+- polling for log output and result files
+- merge conflict handling
+
+### 3. Dashboard read model
+
+Main files:
+
+- `src/dashboard/index.ts`
+- `src/dashboard/poller.ts`
+- `src/dashboard/screen.ts`
+- `src/dashboard/renderer.ts`
+- `src/dashboard/activity-parser.ts`
+
+The dashboard is deliberately read-only. It does not drive the run loop directly. Instead it polls:
+
+- `prd.json`
+- `progress.txt`
+- `ralph-run-stats.json`
+- `logs/*.log`
+
+It builds a `DashboardState` snapshot and renders that into blessed views. This is a separate read model over the execution artifacts, not a source of truth.
+
+### 4. Domain and utility modules
+
+Core shared modules:
+
+- `src/prd-utils.ts`: PRD types and simple load/save helpers
+- `src/config.ts`: `ralph.config.yml` parsing, validation, defaults, CLI override merge
+- `src/run-stats.ts`: run stats schema, aggregation, estimate calculation, atomic save
+- `src/token-parser.ts`: backend log token extraction
+- `src/retry-controller.ts`: pure PRD reset logic for retry flows
+- `src/commands/plan.ts`: guided epic planning entrypoint and prompt builder
+- `src/discuss.ts`: failed-story discussion and guidance persistence
+- `src/commands/discuss.ts`: direct guided discuss entrypoint for failed stories
+
+These modules are mostly synchronous and file-oriented. That matches the rest of the codebase, which prefers simple filesystem contracts over in-memory services.
+
+## Execution Lifecycle
+
+### `run`
+
+`src/commands/run.ts` performs the Node-side setup:
+
+1. Resolve the PRD path.
+2. Load `ralph.config.yml` through `src/config.ts`.
+3. Merge CLI overrides such as `--backend` and `--parallel`.
+4. Validate that the selected backend CLI exists.
+5. Locate `ralph.sh`.
+6. Either:
+   - run it directly with inherited stdio, or
+   - spawn it asynchronously and attach the TUI dashboard.
+
+The command passes runtime settings to `ralph.sh` via environment variables:
+
+- `RALPH_EPIC_TIMEOUT`
+- `RALPH_IDLE_TIMEOUT`
+- `RALPH_VALIDATOR_MAX_PUSHBACKS`
+- `RALPH_PARALLEL`
+- `RALPH_BACKEND`
+
+### `ralph.sh`
+
+The shell runtime then:
+
+1. Validates the PRD structure with `rjq`.
+2. Detects circular dependencies.
+3. Establishes the run loop branch.
+4. Normalizes retryable PRD state.
+5. Repeatedly computes the next wave of runnable epics.
+6. Spawns each epic in its own worktree and backend process.
+7. Watches logs, timeout thresholds, and result files.
+8. Updates `prd.json`, `progress.txt`, and stats after completion.
+9. Merges completed epic branches back into the loop branch.
+10. Repeats until no runnable epics remain.
+
+### Epic execution
+
+Each epic is executed through a team-lead prompt assembled in `ralph.sh`.
+
+The team lead is instructed to:
+
+- spawn a planner first
+- plan only the pending stories for that epic
+- process stories sequentially
+- use builder then validator per story
+- update `prd.json` after each story
+- write a single-line result file at the end
+
+The shell contract is simple and important:
+
+- agents communicate progress by writing logs
+- agents communicate final epic outcome by writing `results/result-<EPIC_ID>.txt`
+
+The shell never tries to infer completion from agent intent. It trusts the result file.
+
+## Persistence Model
+
+### `prd.json`
+
+Primary mutable state.
+
+Contains:
+
+- project metadata
+- epics and dependencies
+- epic `status`
+- story `passes`
+
+The scheduler reads dependencies and completion state directly from this file on each wave.
+
+### `progress.txt`
+
+Narrative event log for humans and dashboard parsers.
+
+Used for:
+
+- wave boundaries
+- pass/fail/skip/merge events
+- failure diagnostics
+- discuss context extraction
+
+### `logs/`
+
+Raw backend output per epic and per merge attempt.
+
+Used for:
+
+- operator visibility
+- dashboard activity parsing
+- token usage extraction
+- timeout/idle detection
+
+Log format depends on backend:
+
+- Claude: stream-json
+- Copilot/Codex: text
+
+### `results/`
+
+One result file per epic run, written by the team lead.
+
+Expected values:
+
+- `PASS`
+- `PARTIAL: ...`
+- `FAIL: ...`
+
+### `ralph-state.json`
+
+Resume artifact written on `SIGINT`.
+
+Contains enough state to restart the run consistently:
+
+- PRD path
+- backend
+- parallel mode
+- active epics
+- current wave
+- loop/source branch info
+- story pass snapshot
+
+`src/commands/resume.ts` reloads this file and simply restarts `ralph.sh` with the saved backend/parallel settings.
+
+### `ralph-run-stats.json`
+
+Derived quantitative state.
+
+Managed by:
+
+- `src/commands/update-stats.ts`
+- `src/run-stats.ts`
+- `src/token-parser.ts`
+
+Stores:
+
+- per-story token, cost, and duration data
+- per-epic aggregates
+- total run aggregates
+- estimated total cost/time based on completed work
+
+This file is not required for execution correctness. It is a telemetry sidecar.
+
+## Scheduling and Dependency Logic
+
+The scheduler is wave-based.
+
+For each loop iteration, `ralph.sh` scans all epics and selects those whose:
+
+- status is `pending`
+- all `dependsOn` epics are `completed`
+
+If a dependency has status `failed`, `partial`, or `merge-failed`, dependent epics are marked failed immediately. That makes dependency failure terminal for downstream work.
+
+Parallelism is constrained per wave by `--parallel` or `RALPH_PARALLEL`.
+
+This gives the system a simple mental model:
+
+- dependencies gate wave eligibility
+- eligibility is recomputed from disk each cycle
+- each epic is isolated in its own worktree
+
+## Backend Integration
+
+Backend selection is centralized around three modes:
+
+- `claude`
+- `copilot`
+- `codex`
+
+Integration points:
+
+- CLI validation in `src/commands/run.ts` and `src/commands/init.ts`
+- shell backend command selection in `ralph.sh`
+- dashboard log parsing in `src/dashboard/activity-parser.ts`
+- token accounting in `src/token-parser.ts`
+
+Backend differences are intentionally normalized into a few contracts:
+
+- how to spawn the top-level agent
+- whether logs are JSON or plain text
+- whether structured token usage is available
+
+Everything else is kept backend-agnostic at the orchestration layer.
+
+## Merge Architecture
+
+Completed epic branches are merged back into the loop branch only after epic execution succeeds.
+
+Merge flow in `ralph.sh`:
+
+1. Attempt a clean git merge.
+2. If there is a conflict, spawn a dedicated merger agent.
+3. If conflicts are resolved and staged, create the merge commit.
+4. If not, abort the merge and mark the epic `merge-failed` in `prd.json`.
+
+This separates "implementation succeeded in isolation" from "integration succeeded into the loop branch". That distinction is important throughout the codebase.
+
+## Dashboard Architecture
+
+The dashboard has three major parts:
+
+### Poller
+
+`src/dashboard/poller.ts`
+
+- reads files with mtime caching
+- continuously polls active epic logs
+- derives `DashboardState`
+
+### Activity parsing
+
+`src/dashboard/activity-parser.ts`
+
+- parses Claude stream-json tool usage and assistant text
+- parses text logs for Copilot/Codex
+- degrades stale Claude tool activity back to `idle`
+
+### Screen and views
+
+`src/dashboard/screen.ts` and `src/dashboard/views/*`
+
+- renders dashboard, logs, epic detail, summary, and discuss modes
+- supports retry from summary mode
+- saves guidance artifacts for failed stories
+
+The dashboard does not depend on internal callbacks from `ralph.sh`. It works by observing files, which keeps coupling low.
+
+## Failure and Recovery
+
+Failure handling is file- and process-based, not exception-based.
+
+Key mechanisms:
+
+- epic timeout kills long-running work
+- idle timeout kills silent work
+- missing result file marks the epic failed
+- dependency failure blocks downstream epics
+- merge failure is tracked separately from implementation failure
+- `SIGINT` writes `ralph-state.json` and preserves worktrees for resume
+
+This makes failure modes inspectable after the fact because evidence is left on disk.
+
+## Repository Map
+
+### Core runtime
+
+- `src/index.ts`
+- `src/commands/run.ts`
+- `src/commands/resume.ts`
+- `ralph.sh`
+
+### PRD and config
+
+- `src/prd-utils.ts`
+- `src/commands/validate.ts`
+- `src/config.ts`
+- `prd.json.example`
+
+### Stats and telemetry
+
+- `src/commands/update-stats.ts`
+- `src/run-stats.ts`
+- `src/token-parser.ts`
+- `src/commands/stats.ts`
+
+### Dashboard
+
+- `src/dashboard/*`
+
+### Retry and discuss
+
+- `src/retry-controller.ts`
+- `src/discuss.ts`
+- `src/guidance.ts`
+
+### Backend role definitions
+
+- `.claude/agents/`
+- `.github/agents/`
+- `.codex/agents/`
+
+### Tests
+
+- `test/*.test.ts`
+- `test/ralph-shell.test.ts` is the highest-value integration suite for shell orchestration behavior
+
+## Architectural Characteristics
+
+Strengths:
+
+- simple, inspectable file contracts
+- strong process isolation via git worktrees
+- easy recovery after interruption
+- backend abstraction without over-engineering
+- dashboard decoupled from executor internals
+
+Tradeoffs:
+
+- state is spread across several files rather than one durable store
+- Bash is harder to evolve than a single-language runtime
+- correctness depends on disciplined file contracts between shell and agents
+- tests need to cover cross-process behavior carefully because the system boundary is the filesystem and subprocess layer
+
+## If You Need To Change The System
+
+Use these rules:
+
+1. If you are changing run control flow, start in `ralph.sh`.
+2. If you are changing user-facing command semantics, start in `src/commands/*`.
+3. If you are changing how progress is displayed, start in `src/dashboard/*`.
+4. If you are changing PRD schema or runtime state semantics, update both `src/commands/validate.ts` and any `rjq` usage in `ralph.sh`.
+5. If you are adding a backend, update:
+   - backend availability checks
+   - shell spawn logic
+   - dashboard activity parsing
+   - token parsing assumptions
+   - any bundled agent role definitions
+
+The core invariant to preserve is:
+
+`ralph.sh` owns execution, `prd.json` owns workflow state, and the Node side mostly observes, validates, or summarizes.

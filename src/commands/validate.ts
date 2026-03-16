@@ -121,6 +121,10 @@ export function validateCommand(prdPath: string): void {
       errors.push(`epics[${i}] (${e.id}) invalid status "${e.status}" — must be one of: pending, completed, partial, failed, merge-failed`);
     }
 
+    if (e.planned !== undefined && typeof e.planned !== 'boolean') {
+      errors.push(`epics[${i}] (${typeof e.id === 'string' ? e.id : i}) planned must be a boolean`);
+    }
+
     if (!Array.isArray(e.userStories)) {
       errors.push(`epics[${i}] (${typeof e.id === 'string' ? e.id : i}) missing required field: userStories (must be an array)`);
     } else {
@@ -152,6 +156,10 @@ export function validateCommand(prdPath: string): void {
 
         if (typeof s.passes !== 'boolean') {
           errors.push(`epics[${i}].userStories[${j}] (${typeof s.id === 'string' ? s.id : j}) missing required boolean field: passes`);
+        }
+
+        if (s.failureReason !== undefined && s.failureReason !== null && typeof s.failureReason !== 'string') {
+          errors.push(`epics[${i}].userStories[${j}] (${typeof s.id === 'string' ? s.id : j}) failureReason must be a string or null`);
         }
       }
     }

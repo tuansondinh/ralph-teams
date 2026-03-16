@@ -216,6 +216,25 @@ test('runCommand exits when --parallel is zero', async () => {
   assert.match(errors[0] ?? '', /--parallel must be greater than 0/i);
 });
 
+test('runCommand exits when --dashboard is requested', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
+  const prdPath = path.join(tempDir, 'prd.json');
+  fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
+
+  const errors: string[] = [];
+  mock.method(console, 'error', (...args: unknown[]) => {
+    errors.push(args.join(' '));
+  });
+
+  await assert.rejects(runCommand(prdPath, { backend: 'claude', dashboard: true }, createRunDeps()), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 1);
+    return true;
+  });
+
+  assert.match(errors[0] ?? '', /--dashboard is temporarily disabled/i);
+});
+
 test('runCommand without --dashboard uses spawnSync (sync path)', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
   const prdPath = path.join(tempDir, 'prd.json');

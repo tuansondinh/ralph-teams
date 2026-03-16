@@ -498,6 +498,21 @@ describe('runDiscussSession', () => {
     );
   });
 
+  it('prompt instructs the agent to write the guidance file when guidanceDir is provided', async () => {
+    const tmpDir = makeTempDir();
+    const guidanceDir = path.join(tmpDir, 'guidance');
+    const { spawner, capturedPrompts } = makeMockSpawner('');
+
+    try {
+      await runDiscussSession(baseContext, { spawnAgent: spawner, guidanceDir });
+      const prompt = capturedPrompts[0];
+      assert.ok(prompt.includes(path.resolve(guidanceDir, 'guidance-US-018.md')));
+      assert.ok(prompt.includes('write the final guidance file yourself'));
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it('persists guidance to guidance/guidance-<storyId>.md when guidanceDir is provided', async () => {
     const tmpDir = makeTempDir();
     const guidanceDir = path.join(tmpDir, 'guidance');

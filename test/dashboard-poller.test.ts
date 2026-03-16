@@ -206,6 +206,7 @@ test('createPoller calls onUpdate when prd.json is created', async () => {
 
   const options: DashboardOptions = {
     prdPath,
+    backend: 'claude',
     statsPath,
     logsDir: tempDir,
     progressPath,
@@ -234,6 +235,7 @@ test('createPoller returns default state when prd.json is missing', async () => 
 
   const options: DashboardOptions = {
     prdPath,
+    backend: 'claude',
     statsPath,
     logsDir: tempDir,
     progressPath,
@@ -267,6 +269,7 @@ test('createPoller stop() prevents further updates', async () => {
 
   const options: DashboardOptions = {
     prdPath,
+    backend: 'claude',
     statsPath,
     logsDir: tempDir,
     progressPath,
@@ -300,6 +303,7 @@ test('createPoller uses mtime caching — does not call onUpdate when file uncha
 
   const options: DashboardOptions = {
     prdPath,
+    backend: 'claude',
     statsPath,
     logsDir: tempDir,
     progressPath,
@@ -319,4 +323,40 @@ test('createPoller uses mtime caching — does not call onUpdate when file uncha
 
   // Should have been called once initially (file present at start), then no more
   assert.equal(callCount, 1, `Expected 1 update (mtime cache), got ${callCount}`);
+});
+
+test('createPoller uses options.backend for non-Claude activity parsing', async () => {
+  const tempDir = makeTempDir();
+  const prdPath = path.join(tempDir, 'prd.json');
+  const progressPath = path.join(tempDir, 'progress.txt');
+  const statsPath = path.join(tempDir, 'ralph-run-stats.json');
+  const logPath = path.join(tempDir, 'epic-EPIC-002-20240101.log');
+
+  fs.writeFileSync(prdPath, SIMPLE_PRD);
+  fs.writeFileSync(logPath, 'Agent booting\nRunning npm test\nDone\n');
+
+  const options: DashboardOptions = {
+    prdPath,
+    backend: 'codex',
+    statsPath,
+    logsDir: tempDir,
+    progressPath,
+    guidanceDir: tempDir,
+    pollIntervalMs: 50,
+  };
+
+  const updates: Array<ReturnType<typeof buildStateFromFiles>> = [];
+  const poller = createPoller(options, (state) => {
+    updates.push(state);
+  });
+
+  poller.start();
+  await delay(120);
+  poller.stop();
+
+  assert.ok(updates.length >= 1, 'expected at least one update');
+  const latestState = updates[updates.length - 1];
+  const pendingEpic = latestState.epics.find(epic => epic.id === 'EPIC-002');
+  assert.ok(pendingEpic, 'expected pending epic in dashboard state');
+  assert.equal(pendingEpic?.currentActivity, 'Done');
 });

@@ -8,6 +8,7 @@
       "title": "Task Priority System",
       "description": "Add priority levels to tasks so users can focus on what matters most",
       "status": "pending",
+      "planned": false,
       "dependsOn": [],
       "userStories": [
         {
@@ -21,7 +22,8 @@
             "Typecheck passes"
           ],
           "priority": 1,
-          "passes": false
+          "passes": false,
+          "failureReason": null
         },
         {
           "id": "US-002",
@@ -35,7 +37,8 @@
             "Verify in browser"
           ],
           "priority": 2,
-          "passes": false
+          "passes": false,
+          "failureReason": null
         },
         {
           "id": "US-003",
@@ -50,7 +53,8 @@
             "Verify in browser"
           ],
           "priority": 3,
-          "passes": false
+          "passes": false,
+          "failureReason": null
         }
       ]
     },
@@ -59,6 +63,7 @@
       "title": "Task Labels and Tags",
       "description": "Add a labeling system so users can categorize and find tasks",
       "status": "pending",
+      "planned": false,
       "dependsOn": ["EPIC-001"],
       "userStories": [
         {
@@ -72,7 +77,8 @@
             "Typecheck passes"
           ],
           "priority": 1,
-          "passes": false
+          "passes": false,
+          "failureReason": null
         },
         {
           "id": "US-005",
@@ -85,7 +91,8 @@
             "Verify in browser"
           ],
           "priority": 2,
-          "passes": false
+          "passes": false,
+          "failureReason": null
         },
         {
           "id": "US-006",
@@ -98,7 +105,8 @@
             "Verify in browser"
           ],
           "priority": 3,
-          "passes": false
+          "passes": false,
+          "failureReason": null
         }
       ]
     }

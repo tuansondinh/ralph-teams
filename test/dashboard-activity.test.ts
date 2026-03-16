@@ -13,6 +13,7 @@ import * as path from 'node:path';
 import {
   toolCallToActivity,
   parseStreamJsonLine,
+  parseStreamJsonTextLine,
   parseCopilotLine,
   parseLatestActivity,
   readLogTail,
@@ -45,6 +46,28 @@ function toolUseLine(toolName: string, input: Record<string, unknown>, timestamp
           id: 'tool-1',
           name: toolName,
           input,
+        },
+      ],
+      usage: { input_tokens: 100, output_tokens: 50 },
+    },
+  };
+  if (timestamp) obj['timestamp'] = timestamp;
+  return JSON.stringify(obj);
+}
+
+/** Builds a stream-json assistant line with a text content block. */
+function textLine(text: string, timestamp?: string): string {
+  const obj: Record<string, unknown> = {
+    type: 'assistant',
+    uuid: 'test-text-uuid-1',
+    message: {
+      id: 'msg-text-1',
+      type: 'message',
+      role: 'assistant',
+      content: [
+        {
+          type: 'text',
+          text,
         },
       ],
       usage: { input_tokens: 100, output_tokens: 50 },
@@ -256,6 +279,20 @@ test('parseStreamJsonLine returns null timestampMs when no timestamp in line', (
   assert.equal(result.timestampMs, null);
 });
 
+test('parseStreamJsonTextLine extracts assistant text output', () => {
+  const line = textLine('Planning next step');
+  const result = parseStreamJsonTextLine(line);
+  assert.ok(result !== null);
+  assert.equal(result.activity, 'Planning next step');
+});
+
+test('parseStreamJsonTextLine returns the last non-empty text line', () => {
+  const line = textLine('First line\n\nSecond line');
+  const result = parseStreamJsonTextLine(line);
+  assert.ok(result !== null);
+  assert.equal(result.activity, 'Second line');
+});
+
 // ---------------------------------------------------------------------------
 // parseCopilotLine
 // ---------------------------------------------------------------------------
@@ -290,7 +327,7 @@ test('parseLatestActivity returns idle spinner for empty log', () => {
   });
 });
 
-test('parseLatestActivity returns idle spinner for log with no tool_use', () => {
+test('parseLatestActivity returns idle spinner for log with no text or tool_use', () => {
   withResetSpinner(() => {
     const log = [usageLine('uuid-1'), usageLine('uuid-2')].join('\n');
     const result = parseLatestActivity(log, 'claude');
@@ -298,18 +335,19 @@ test('parseLatestActivity returns idle spinner for log with no tool_use', () => 
   });
 });
 
-test('parseLatestActivity returns most recent tool_use activity', () => {
+test('parseLatestActivity returns most recent assistant text output', () => {
   withResetSpinner(() => {
     const log = [
       toolUseLine('Edit', { file_path: 'src/old.ts' }),
-      toolUseLine('Bash', { command: 'npm test' }),
+      textLine('Validator running'),
+      textLine('Builder finished US-001'),
     ].join('\n');
     const result = parseLatestActivity(log, 'claude');
-    assert.equal(result, 'running tests');
+    assert.equal(result, 'Builder finished US-001');
   });
 });
 
-test('parseLatestActivity shows earlier activity when last line has no tool_use', () => {
+test('parseLatestActivity falls back to tool activity when no assistant text is present', () => {
   withResetSpinner(() => {
     const log = [
       toolUseLine('Edit', { file_path: 'src/api.ts' }),
@@ -320,21 +358,31 @@ test('parseLatestActivity shows earlier activity when last line has no tool_use'
   });
 });
 
-test('parseLatestActivity returns idle when tool_use timestamp is stale (>30s)', () => {
+test('parseLatestActivity keeps showing assistant text even when older than 30s', () => {
   withResetSpinner(() => {
-    const staleTs = new Date(Date.now() - 60_000).toISOString(); // 60s ago
-    const log = toolUseLine('Edit', { file_path: 'old.ts' }, staleTs);
+    const staleTs = new Date(Date.now() - 60_000).toISOString();
+    const log = textLine('Still working through validator feedback', staleTs);
     const result = parseLatestActivity(log, 'claude');
-    assert.ok(result.startsWith('idle '), `expected idle, got "${result}"`);
+    assert.equal(result, 'Still working through validator feedback');
   });
 });
 
-test('parseLatestActivity returns activity when tool_use timestamp is fresh (<30s)', () => {
+test('parseLatestActivity still falls back to fresh tool activity', () => {
   withResetSpinner(() => {
-    const freshTs = new Date(Date.now() - 5_000).toISOString(); // 5s ago
+    const freshTs = new Date(Date.now() - 5_000).toISOString();
     const log = toolUseLine('Edit', { file_path: 'fresh.ts' }, freshTs);
     const result = parseLatestActivity(log, 'claude');
     assert.equal(result, 'editing fresh.ts');
+  });
+});
+
+test('parseLatestActivity ages stale Claude tool activity back to idle', () => {
+  withResetSpinner(() => {
+    const nowMs = Date.now();
+    const staleTs = new Date(nowMs - 60_000).toISOString();
+    const log = toolUseLine('Edit', { file_path: 'stale.ts' }, staleTs);
+    const result = parseLatestActivity(log, 'claude', nowMs);
+    assert.ok(result.startsWith('idle '), `expected idle spinner, got "${result}"`);
   });
 });
 
@@ -349,13 +397,11 @@ test('parseLatestActivity returns idle spinner for empty copilot log', () => {
   });
 });
 
-test('parseLatestActivity detects activity from copilot text log', () => {
+test('parseLatestActivity returns the latest visible line from copilot text log', () => {
   withResetSpinner(() => {
     const log = 'Some output\nRunning npm test\nDone';
     const result = parseLatestActivity(log, 'copilot');
-    // 'Done' doesn't match, 'npm test' on the second line does (scanning in reverse)
-    // But 'Done' is last — no match, next is 'Running npm test' — match
-    assert.equal(result, 'running tests');
+    assert.equal(result, 'Done');
   });
 });
 

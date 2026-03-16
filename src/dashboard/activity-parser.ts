@@ -140,6 +140,56 @@ interface ParsedStreamLine {
 }
 
 /**
+ * Attempts to extract visible assistant text from a single Claude stream-json
+ * line. Returns the last non-empty text content block, or null.
+ */
+export function parseStreamJsonTextLine(line: string): ParsedStreamLine | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+
+  let obj: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    obj = parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  if (obj['type'] !== 'assistant') return null;
+
+  const message = obj['message'];
+  if (!message || typeof message !== 'object' || Array.isArray(message)) return null;
+  const msgObj = message as Record<string, unknown>;
+
+  const content = msgObj['content'];
+  if (!Array.isArray(content)) return null;
+
+  let latestText: string | null = null;
+  for (const block of content) {
+    if (!block || typeof block !== 'object' || Array.isArray(block)) continue;
+    const blockObj = block as Record<string, unknown>;
+    if (blockObj['type'] !== 'text' || typeof blockObj['text'] !== 'string') continue;
+
+    const lines = blockObj['text']
+      .split('\n')
+      .map(textLine => textLine.trim())
+      .filter(textLine => textLine.length > 0);
+    if (lines.length > 0) {
+      latestText = lines[lines.length - 1];
+    }
+  }
+
+  if (!latestText) return null;
+
+  const ts = typeof obj['timestamp'] === 'string'
+    ? new Date(obj['timestamp']).getTime()
+    : null;
+
+  return { activity: latestText, timestampMs: isNaN(ts ?? NaN) ? null : ts };
+}
+
+/**
  * Attempts to parse a single JSON log line from a Claude stream-json file.
  * Returns the activity string if the line contains a tool_use block, or null.
  */
@@ -231,6 +281,7 @@ export function parseCopilotLine(line: string): string | null {
  * How many seconds of inactivity before we report 'idle'.
  */
 const IDLE_THRESHOLD_SECONDS = 30;
+const IDLE_THRESHOLD_MS = IDLE_THRESHOLD_SECONDS * 1000;
 
 /**
  * Parses the last N lines of a log file (already read as a string) and
@@ -259,28 +310,32 @@ export function parseLatestActivity(
   }
 
   if (backend === 'claude') {
-    // Scan lines in reverse to find the most recent tool_use
+    // Prefer the latest visible assistant text from the team lead.
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const textResult = parseStreamJsonTextLine(lines[i]);
+      if (textResult) {
+        return textResult.activity;
+      }
+    }
+
+    // Fall back to tool-use derived activity when no text was emitted.
     for (let i = lines.length - 1; i >= 0; i--) {
       const result = parseStreamJsonLine(lines[i]);
       if (result) {
-        // Check timestamp freshness if available
-        if (result.timestampMs !== null) {
-          const ageSeconds = (nowMs - result.timestampMs) / 1000;
-          if (ageSeconds > IDLE_THRESHOLD_SECONDS) {
-            return `idle ${nextSpinnerChar()}`;
-          }
+        if (result.timestampMs !== null && nowMs - result.timestampMs > IDLE_THRESHOLD_MS) {
+          return `idle ${nextSpinnerChar()}`;
         }
         return result.activity;
       }
     }
-    // No tool_use found in tail
+
     return `idle ${nextSpinnerChar()}`;
   }
 
-  // Copilot backend: text format
+  // Text backends: show the most recent non-empty visible line from the log.
   for (let i = lines.length - 1; i >= 0; i--) {
-    const activity = parseCopilotLine(lines[i]);
-    if (activity) return activity;
+    const latestLine = lines[i].trim();
+    if (latestLine.length > 0) return latestLine;
   }
 
   return `idle ${nextSpinnerChar()}`;

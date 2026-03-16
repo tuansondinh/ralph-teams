@@ -13,7 +13,8 @@ export function statusCommand(prdPath: string): void {
   let completedEpics = 0;
 
   for (const epic of prd.epics) {
-    console.log(`\n  ${chalk.bold(epic.id)}: ${epic.title} [${epicStatusColor(epic.status)}]`);
+    const planningLabel = epic.planned ? chalk.green('planned') : chalk.yellow('unplanned');
+    console.log(`\n  ${chalk.bold(epic.id)}: ${epic.title} [${epicStatusColor(epic.status)} | ${planningLabel}]`);
 
     for (const story of epic.userStories) {
       totalStories++;
