@@ -22,6 +22,7 @@ import {
   renderEpicDetailContent,
 } from './renderer';
 import { findLatestEpicLog, readLogTail } from './activity-parser';
+import { computeRunSummary, renderSummaryView } from './views/summary-view';
 
 export interface DashboardScreen {
   screen: blessed.Widgets.Screen;
@@ -48,6 +49,8 @@ export function createDashboardScreen(
   // Mutable view state — owned by screen, not the poller
   let currentState: DashboardState | null = null;
   let awaitingEpicNumber = false;
+  /** Tracks whether we have already auto-transitioned to the summary view (one-time). */
+  let summaryShown = false;
 
   const screen = blessed.screen({
     smartCSR: true,
@@ -152,6 +155,12 @@ export function createDashboardScreen(
         break;
       }
 
+      case 'summary': {
+        const summary = computeRunSummary(state);
+        epicListBox.setContent(renderSummaryView(summary));
+        break;
+      }
+
       default:
         epicListBox.setContent(renderEpicList(state));
         break;
@@ -167,18 +176,18 @@ export function createDashboardScreen(
     onExit();
   });
 
-  // 'q' / Escape: exit from dashboard, or return to dashboard from other views
+  // 'q' / Escape: exit from dashboard/summary, or return to dashboard from other views
   screen.key(['q', 'Q', 'escape'], () => {
     if (!currentState) {
       onExit();
       return;
     }
-    if (currentState.viewMode !== 'dashboard') {
+    if (currentState.viewMode === 'dashboard' || currentState.viewMode === 'summary') {
+      onExit();
+    } else {
       currentState = { ...currentState, viewMode: 'dashboard', selectedEpicId: null };
       awaitingEpicNumber = false;
       render();
-    } else {
-      onExit();
     }
   });
 
@@ -253,6 +262,16 @@ export function createDashboardScreen(
       };
     } else {
       currentState = state;
+    }
+
+    // Auto-transition to summary view once the run is complete (one-time only)
+    if (
+      currentState.runComplete &&
+      !summaryShown &&
+      currentState.viewMode === 'dashboard'
+    ) {
+      summaryShown = true;
+      currentState = { ...currentState, viewMode: 'summary' };
     }
 
     render();

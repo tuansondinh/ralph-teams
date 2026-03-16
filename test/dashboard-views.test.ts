@@ -70,6 +70,7 @@ function makeState(overrides: Partial<DashboardState> = {}): DashboardState {
     rawLogLines: [],
     mergeEvents: [],
     awaitingEpicNumber: false,
+    runComplete: false,
     ...overrides,
   };
 }

@@ -198,6 +198,8 @@ export function renderFooter(
       return '[d] dashboard  [q] quit  arrows:scroll';
     case 'epic-detail':
       return '[q/Esc] back to dashboard  arrows:scroll';
+    case 'summary':
+      return '[q] quit';
     default:
       return '[d] logs  [e] epic detail  [q] quit  arrows:scroll';
   }

@@ -26,11 +26,13 @@ export interface DashboardState {
   totalElapsed: string;
   /** Estimated total time string from run stats, e.g. '12m 30s' or '--' */
   totalTimeEstimate: string | null;
-  viewMode: 'dashboard' | 'logs' | 'epic-detail';
+  viewMode: 'dashboard' | 'logs' | 'epic-detail' | 'summary';
   selectedEpicId: string | null;
   rawLogLines: string[];
   /** Merge events parsed from progress.txt (one per epic, latest state) */
   mergeEvents: MergeEvent[];
+  /** True when all epics have reached a terminal state (completed/failed/partial/merge-failed) */
+  runComplete: boolean;
   /**
    * When true, the next numeric key press (1-9) should select an epic for detail view.
    * Set by pressing 'e', cleared after a digit is pressed or any other key.
