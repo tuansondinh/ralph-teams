@@ -21,7 +21,7 @@ PRD: prd.json
 
 === Wave 2 — Mon Jan 01 00:02:00 UTC 2024 ===
   EPIC-003
-[EPIC-003] PARTIAL — Mon Jan 01 00:03:00 UTC 2024 — 2/3 stories passed
+[EPIC-003] PARTIAL — Mon Jan 01 00:03:00 UTC 2024 — PARTIAL: 2/3 stories passed
 `;
 
 function writeTempProgress(content: string): string {
@@ -85,7 +85,18 @@ test('parseWavesFromProgress extracts results for wave 2', () => {
   const wave2Results = waves[1]?.results ?? [];
   assert.equal(wave2Results.length, 1);
   assert.equal(wave2Results[0]?.epicId, 'EPIC-003');
-  assert.equal(wave2Results[0]?.outcome, 'PARTIAL');
+  assert.equal(wave2Results[0]?.outcome, 'PARTIAL: 2/3 stories passed');
+});
+
+test('parseWavesFromProgress preserves detailed failure text after the timestamp', () => {
+  const content = `
+=== Wave 1 — somedate ===
+  EPIC-001
+[EPIC-001] FAILED — somedate — FAIL: 0/2 stories passed. Failed: US-001, US-002
+`;
+  const filePath = writeTempProgress(content);
+  const waves = parseWavesFromProgress(filePath);
+  assert.equal(waves[0]?.results[0]?.outcome, 'FAIL: 0/2 stories passed. Failed: US-001, US-002');
 });
 
 test('parseWavesFromProgress handles MERGE FAILED outcome', () => {

@@ -4,8 +4,9 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const repoRoot = '/Users/sonwork/Workspace/ralph-team-agents';
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const scriptPath = path.join(repoRoot, 'ralph.sh');
 
 function setupTempRepo() {
@@ -283,7 +284,8 @@ test('US-002: worktrees are cleaned up after wave completes', () => {
     { 'EPIC-001': 'PASS' },
   );
 
-  runRalph(tempDir, env);
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
 
   // .worktrees/EPIC-001 should NOT exist after cleanup
   assert.equal(fs.existsSync(path.join(tempDir, '.worktrees', 'EPIC-001')), false);
@@ -368,7 +370,7 @@ test('US-003: --parallel flag is parsed and shown in banner', () => {
   assert.match(result.stdout, /Parallel: 2/);
 });
 
-test('US-003: default (no --parallel) shows unlimited in banner', () => {
+test('US-003: default (no --parallel) stays sequential', () => {
   const { tempDir, env } = setupMultiEpicRepo(
     [{ id: 'EPIC-001', title: 'Alpha' }],
     { 'EPIC-001': 'PASS' },
@@ -376,7 +378,8 @@ test('US-003: default (no --parallel) shows unlimited in banner', () => {
 
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
-  assert.match(result.stdout, /Parallel: unlimited/);
+  assert.match(result.stdout, /Mode: sequential/);
+  assert.doesNotMatch(result.stdout, /Parallel:/);
 });
 
 test('US-003: --parallel 1 runs all epics in wave sequentially and all pass', () => {

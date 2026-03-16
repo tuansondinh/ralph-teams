@@ -63,3 +63,43 @@ test('logsCommand exits on an invalid tail value', () => {
     process.chdir(previousCwd);
   }
 });
+
+test('logsCommand tails the last wave block from a real progress log', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-logs-'));
+  const previousCwd = process.cwd();
+  process.chdir(tempDir);
+
+  try {
+    fs.writeFileSync(
+      path.join(tempDir, 'progress.txt'),
+      [
+        '# Ralph Progress Log',
+        'Started: date',
+        'PRD: prd.json',
+        '---',
+        '',
+        '=== Wave 1 — date ===',
+        '  EPIC-001',
+        '[EPIC-001] PASSED — date',
+        '',
+        '=== Wave 2 — date ===',
+        '  EPIC-002',
+        '[EPIC-002] FAILED — date — FAIL: 0/1 stories passed',
+      ].join('\n'),
+    );
+
+    const lines: string[] = [];
+    mock.method(console, 'log', (...args: unknown[]) => {
+      lines.push(args.join(' '));
+    });
+
+    logsCommand({ tail: '1' });
+
+    const output = lines.join('\n');
+    assert.doesNotMatch(output, /Wave 1/);
+    assert.match(output, /Wave 2/);
+    assert.match(output, /EPIC-002/);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});

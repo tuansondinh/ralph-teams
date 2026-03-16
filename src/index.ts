@@ -16,7 +16,7 @@ const program = new Command();
 program
   .name('ralph-teams')
   .description(chalk.bold('CLI for Ralph Teams'))
-  .version('0.1.0');
+  .version('0.1.1');
 
 program
   .command('status [path]')

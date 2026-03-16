@@ -143,11 +143,12 @@ ralph-teams run
 ralph-teams logs
 ```
 
-Run `ralph.sh` directly when you want to choose a backend:
+Run `ralph.sh` directly when you want shell-level flags:
 
 ```bash
 ./ralph.sh prd.json --backend claude
 ./ralph.sh prd.json --backend copilot
+./ralph.sh prd.json --parallel 2
 ./ralph.sh prd.json --backend copilot --max-epics 1
 ```
 
@@ -186,19 +187,22 @@ Runs Ralph against a PRD file. Default path is `./prd.json`.
 ```bash
 ralph-teams run
 ralph-teams run ./my-prd.json
+ralph-teams run --backend copilot
+ralph-teams run --parallel 2
 ```
 
 Behavior:
 
-- validates that the default backend dependencies, `jq`, and the PRD are available
+- validates that the selected backend dependencies, `jq`, and the PRD are available
 - locates bundled `ralph.sh`
 - streams Ralph output directly to the terminal
 - exits with Ralph's exit code
 
 Notes:
 
-- the CLI currently runs `ralph.sh` with its default backend
-- if you want to force `claude` or `copilot`, run `ralph.sh` directly with `--backend`
+- `--backend` is forwarded to `ralph.sh`
+- runs sequentially by default
+- `--parallel <n>` enables the experimental parallel wave runner
 
 ### `ralph-teams status [path]`
 
@@ -254,6 +258,7 @@ Checks include:
 - valid epic status values
 - duplicate epic IDs
 - duplicate story IDs
+- invalid `dependsOn` values
 - unknown `dependsOn` references
 - circular epic dependencies
 

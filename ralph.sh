@@ -11,8 +11,7 @@ PRD_FILE="${1:-prd.json}"
 MAX_EPICS=10
 PROGRESS_FILE="progress.txt"
 BACKEND="claude"
-PARALLEL=0  # 0 means unlimited (all epics in wave at once)
-HEARTBEAT_SECONDS="${RALPH_HEARTBEAT_SECONDS:-10}"
+PARALLEL=""
 
 # Parse flags — shift past the PRD_FILE arg first
 shift 2>/dev/null || true
@@ -27,6 +26,11 @@ while [[ $# -gt 0 ]]; do
     *) shift ;;
   esac
 done
+
+if [ -n "$PARALLEL" ] && ! [[ "$PARALLEL" =~ ^[0-9]+$ ]]; then
+  echo "Error: --parallel must be a whole number."
+  exit 1
+fi
 
 # --- Backend configuration ---
 case "$BACKEND" in
@@ -67,8 +71,8 @@ if [ "$BACKEND" = "copilot" ]; then
   fi
 fi
 
-if ! command -v jq &> /dev/null; then
-  echo "Error: 'jq' not found. Install with: brew install jq"
+if ! command -v rjq &> /dev/null; then
+  echo "Error: 'rjq' not found. Run 'npm install -g ralph-teams' to install."
   exit 1
 fi
 
@@ -82,13 +86,13 @@ fi
 # --- Validate PRD structure ---
 echo "Validating PRD structure..."
 
-PRD_PROJECT=$(jq -r '.project // empty' "$PRD_FILE" 2>/dev/null)
+PRD_PROJECT=$(rjq read "$PRD_FILE" .project "")
 if [ -z "$PRD_PROJECT" ]; then
   echo "Error: PRD missing required field: .project"
   exit 1
 fi
 
-EPICS_COUNT=$(jq '.epics | length' "$PRD_FILE" 2>/dev/null)
+EPICS_COUNT=$(rjq length "$PRD_FILE" .epics)
 if [ -z "$EPICS_COUNT" ] || [ "$EPICS_COUNT" = "null" ] || [ "$EPICS_COUNT" -eq 0 ]; then
   echo "Error: PRD missing required field: .epics (must be a non-empty array)"
   exit 1
@@ -97,9 +101,9 @@ fi
 # Check each epic has id, title, userStories
 VALIDATION_ERRORS=0
 for i in $(seq 0 $((EPICS_COUNT - 1))); do
-  EPIC_ID_CHECK=$(jq -r ".epics[$i].id // empty" "$PRD_FILE")
-  EPIC_TITLE_CHECK=$(jq -r ".epics[$i].title // empty" "$PRD_FILE")
-  STORIES_COUNT=$(jq ".epics[$i].userStories | length" "$PRD_FILE" 2>/dev/null)
+  EPIC_ID_CHECK=$(rjq read "$PRD_FILE" ".epics[$i].id" "")
+  EPIC_TITLE_CHECK=$(rjq read "$PRD_FILE" ".epics[$i].title" "")
+  STORIES_COUNT=$(rjq length "$PRD_FILE" ".epics[$i].userStories")
 
   if [ -z "$EPIC_ID_CHECK" ]; then
     echo "Error: epics[$i] missing required field: id"
@@ -130,12 +134,12 @@ detect_circular_deps() {
   local prd_file="$1"
   local total="$2"
 
-  # Build in-degree array and adjacency list using jq
+  # Build in-degree array and adjacency list using rjq
   # in_degree[i] = number of dependencies epic i has
   local -a in_degree=()
   for i in $(seq 0 $((total - 1))); do
     local cnt
-    cnt=$(jq ".epics[$i].dependsOn // [] | length" "$prd_file")
+    cnt=$(rjq length "$prd_file" ".epics[$i].dependsOn")
     in_degree+=("$cnt")
   done
 
@@ -159,10 +163,10 @@ detect_circular_deps() {
 
     # For each epic that depends on this node (reverse adjacency)
     local node_id
-    node_id=$(jq -r ".epics[$node].id" "$prd_file")
+    node_id=$(rjq read "$prd_file" ".epics[$node].id")
     for j in $(seq 0 $((total - 1))); do
       local dep_match
-      dep_match=$(jq -r ".epics[$j].dependsOn // [] | map(select(. == \"$node_id\")) | length" "$prd_file")
+      dep_match=$(rjq count-matches "$prd_file" ".epics[$j].dependsOn" "$node_id")
       if [ "$dep_match" -gt 0 ]; then
         in_degree[$j]=$((in_degree[$j] - 1))
         if [ "${in_degree[$j]}" -eq 0 ]; then
@@ -188,9 +192,9 @@ if [ ! -f "$PROGRESS_FILE" ]; then
 fi
 
 # --- Read PRD ---
-PROJECT=$(jq -r '.project' "$PRD_FILE")
-BRANCH=$(jq -r '.branchName // empty' "$PRD_FILE")
-TOTAL_EPICS=$(jq '.epics | length' "$PRD_FILE")
+PROJECT=$(rjq read "$PRD_FILE" .project)
+BRANCH=$(rjq read "$PRD_FILE" .branchName "")
+TOTAL_EPICS=$(rjq length "$PRD_FILE" .epics)
 
 echo ""
 echo "========================================================"
@@ -199,7 +203,11 @@ echo "  Project: $PROJECT"
 echo "  Branch: ${BRANCH:-<not set>}"
 echo "  Epics: $TOTAL_EPICS"
 echo "  Backend: $BACKEND"
-echo "  Parallel: $([ "$PARALLEL" -eq 0 ] && echo 'unlimited' || echo "$PARALLEL")"
+if [ -n "$PARALLEL" ]; then
+  echo "  Parallel: $PARALLEL"
+else
+  echo "  Mode: sequential"
+fi
 echo "========================================================"
 
 prompt_to_commit_dirty_worktree() {
@@ -292,7 +300,17 @@ emit_new_log_output() {
   if [ "$current_line_count" -gt "$previous_line_count" ]; then
     sed -n "$((previous_line_count + 1)),${current_line_count}p" "$log_file" 2>/dev/null \
       | while IFS= read -r log_line; do
-          [ -n "$log_line" ] && echo "  [$epic_id] live: $log_line"
+          [ -z "$log_line" ] && continue
+
+          if printf '%s\n' "$log_line" | rjq validate 2>/dev/null; then
+            printf '%s\n' "$log_line" \
+              | rjq extract-stream-text 2>/dev/null \
+              | while IFS= read -r text_line; do
+                  [ -n "$text_line" ] && echo "  [$epic_id] $text_line"
+                done
+          elif [ "$STREAM_FORMAT" = "text" ]; then
+            echo "  [$epic_id] $log_line"
+          fi
         done
   fi
 
@@ -313,21 +331,21 @@ normalize_epic_statuses() {
 
   for epic_index in $(seq 0 $((TOTAL_EPICS - 1))); do
     local epic_status
-    epic_status=$(jq -r ".epics[$epic_index].status // \"pending\"" "$PRD_FILE")
+    epic_status=$(rjq read "$PRD_FILE" ".epics[$epic_index].status" "pending")
     [ "$epic_status" != "pending" ] && continue
 
     local story_count
-    story_count=$(jq ".epics[$epic_index].userStories | length" "$PRD_FILE")
+    story_count=$(rjq length "$PRD_FILE" ".epics[$epic_index].userStories")
     [ "$story_count" -eq 0 ] && continue
 
     local passed_count
-    passed_count=$(jq "[.epics[$epic_index].userStories[] | select(.passes == true)] | length" "$PRD_FILE")
+    passed_count=$(rjq count-where "$PRD_FILE" ".epics[$epic_index].userStories" "passes=true")
 
     if [ "$passed_count" -eq "$story_count" ]; then
       local epic_id
-      epic_id=$(jq -r ".epics[$epic_index].id" "$PRD_FILE")
+      epic_id=$(rjq read "$PRD_FILE" ".epics[$epic_index].id")
       echo "  [$epic_id] all stories already pass — marking epic completed"
-      jq ".epics[$epic_index].status = \"completed\"" "$PRD_FILE" > tmp.$$.json && mv tmp.$$.json "$PRD_FILE"
+      rjq set "$PRD_FILE" ".epics[$epic_index].status" '"completed"'
       echo "[$epic_id] AUTO-COMPLETED (all stories already passed) — $(date)" >> "$PROGRESS_FILE"
       updated=true
     fi
@@ -339,8 +357,8 @@ normalize_epic_statuses() {
 }
 
 initialize_counters() {
-  COMPLETED=$(jq '[.epics[] | select((.status // "pending") == "completed")] | length' "$PRD_FILE")
-  FAILED=$(jq '[.epics[] | select((.status // "pending") == "failed" or (.status // "pending") == "merge-failed")] | length' "$PRD_FILE")
+  COMPLETED=$(rjq count-where "$PRD_FILE" .epics "status=completed" --default pending)
+  FAILED=$(rjq count-where "$PRD_FILE" .epics "status=failed|merge-failed" --default pending)
 }
 
 # Detect circular dependencies before starting
@@ -355,13 +373,13 @@ trap 'cleanup_all_worktrees; kill $(jobs -p) 2>/dev/null || true' EXIT
 process_epic_result() {
   local epic_index="$1"
   local epic_id
-  epic_id=$(jq -r ".epics[$epic_index].id" "$PRD_FILE")
+  epic_id=$(rjq read "$PRD_FILE" ".epics[$epic_index].id")
   local result_file="$(pwd)/results/result-${epic_id}.txt"
 
   if [ ! -f "$result_file" ]; then
     echo ""
     echo "  [$epic_id] FAILED — no result file found at $result_file"
-    jq ".epics[$epic_index].status = \"failed\"" "$PRD_FILE" > tmp.$$.json && mv tmp.$$.json "$PRD_FILE"
+    rjq set "$PRD_FILE" ".epics[$epic_index].status" '"failed"'
     FAILED=$((FAILED + 1))
     echo "[$epic_id] FAILED (no result file) — $(date)" >> "$PROGRESS_FILE"
     return
@@ -373,20 +391,20 @@ process_epic_result() {
   if echo "$result" | grep -qi "^PASS$"; then
     echo ""
     echo "  [$epic_id] PASSED — all stories completed"
-    jq ".epics[$epic_index].status = \"completed\"" "$PRD_FILE" > tmp.$$.json && mv tmp.$$.json "$PRD_FILE"
+    rjq set "$PRD_FILE" ".epics[$epic_index].status" '"completed"'
     COMPLETED=$((COMPLETED + 1))
     echo "[$epic_id] PASSED — $(date)" >> "$PROGRESS_FILE"
 
   elif echo "$result" | grep -qi "^PARTIAL"; then
     echo ""
     echo "  [$epic_id] PARTIAL — $result"
-    jq ".epics[$epic_index].status = \"partial\"" "$PRD_FILE" > tmp.$$.json && mv tmp.$$.json "$PRD_FILE"
+    rjq set "$PRD_FILE" ".epics[$epic_index].status" '"partial"'
     echo "[$epic_id] PARTIAL — $(date) — $result" >> "$PROGRESS_FILE"
 
   else
     echo ""
     echo "  [$epic_id] FAILED — $result"
-    jq ".epics[$epic_index].status = \"failed\"" "$PRD_FILE" > tmp.$$.json && mv tmp.$$.json "$PRD_FILE"
+    rjq set "$PRD_FILE" ".epics[$epic_index].status" '"failed"'
     FAILED=$((FAILED + 1))
     echo "[$epic_id] FAILED — $(date) — $result" >> "$PROGRESS_FILE"
   fi
@@ -398,11 +416,11 @@ process_epic_result() {
 spawn_epic_bg() {
   local EPIC_INDEX="$1"
   local EPIC_ID
-  EPIC_ID=$(jq -r ".epics[$EPIC_INDEX].id" "$PRD_FILE")
+  EPIC_ID=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].id")
   local EPIC_TITLE
-  EPIC_TITLE=$(jq -r ".epics[$EPIC_INDEX].title" "$PRD_FILE")
+  EPIC_TITLE=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].title")
   local EPIC_JSON
-  EPIC_JSON=$(jq ".epics[$EPIC_INDEX]" "$PRD_FILE")
+  EPIC_JSON=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX]")
 
   local RESULT_FILE="${ROOT_DIR}/results/result-${EPIC_ID}.txt"
   local EPIC_LOG="${ROOT_DIR}/logs/epic-${EPIC_ID}-$(date +%s).log"
@@ -467,7 +485,6 @@ Begin."
   fi
   LAST_SPAWN_PID=$!
   LAST_SPAWN_LOG="$EPIC_LOG"
-  LAST_SPAWN_STARTED_AT="$(date +%s)"
 }
 
 # merge_wave: merges completed epic branches back to the target branch sequentially.
@@ -485,7 +502,7 @@ merge_wave() {
 
   local merge_failures=0
   local target_branch
-  target_branch=$(jq -r '.branchName // empty' "$PRD_FILE")
+  target_branch=$(rjq read "$PRD_FILE" .branchName "")
   [ -z "$target_branch" ] && target_branch=$(git branch --show-current)
 
   for epic_id in "${completed_epic_ids[@]}"; do
@@ -567,9 +584,9 @@ Begin resolving."
 
         # Update epic status to merge-failed
         local epic_index
-        epic_index=$(jq --arg id "$epic_id" '.epics | to_entries[] | select(.value.id == $id) | .key' "$PRD_FILE")
+        epic_index=$(rjq find-index "$PRD_FILE" .epics id "$epic_id")
         if [ -n "$epic_index" ]; then
-          jq ".epics[$epic_index].status = \"merge-failed\"" "$PRD_FILE" > tmp.$$.json && mv tmp.$$.json "$PRD_FILE"
+          rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"'
         fi
       fi
     fi
@@ -587,20 +604,20 @@ while true; do
   WAVE_EPICS=()
 
   for EPIC_INDEX in $(seq 0 $((TOTAL_EPICS - 1))); do
-    EPIC_STATUS=$(jq -r ".epics[$EPIC_INDEX].status // \"pending\"" "$PRD_FILE")
+    EPIC_STATUS=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].status" "pending")
     [ "$EPIC_STATUS" != "pending" ] && continue
 
     # Check all dependencies
     ALL_DEPS_MET=true
-    DEPS=$(jq -r ".epics[$EPIC_INDEX].dependsOn // [] | .[]" "$PRD_FILE" 2>/dev/null || true)
+    DEPS=$(rjq list "$PRD_FILE" ".epics[$EPIC_INDEX].dependsOn")
     for DEP in $DEPS; do
-      DEP_STATUS=$(jq -r ".epics[] | select(.id == \"$DEP\") | .status // \"pending\"" "$PRD_FILE")
+      DEP_STATUS=$(rjq read-where "$PRD_FILE" .epics id "$DEP" status "pending")
       if [ "$DEP_STATUS" = "failed" ] || [ "$DEP_STATUS" = "partial" ] || [ "$DEP_STATUS" = "merge-failed" ]; then
         # Dependency failed — skip this epic permanently
-        EPIC_ID=$(jq -r ".epics[$EPIC_INDEX].id" "$PRD_FILE")
-        EPIC_TITLE=$(jq -r ".epics[$EPIC_INDEX].title" "$PRD_FILE")
+        EPIC_ID=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].id")
+        EPIC_TITLE=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].title")
         echo "  [$EPIC_ID] $EPIC_TITLE — skipped (dependency $DEP has status: $DEP_STATUS)"
-        jq ".epics[$EPIC_INDEX].status = \"failed\"" "$PRD_FILE" > tmp.$$.json && mv tmp.$$.json "$PRD_FILE"
+        rjq set "$PRD_FILE" ".epics[$EPIC_INDEX].status" '"failed"'
         FAILED=$((FAILED + 1))
         echo "[$EPIC_ID] SKIPPED (dependency $DEP failed) — $(date)" >> "$PROGRESS_FILE"
         ALL_DEPS_MET=false
@@ -627,23 +644,25 @@ while true; do
   echo "" >> "$PROGRESS_FILE"
   echo "=== Wave $WAVE_NUM — $(date) ===" >> "$PROGRESS_FILE"
   for IDX in "${WAVE_EPICS[@]}"; do
-    W_EPIC_ID=$(jq -r ".epics[$IDX].id" "$PRD_FILE")
+    W_EPIC_ID=$(rjq read "$PRD_FILE" ".epics[$IDX].id")
     echo "  $W_EPIC_ID" >> "$PROGRESS_FILE"
   done
 
   # Process epics in this wave with optional concurrency limit (PARALLEL).
   # Uses kill -0 polling to detect when a slot frees up, then starts the next
   # queued epic. All result processing happens after each epic finishes.
-  local_max_slots="$PARALLEL"
-  [ "$local_max_slots" -eq 0 ] && local_max_slots=${#WAVE_EPICS[@]}
+  if [ -n "$PARALLEL" ]; then
+    local_max_slots="$PARALLEL"
+    [ "$local_max_slots" -eq 0 ] && local_max_slots=${#WAVE_EPICS[@]}
+  else
+    local_max_slots=1
+  fi
 
   # active_pids[i] and active_indices[i] track running background processes
   declare -a active_pids=()
   declare -a active_indices=()
   declare -a active_logs=()
-  declare -a active_started_at=()
   declare -a active_log_lines=()
-  declare -a active_last_signal_at=()
   # wave_completed_ids collects epic IDs that completed successfully (for merge_wave)
   declare -a wave_completed_ids=()
   queue_pos=0
@@ -654,7 +673,7 @@ while true; do
     while true; do
       for slot in "${!active_pids[@]}"; do
         local finished_epic_id
-        finished_epic_id=$(jq -r ".epics[${active_indices[$slot]}].id" "$PRD_FILE")
+        finished_epic_id=$(rjq read "$PRD_FILE" ".epics[${active_indices[$slot]}].id")
         local result_file="${ROOT_DIR}/results/result-${finished_epic_id}.txt"
         local process_finished=false
 
@@ -677,7 +696,7 @@ while true; do
           process_epic_result "${active_indices[$slot]}"
           # Track completed epics for merge_wave
           local post_status
-          post_status=$(jq -r ".epics[${active_indices[$slot]}].status // \"pending\"" "$PRD_FILE")
+          post_status=$(rjq read "$PRD_FILE" ".epics[${active_indices[$slot]}].status" "pending")
           if [ "$post_status" = "completed" ]; then
             wave_completed_ids+=("$finished_epic_id")
           fi
@@ -688,15 +707,6 @@ while true; do
           return
         fi
 
-        local now
-        now=$(date +%s)
-        local last_signal_at="${active_last_signal_at[$slot]:-0}"
-        if [ $((now - last_signal_at)) -ge "$HEARTBEAT_SECONDS" ]; then
-          local started_at="${active_started_at[$slot]:-$now}"
-          local elapsed=$((now - started_at))
-          echo "  [$finished_epic_id] still running (${elapsed}s) — waiting for more session output"
-          active_last_signal_at[$slot]="$now"
-        fi
       done
       sleep 1
     done
@@ -712,10 +722,10 @@ while true; do
       break
     fi
 
-    EPIC_STATUS=$(jq -r ".epics[$EPIC_INDEX].status // \"pending\"" "$PRD_FILE")
+    EPIC_STATUS=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].status" "pending")
     if [ "$EPIC_STATUS" = "completed" ]; then
-      local_epic_id=$(jq -r ".epics[$EPIC_INDEX].id" "$PRD_FILE")
-      local_epic_title=$(jq -r ".epics[$EPIC_INDEX].title" "$PRD_FILE")
+      local_epic_id=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].id")
+      local_epic_title=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].title")
       echo "  [$local_epic_id] $local_epic_title — already completed, skipping"
       COMPLETED=$((COMPLETED + 1))
       continue
@@ -731,9 +741,7 @@ while true; do
     active_pids+=("$LAST_SPAWN_PID")
     active_indices+=("$EPIC_INDEX")
     active_logs+=("$LAST_SPAWN_LOG")
-    active_started_at+=("$LAST_SPAWN_STARTED_AT")
     active_log_lines+=("0")
-    active_last_signal_at+=("0")
   done
 
   # Wait for all remaining active processes to finish

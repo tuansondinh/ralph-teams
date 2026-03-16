@@ -169,3 +169,41 @@ test('runCommand without --parallel does not include --parallel in args', () => 
   assert.ok(!ralphArgs.includes('--parallel'), 'args should NOT include --parallel');
   assert.deepEqual(Array.from(ralphArgs).slice(1), ['--backend', 'claude']);
 });
+
+test('runCommand exits when --parallel is not a whole number', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
+  const prdPath = path.join(tempDir, 'prd.json');
+  fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
+
+  const errors: string[] = [];
+  mock.method(console, 'error', (...args: unknown[]) => {
+    errors.push(args.join(' '));
+  });
+
+  assert.throws(() => runCommand(prdPath, { backend: 'claude', parallel: 'abc' }, createRunDeps()), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 1);
+    return true;
+  });
+
+  assert.match(errors[0] ?? '', /--parallel must be a whole number/i);
+});
+
+test('runCommand exits when --parallel is zero', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
+  const prdPath = path.join(tempDir, 'prd.json');
+  fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
+
+  const errors: string[] = [];
+  mock.method(console, 'error', (...args: unknown[]) => {
+    errors.push(args.join(' '));
+  });
+
+  assert.throws(() => runCommand(prdPath, { backend: 'claude', parallel: '0' }, createRunDeps()), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 1);
+    return true;
+  });
+
+  assert.match(errors[0] ?? '', /--parallel must be greater than 0/i);
+});

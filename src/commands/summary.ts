@@ -34,8 +34,8 @@ export function parseWavesFromProgress(progressPath: string): WaveInfo[] {
   const waveHeaderRe = /^===\s+Wave\s+(\d+)/;
   // Matches indented epic IDs that follow the wave header (before any result lines)
   const epicIdRe = /^\s{1,4}(EPIC-\d+)\s*$/;
-  // Matches result lines: [EPIC-XXX] OUTCOME — date
-  const resultRe = /^\[(EPIC-\d+)\]\s+(.+?)\s+—/;
+  // Matches result lines: [EPIC-XXX] OUTCOME — date [— detail]
+  const resultRe = /^\[(EPIC-\d+)\]\s+(.+)$/;
 
   for (const line of lines) {
     const waveMatch = waveHeaderRe.exec(line);
@@ -60,7 +60,7 @@ export function parseWavesFromProgress(progressPath: string): WaveInfo[] {
 
     const resultMatch = resultRe.exec(line);
     if (resultMatch && currentWave) {
-      currentWave.results.push({ epicId: resultMatch[1], outcome: resultMatch[2].trim() });
+      currentWave.results.push({ epicId: resultMatch[1], outcome: parseResultOutcome(resultMatch[2]) });
     }
   }
 
@@ -132,7 +132,7 @@ export function summaryCommand(prdPath: string): void {
   }
 
   // Wave History — parsed from progress.txt if present
-  const progressPath = path.resolve(path.dirname(prdPath), 'progress.txt');
+  const progressPath = path.resolve('./progress.txt');
   const waves = parseWavesFromProgress(progressPath);
   if (waves.length > 0) {
     console.log(chalk.bold('\nWave History:'));
@@ -155,8 +155,18 @@ function formatOutcome(outcome: string): string {
   if (outcome.startsWith('MERGED')) return chalk.blue(outcome);
   if (outcome.startsWith('MERGE FAILED')) return chalk.red(outcome);
   if (outcome.startsWith('FAILED')) return chalk.red(outcome);
+  if (outcome.startsWith('FAIL')) return chalk.red(outcome);
   if (outcome.startsWith('PARTIAL')) return chalk.yellow(outcome);
   if (outcome.startsWith('SKIPPED')) return chalk.dim(outcome);
   if (outcome.startsWith('AUTO-COMPLETED')) return chalk.green(outcome);
   return outcome;
+}
+
+function parseResultOutcome(resultLine: string): string {
+  const parts = resultLine.split(' — ');
+  if (parts.length >= 3) {
+    return parts.slice(2).join(' — ').trim();
+  }
+
+  return parts[0]?.trim() ?? resultLine.trim();
 }
