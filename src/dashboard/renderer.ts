@@ -181,10 +181,122 @@ export function renderStoryRow(story: StoryDisplayData): string {
 }
 
 /**
- * Renders the footer key bindings line.
+ * Renders the footer key bindings line based on the current view mode.
+ *
+ * @param viewMode - Current view: 'dashboard', 'logs', or 'epic-detail'
+ * @param awaitingEpicNumber - When true, show the epic-select prompt
  */
-export function renderFooter(): string {
-  return 'q:quit  r:refresh  d:dashboard  l:logs  arrows:scroll';
+export function renderFooter(
+  viewMode: DashboardState['viewMode'] = 'dashboard',
+  awaitingEpicNumber: boolean = false,
+): string {
+  if (awaitingEpicNumber) {
+    return 'Press epic number (1-9)... [Esc to cancel]';
+  }
+  switch (viewMode) {
+    case 'logs':
+      return '[d] dashboard  [q] quit  arrows:scroll';
+    case 'epic-detail':
+      return '[q/Esc] back to dashboard  arrows:scroll';
+    default:
+      return '[d] logs  [e] epic detail  [q] quit  arrows:scroll';
+  }
+}
+
+/**
+ * Renders the raw log view content.
+ * Shows the last `maxLines` lines from the raw log buffer.
+ *
+ * @param rawLines - Bounded buffer of raw log lines
+ * @param maxLines - How many lines to show (default: 200)
+ */
+export function renderRawLogView(rawLines: string[], maxLines: number = 200): string {
+  const tail = rawLines.length > maxLines
+    ? rawLines.slice(rawLines.length - maxLines)
+    : rawLines;
+
+  const header = `[Raw Log Output — press 'd' to return to dashboard]`;
+
+  if (tail.length === 0) {
+    return `${header}\n\n  (no log output yet — waiting for ralph to produce output)`;
+  }
+
+  return `${header}\n${tail.join('\n')}`;
+}
+
+/**
+ * Renders the epic detail view content for a given epic.
+ * Returns a placeholder string if epicId is not found in state.
+ *
+ * @param state - Current DashboardState
+ * @param epicId - ID of the epic to show detail for
+ * @param logTail - Pre-fetched log tail string (pass empty string if unavailable)
+ */
+export function renderEpicDetailContent(
+  state: DashboardState,
+  epicId: string | null,
+  logTail: string,
+): string {
+  if (!epicId) return '  (no epic selected)';
+
+  const epic = state.epics.find(e => e.id === epicId);
+  if (!epic) return `  (epic ${epicId} not found)`;
+
+  const sep = '─'.repeat(72);
+
+  // Top section: epic summary
+  const costStr = epic.costActual !== null ? formatCost(epic.costActual) : (epic.costEstimate ?? '--');
+  const timeStr = epic.timeActual ?? (epic.timeEstimate ?? '--');
+
+  const lines: string[] = [
+    `[Epic Detail — press 'q' or Esc to return to dashboard]`,
+    '',
+    `  ${epic.id}: ${epic.title}`,
+    `  Status: ${epic.status}  |  Cost: ${costStr}  |  Time: ${timeStr}`,
+    `  Progress: ${epic.storiesPassed}/${epic.storiesTotal} stories passed`,
+    sep,
+    '  Stories:',
+  ];
+
+  if (epic.stories.length === 0) {
+    lines.push('    (no stories)');
+  } else {
+    epic.stories.forEach((story, i) => {
+      const icon = storyStateIcon(story.state);
+      const num = String(i + 1).padStart(2);
+      const titlePart = story.title.substring(0, 45).padEnd(45);
+      const dur = story.duration ? `  [${story.duration}]` : '';
+
+      let detail = '';
+      if (story.state === 'pass') {
+        detail = `  PASS${dur}`;
+      } else if (story.state === 'fail') {
+        const reason = story.failureReason ? `: ${story.failureReason}` : '';
+        detail = `  FAIL${reason}${dur}`;
+      } else if (story.state === 'building') {
+        detail = '  building...';
+      } else if (story.state === 'validating') {
+        detail = '  validating...';
+      }
+
+      lines.push(`  ${num}. ${icon} ${story.id}  ${titlePart}${detail}`);
+    });
+  }
+
+  lines.push(sep);
+  lines.push('  Recent log (last 15 lines):');
+
+  if (!logTail || logTail.trim() === '') {
+    lines.push('    (no log output available)');
+  } else {
+    const logLines = logTail.split('\n');
+    const tail = logLines.length > 15
+      ? logLines.slice(logLines.length - 15)
+      : logLines;
+    tail.forEach(line => lines.push(`  ${line}`));
+  }
+
+  return lines.join('\n');
 }
 
 /**

@@ -324,6 +324,7 @@ export function buildStateFromFiles(
     selectedEpicId: null,
     rawLogLines: [],
     mergeEvents,
+    awaitingEpicNumber: false,
   };
 }
 

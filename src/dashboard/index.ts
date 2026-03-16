@@ -37,7 +37,7 @@ export function startDashboard(options: DashboardOptions): Dashboard {
     process.exit(0);
   }
 
-  dashScreen = createDashboardScreen(onExit);
+  dashScreen = createDashboardScreen(onExit, options.logsDir);
 
   const poller = createPoller(options, (state: DashboardState) => {
     if (dashScreen) {

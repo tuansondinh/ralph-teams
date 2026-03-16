@@ -3,13 +3,25 @@
  *
  * Creates a blessed screen with:
  *   - Header box: top 3 lines (project name, wave, elapsed time, cost)
- *   - Epic list box: rows 3 to -2 (scrollable)
- *   - Footer box: bottom 1 line (key bindings)
+ *   - Content box: rows 3 to -2 (scrollable, shared by all views)
+ *   - Footer box: bottom 1 line (key bindings, changes per view mode)
+ *
+ * View modes:
+ *   - 'dashboard': epic list with activity
+ *   - 'logs': raw log output from ralph
+ *   - 'epic-detail': detailed story/log view for one epic
  */
 
 import * as blessed from 'blessed';
 import { DashboardState } from './types';
-import { renderHeader, renderEpicList, renderFooter } from './renderer';
+import {
+  renderHeader,
+  renderEpicList,
+  renderFooter,
+  renderRawLogView,
+  renderEpicDetailContent,
+} from './renderer';
+import { findLatestEpicLog, readLogTail } from './activity-parser';
 
 export interface DashboardScreen {
   screen: blessed.Widgets.Screen;
@@ -26,9 +38,17 @@ export interface DashboardScreen {
  * Creates and returns the blessed TUI screen with all widgets.
  * Minimum supported terminal size: 80x24.
  *
- * @param onExit - Callback when user presses q/Escape/C-c
+ * @param onExit - Callback when user presses q/Escape/C-c (from dashboard view)
+ * @param logsDir - Directory containing epic log files (for epic-detail log tail)
  */
-export function createDashboardScreen(onExit: () => void): DashboardScreen {
+export function createDashboardScreen(
+  onExit: () => void,
+  logsDir: string = '',
+): DashboardScreen {
+  // Mutable view state — owned by screen, not the poller
+  let currentState: DashboardState | null = null;
+  let awaitingEpicNumber = false;
+
   const screen = blessed.screen({
     smartCSR: true,
     title: 'Ralph Teams',
@@ -52,7 +72,7 @@ export function createDashboardScreen(onExit: () => void): DashboardScreen {
     content: 'Ralph Teams',
   });
 
-  // Epic list: between header and footer
+  // Content area: between header and footer (shared by all view modes)
   const epicListBox = blessed.box({
     parent: screen,
     top: 3,
@@ -90,14 +110,116 @@ export function createDashboardScreen(onExit: () => void): DashboardScreen {
       fg: 'black',
       bg: 'white',
     },
-    content: renderFooter(),
+    content: renderFooter('dashboard', false),
   });
 
-  // Key bindings
-  screen.key(['q', 'Q', 'escape', 'C-c'], () => {
+  /**
+   * Re-renders the content box and footer based on current view mode.
+   * Called after any state or view mode change.
+   */
+  function render(): void {
+    if (!currentState) {
+      screen.render();
+      return;
+    }
+
+    const state = currentState;
+
+    // Update footer based on view mode and awaitingEpicNumber
+    footerBox.setContent(renderFooter(state.viewMode, awaitingEpicNumber));
+
+    switch (state.viewMode) {
+      case 'logs':
+        epicListBox.setContent(renderRawLogView(state.rawLogLines));
+        // Auto-scroll to bottom for log view
+        epicListBox.setScrollPerc(100);
+        break;
+
+      case 'epic-detail': {
+        const epicId = state.selectedEpicId;
+        let logTail = '';
+        if (epicId && logsDir) {
+          try {
+            const logFile = findLatestEpicLog(logsDir, epicId);
+            if (logFile) {
+              logTail = readLogTail(logFile, 15);
+            }
+          } catch {
+            // silently ignore
+          }
+        }
+        epicListBox.setContent(renderEpicDetailContent(state, epicId, logTail));
+        break;
+      }
+
+      default:
+        epicListBox.setContent(renderEpicList(state));
+        break;
+    }
+
+    screen.render();
+  }
+
+  // ─── Key bindings ──────────────────────────────────────────────────────────
+
+  // Ctrl-C always exits (does not toggle; graceful shutdown)
+  screen.key(['C-c'], () => {
     onExit();
   });
 
+  // 'q' / Escape: exit from dashboard, or return to dashboard from other views
+  screen.key(['q', 'Q', 'escape'], () => {
+    if (!currentState) {
+      onExit();
+      return;
+    }
+    if (currentState.viewMode !== 'dashboard') {
+      currentState = { ...currentState, viewMode: 'dashboard', selectedEpicId: null };
+      awaitingEpicNumber = false;
+      render();
+    } else {
+      onExit();
+    }
+  });
+
+  // 'd': toggle between dashboard and log view
+  screen.key(['d', 'D'], () => {
+    if (!currentState) return;
+    awaitingEpicNumber = false;
+    currentState = {
+      ...currentState,
+      viewMode: currentState.viewMode === 'dashboard' ? 'logs' : 'dashboard',
+      selectedEpicId: currentState.viewMode === 'logs' ? currentState.selectedEpicId : null,
+    };
+    render();
+  });
+
+  // 'e': enter epic selection mode (next digit selects the epic)
+  screen.key(['e', 'E'], () => {
+    if (!currentState) return;
+    awaitingEpicNumber = true;
+    footerBox.setContent(renderFooter(currentState.viewMode, true));
+    screen.render();
+  });
+
+  // Digit keys: select epic if awaitingEpicNumber
+  screen.key(['1', '2', '3', '4', '5', '6', '7', '8', '9'], (ch: string) => {
+    if (!currentState) return;
+    if (awaitingEpicNumber) {
+      const epicIndex = parseInt(ch, 10) - 1;
+      if (epicIndex >= 0 && epicIndex < currentState.epics.length) {
+        currentState = {
+          ...currentState,
+          viewMode: 'epic-detail',
+          selectedEpicId: currentState.epics[epicIndex].id,
+        };
+      }
+      awaitingEpicNumber = false;
+      render();
+    }
+  });
+
+  // Arrow / vim scroll keys
   screen.key(['up', 'k'], () => {
     epicListBox.scroll(-1);
     screen.render();
@@ -108,11 +230,12 @@ export function createDashboardScreen(onExit: () => void): DashboardScreen {
     screen.render();
   });
 
+  // Manual refresh
   screen.key(['r', 'R'], () => {
-    screen.render();
+    render();
   });
 
-  // Give focus to the scrollable list
+  // Give focus to the scrollable content area
   epicListBox.focus();
 
   screen.render();
@@ -120,8 +243,19 @@ export function createDashboardScreen(onExit: () => void): DashboardScreen {
   function update(state: DashboardState): void {
     const headerLines = renderHeader(state);
     headerBox.setContent(headerLines.join('\n'));
-    epicListBox.setContent(renderEpicList(state));
-    screen.render();
+
+    // Preserve view mode across poller updates (poller always sends viewMode: 'dashboard')
+    if (currentState) {
+      currentState = {
+        ...state,
+        viewMode: currentState.viewMode,
+        selectedEpicId: currentState.selectedEpicId,
+      };
+    } else {
+      currentState = state;
+    }
+
+    render();
   }
 
   function destroy(): void {

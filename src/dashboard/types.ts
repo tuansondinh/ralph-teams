@@ -31,6 +31,11 @@ export interface DashboardState {
   rawLogLines: string[];
   /** Merge events parsed from progress.txt (one per epic, latest state) */
   mergeEvents: MergeEvent[];
+  /**
+   * When true, the next numeric key press (1-9) should select an epic for detail view.
+   * Set by pressing 'e', cleared after a digit is pressed or any other key.
+   */
+  awaitingEpicNumber: boolean;
 }
 
 export interface EpicDisplayData {

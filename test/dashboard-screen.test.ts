@@ -325,14 +325,14 @@ test('renderStoryRow shows validating... label for validating state', () => {
 
 test('renderFooter includes quit keybinding', () => {
   const footer = renderFooter();
-  assert.ok(footer.includes('q:quit'), 'footer should include q:quit');
+  assert.ok(footer.includes('quit'), 'footer should include quit');
 });
 
-test('renderFooter includes expected keys', () => {
-  const footer = renderFooter();
-  assert.ok(footer.includes('r:refresh'));
-  assert.ok(footer.includes('d:dashboard'));
-  assert.ok(footer.includes('l:logs'));
+test('renderFooter includes expected keys for dashboard view', () => {
+  const footer = renderFooter('dashboard', false);
+  assert.ok(footer.includes('[d] logs'));
+  assert.ok(footer.includes('[e] epic detail'));
+  assert.ok(footer.includes('[q] quit'));
 });
 
 // ---------------------------------------------------------------------------
