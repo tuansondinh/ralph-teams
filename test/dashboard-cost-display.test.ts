@@ -109,6 +109,9 @@ describe('renderHeader with estimates', () => {
     selectedEpicId: null,
     rawLogLines: [],
     mergeEvents: [],
+    awaitingEpicNumber: false,
+    runComplete: false,
+    retryCount: 0,
   };
 
   it('renders basic two-line header with no estimates', () => {
@@ -404,6 +407,9 @@ describe('renderEpicList with merge events', () => {
     mergeEvents: [
       { epicId: 'EPIC-001', status: 'merged-clean', detail: 'clean' },
     ],
+    awaitingEpicNumber: false,
+    runComplete: false,
+    retryCount: 0,
   };
 
   it('includes merge status line for epic with merge event', () => {

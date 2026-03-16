@@ -19,6 +19,7 @@ Current backends:
 
 - `claude` via the `claude` CLI and `.claude/agents/*.md`
 - `copilot` via `gh copilot` and `.github/agents/*.agent.md`
+- `codex` via the `codex` CLI, repo-local `.codex/agents/*.toml`, and Codex multi-agent mode
 
 ## Flow
 
@@ -36,7 +37,7 @@ flowchart TB
     B -->|No| D[Finish run]
     B -->|Yes| X{Dependency failed?}
     X -->|Yes| K[Mark blocked epic failed]
-    X -->|No| T[Spawn epic worktree and team lead]
+    X -->|No| T[Create epic worktree from loop branch and start team lead]
 
     subgraph CS[Agent session: team agents for one epic]
         direction TB
@@ -71,7 +72,7 @@ flowchart TB
     RF --> P2[Update PRD status and progress log]
     P2 --> G{Epic completed?}
     G -->|No| E
-    G -->|Yes| H[Merge epic branch into target branch]
+    G -->|Yes| H[Merge epic branch back into the run loop branch]
     H --> E
 ```
 
@@ -87,6 +88,9 @@ Backend-specific requirements:
 - Copilot backend:
   - `gh` CLI in `PATH`
   - GitHub Copilot CLI available through `gh copilot`
+- Codex backend:
+  - `codex` CLI in `PATH`
+  - multi-agent feature enabled by the CLI (Ralph passes `--enable multi_agent` automatically)
 
 ## Install
 
@@ -149,6 +153,7 @@ Run `ralph.sh` directly when you want shell-level flags:
 ```bash
 ./ralph.sh prd.json --backend claude
 ./ralph.sh prd.json --backend copilot
+./ralph.sh prd.json --backend codex
 ./ralph.sh prd.json --parallel 2
 ./ralph.sh prd.json --backend copilot --max-epics 1
 ```
@@ -163,6 +168,7 @@ Creates a new `prd.json` interactively in the current directory by launching an 
 ralph-teams init
 ralph-teams init --backend claude
 ralph-teams init --backend copilot
+ralph-teams init --backend codex
 ```
 
 Flow:
@@ -178,7 +184,7 @@ Notes:
 - `init` is grounded by `prd.json.example`
 - the agent generates epics and user stories automatically
 - the agent should aim for about 5 user stories per epic when the scope supports it
-- `--backend` controls whether the interview/generation uses `claude` or `copilot`
+- `--backend` controls whether the interview/generation uses `claude`, `copilot`, or `codex`
 - the discussion itself is handled by the agent, not by a hardcoded questionnaire in the CLI
 
 ### `ralph-teams run [path]`
@@ -189,6 +195,7 @@ Runs Ralph against a PRD file. Default path is `./prd.json`.
 ralph-teams run
 ralph-teams run ./my-prd.json
 ralph-teams run --backend copilot
+ralph-teams run --backend codex
 ralph-teams run --parallel 2
 ```
 
@@ -315,6 +322,25 @@ Notes:
 - Copilot live output is routed through a PTY wrapper in `ralph.sh`
 - without the PTY wrapper, `gh copilot` may not show incremental output in pipe mode
 
+### Codex Backend
+
+Uses:
+
+- `codex exec`
+- `.codex/agents/*.toml`
+- Codex multi-agent mode with repo-local planner, builder, and validator roles
+
+Example:
+
+```bash
+./ralph.sh prd.json --backend codex
+```
+
+Notes:
+
+- Ralph enables Codex multi-agent mode per run, so no global `~/.codex/config.toml` edits are required
+- Codex runs from each epic worktree and is granted write access to the repo root so it can update the shared PRD and result files
+
 ## PRD Format
 
 Example:
@@ -322,7 +348,7 @@ Example:
 ```json
 {
   "project": "MyApp",
-  "branchName": "ralph/my-feature",
+  "branchName": "main",
   "description": "Short description of the project",
   "epics": [
     {
@@ -383,9 +409,13 @@ The current execution contract is:
 - blocked epics are skipped until dependencies are complete
 - runs sequentially by default
 - experimental wave parallelism is enabled only with `--parallel <n>`
+- at run start Ralph creates a fresh loop branch from your current branch
+- each epic gets its own worktree and branch rooted from that loop branch
+- when an epic completes, its branch is merged back into the loop branch
 - the backend team processes one epic per session
 - stories run sequentially inside that epic
 - already-passed stories are skipped
+- rerunning Ralph automatically resets `failed` and `partial` epics back to `pending` so only unfinished work is retried
 - each story gets at most two build/validate cycles
 - the validator checks output independently from the builder's reasoning
 - after writing `results/result-EPIC-xxx.txt`, the team lead must print the same result and exit the session immediately
@@ -415,6 +445,10 @@ Install Claude Code and ensure `claude` is on your `PATH`.
 ### `Error: 'gh' CLI not found`
 
 Install GitHub CLI and ensure `gh` is on your `PATH`.
+
+### `Error: 'codex' CLI not found`
+
+Install Codex CLI and ensure `codex` is on your `PATH`.
 
 ### `Error: GitHub Copilot CLI not available`
 

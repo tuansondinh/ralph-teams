@@ -51,10 +51,16 @@ function makeState(overrides: Partial<DashboardState> = {}): DashboardState {
     startedAt: null,
     epics: [],
     totalCostUsd: null,
+    totalCostEstimate: null,
     totalElapsed: '--',
+    totalTimeEstimate: null,
     viewMode: 'dashboard',
     selectedEpicId: null,
     rawLogLines: [],
+    mergeEvents: [],
+    awaitingEpicNumber: false,
+    runComplete: false,
+    retryCount: 0,
     ...overrides,
   };
 }

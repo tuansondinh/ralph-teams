@@ -183,12 +183,14 @@ export function renderStoryRow(story: StoryDisplayData): string {
 /**
  * Renders the footer key bindings line based on the current view mode.
  *
- * @param viewMode - Current view: 'dashboard', 'logs', or 'epic-detail'
+ * @param viewMode - Current view: 'dashboard', 'logs', 'epic-detail', 'summary', or 'discuss'
  * @param awaitingEpicNumber - When true, show the epic-select prompt
+ * @param hasFailedStories - When true and in summary mode, show the interactive menu
  */
 export function renderFooter(
   viewMode: DashboardState['viewMode'] = 'dashboard',
   awaitingEpicNumber: boolean = false,
+  hasFailedStories: boolean = false,
 ): string {
   if (awaitingEpicNumber) {
     return 'Press epic number (1-9)... [Esc to cancel]';
@@ -198,6 +200,12 @@ export function renderFooter(
       return '[d] dashboard  [q] quit  arrows:scroll';
     case 'epic-detail':
       return '[q/Esc] back to dashboard  arrows:scroll';
+    case 'summary':
+      return hasFailedStories
+        ? '[d] discuss a story  [r] retry all failed  [q] quit'
+        : 'All stories passed! [q] quit';
+    case 'discuss':
+      return 'Type guidance, press Enter to send. Type "done" or press Esc to finish.';
     default:
       return '[d] logs  [e] epic detail  [q] quit  arrows:scroll';
   }

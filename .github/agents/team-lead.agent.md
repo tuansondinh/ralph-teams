@@ -35,11 +35,13 @@ Before starting a story, check the `passes` field in the PRD file.
 - If `passes: false` → process normally.
 
 ### Build Phase
-1. Use the `task` tool to spawn the `builder` agent with:
+1. Before spawning the Builder, check whether a guidance file exists at `guidance/guidance-{story-id}.md` (substituting the actual story ID, e.g. `guidance/guidance-US-003.md`).
+2. Use the `task` tool to spawn the `builder` agent with:
    - The story details and acceptance criteria
    - The relevant section from the implementation plan
    - Any context from previous stories
-2. Wait for Builder to complete and return the commit SHA
+   - **If the guidance file exists**, include this line explicitly: `Guidance file for this story: guidance/guidance-{story-id}.md — read it before implementing and follow the instructions in it.`
+3. Wait for Builder to complete and return the commit SHA
 
 ### Validate Phase
 3. Use the `task` tool to spawn the `validator` agent with:

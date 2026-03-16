@@ -1,6 +1,6 @@
 # Ralph Teams
 
-Ralph is a project manager that spawns AI coding agent teams to implement epics autonomously. Supports Claude Code and GitHub Copilot CLI as backends.
+Ralph is a project manager that spawns AI coding agent teams to implement epics autonomously. Supports Claude Code, GitHub Copilot CLI, and OpenAI Codex as backends.
 
 ## Architecture
 
@@ -43,6 +43,7 @@ See `prd.json.example` for the expected format. Key fields:
 ```bash
 ./ralph.sh prd.json                          # Process all epics (default: claude backend)
 ./ralph.sh prd.json --backend copilot        # Use GitHub Copilot CLI
+./ralph.sh prd.json --backend codex          # Use OpenAI Codex CLI
 ./ralph.sh prd.json --max-epics 1            # Process one epic at a time
 ./ralph.sh prd.json --backend copilot --max-epics 2
 ```
@@ -53,5 +54,6 @@ See `prd.json.example` for the expected format. Key fields:
 |---------|---------|------------|----------------|-------------|
 | `claude` (default) | `claude` CLI | `.claude/agents/*.md` | `Agent` tool | `--dangerously-skip-permissions` |
 | `copilot` | `gh copilot` | `.github/agents/*.agent.md` | `task` tool | `--allow-all --no-ask-user` |
+| `codex` | `codex exec` | `.codex/agents/*.toml` | Codex multi-agent roles | `-a never -s workspace-write` |
 
-Both backends support sub-agent spawning. The team lead spawns planner, builder, and validator as sub-agents using their respective tool systems.
+All backends support sub-agent spawning. The team lead spawns planner, builder, and validator as sub-agents using their respective tool systems.

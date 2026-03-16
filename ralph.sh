@@ -2,7 +2,7 @@
 # Ralph Teams — Project Manager Shell Harness
 # Ralph never writes code. Ralph schedules epics and spawns teams.
 #
-# Usage: ./ralph.sh [prd.json] [--max-epics N] [--backend claude|copilot] [--parallel N]
+# Usage: ./ralph.sh [prd.json] [--max-epics N] [--backend claude|copilot|codex] [--parallel N]
 
 set -euo pipefail
 
@@ -57,8 +57,13 @@ case "$BACKEND" in
     AGENT_FLAGS="copilot -- --agent team-lead --allow-all --no-ask-user --stream on -p"
     STREAM_FORMAT="text"
     ;;
+  codex)
+    AGENT_CMD="codex"
+    AGENT_FLAGS=""
+    STREAM_FORMAT="text"
+    ;;
   *)
-    echo "Error: Unknown backend '$BACKEND'. Use 'claude' or 'copilot'."
+    echo "Error: Unknown backend '$BACKEND'. Use 'claude', 'copilot', or 'codex'."
     exit 1
     ;;
 esac
@@ -79,6 +84,11 @@ if [ "$BACKEND" = "copilot" ]; then
     echo "Error: GitHub Copilot CLI not available. Run 'gh copilot' to install."
     exit 1
   fi
+fi
+
+if [ "$BACKEND" = "codex" ] && ! command -v codex &> /dev/null; then
+  echo "Error: 'codex' CLI not found. Install Codex CLI first."
+  exit 1
 fi
 
 if ! command -v rjq &> /dev/null; then
@@ -203,14 +213,45 @@ fi
 
 # --- Read PRD ---
 PROJECT=$(rjq read "$PRD_FILE" .project)
-BRANCH=$(rjq read "$PRD_FILE" .branchName "")
 TOTAL_EPICS=$(rjq length "$PRD_FILE" .epics)
+
+STATE_FILE="$(cd "$(dirname "$PRD_FILE")" && pwd)/ralph-state.json"
+LOOP_BRANCH_PREFIX="ralph/loop"
+CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+SOURCE_BRANCH="$CURRENT_BRANCH"
+LOOP_BRANCH=""
+
+generate_loop_branch_name() {
+  echo "${LOOP_BRANCH_PREFIX}/$(date +%Y%m%d-%H%M%S)"
+}
+
+if [ -f "$STATE_FILE" ]; then
+  LOOP_BRANCH=$(rjq read "$STATE_FILE" .loopBranch "" 2>/dev/null || echo "")
+  STATE_SOURCE_BRANCH=$(rjq read "$STATE_FILE" .sourceBranch "" 2>/dev/null || echo "")
+  if [ -n "$STATE_SOURCE_BRANCH" ]; then
+    SOURCE_BRANCH="$STATE_SOURCE_BRANCH"
+  fi
+fi
+
+if [ -z "$LOOP_BRANCH" ] && [[ "$CURRENT_BRANCH" == ${LOOP_BRANCH_PREFIX}/* ]]; then
+  LOOP_BRANCH="$CURRENT_BRANCH"
+fi
+
+if [ -z "$CURRENT_BRANCH" ]; then
+  echo "Error: unable to determine the current git branch."
+  exit 1
+fi
+
+if [ -z "$LOOP_BRANCH" ]; then
+  LOOP_BRANCH=$(generate_loop_branch_name)
+fi
 
 echo ""
 echo "========================================================"
 echo "  Ralph Teams — Project Manager"
 echo "  Project: $PROJECT"
-echo "  Branch: ${BRANCH:-<not set>}"
+echo "  Source Branch: ${SOURCE_BRANCH:-<unknown>}"
+echo "  Loop Branch: $LOOP_BRANCH"
 echo "  Epics: $TOTAL_EPICS"
 echo "  Backend: $BACKEND"
 if [ -n "$PARALLEL" ]; then
@@ -223,7 +264,7 @@ echo "========================================================"
 prompt_to_commit_dirty_worktree() {
   local target_branch="$1"
 
-  echo "Worktree has uncommitted changes and Ralph needs to switch to branch '$target_branch'."
+  echo "Worktree has uncommitted changes and Ralph needs to create or switch to branch '$target_branch'."
   echo "Ralph will now stage and commit all current changes before the run."
   git status --short
   printf "Proceed with auto-commit before continuing? [y/N]: "
@@ -242,18 +283,45 @@ prompt_to_commit_dirty_worktree() {
   esac
 }
 
-# --- Ensure correct branch ---
-CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
-if [ -n "$BRANCH" ] && [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
+prompt_to_remove_stale_worktree_dir() {
+  local worktree_path="$1"
+  local branch_name="$2"
+
+  echo "Found a stale worktree directory at '$worktree_path' for branch '$branch_name'." >&2
+  echo "Git does not recognize it as an active worktree, but the directory still exists on disk." >&2
+  printf "Delete the stale directory and recreate the worktree? [y/N]: " >&2
+
+  local response
+  IFS= read -r response || response=""
+  case "$response" in
+    y|Y|yes|YES)
+      rm -rf "$worktree_path"
+      ;;
+    *)
+      echo "Aborted: user declined stale worktree directory removal." >&2
+      exit 1
+      ;;
+  esac
+}
+
+# --- Ensure loop branch exists and is checked out ---
+if [ "$CURRENT_BRANCH" != "$LOOP_BRANCH" ]; then
   if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
-    prompt_to_commit_dirty_worktree "$BRANCH"
+    prompt_to_commit_dirty_worktree "$LOOP_BRANCH"
   fi
-  echo "Switching to branch: $BRANCH"
-  git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH"
+
+  if git show-ref --verify --quiet "refs/heads/${LOOP_BRANCH}"; then
+    echo "Switching to loop branch: $LOOP_BRANCH"
+    git checkout "$LOOP_BRANCH" >/dev/null 2>&1
+  else
+    echo "Creating loop branch: $LOOP_BRANCH (from $CURRENT_BRANCH)"
+    git checkout -b "$LOOP_BRANCH" >/dev/null 2>&1
+  fi
 fi
 
 # --- Worktree Management ---
-# Creates a git worktree at .worktrees/<epic_id> on branch ralph/<epic_id>.
+# Creates a git worktree at .worktrees/<epic_id> on branch ralph/<epic_id>,
+# rooted from the loop branch for this run.
 # If the worktree already exists and is valid (e.g. from an interrupted run),
 # it is reused as-is. Otherwise, any stale entries are cleaned up first.
 create_epic_worktree() {
@@ -267,12 +335,23 @@ create_epic_worktree() {
     return
   fi
 
-  # Remove stale worktree entry if it exists
-  git worktree remove "$worktree_path" --force 2>/dev/null || true
-  # Remove stale branch if it exists
-  git branch -D "$branch_name" 2>/dev/null || true
+  # Prune stale git worktree metadata before cleanup.
+  git worktree prune >/dev/null 2>&1 || true
 
-  git worktree add "$worktree_path" -b "$branch_name" >/dev/null 2>&1
+  # Remove stale worktree entry if it exists
+  git worktree remove "$worktree_path" --force >/dev/null 2>&1 || true
+  # If Git no longer knows about the worktree but the directory is still on disk,
+  # ask before removing the stale directory so a fresh worktree can be created.
+  if [ -d "$worktree_path" ]; then
+    prompt_to_remove_stale_worktree_dir "$worktree_path" "$branch_name"
+  fi
+  # Remove stale branch if it exists
+  git branch -D "$branch_name" >/dev/null 2>&1 || true
+
+  if ! git worktree add "$worktree_path" -b "$branch_name" "$LOOP_BRANCH" >/dev/null 2>&1; then
+    echo "Error: failed to create worktree $worktree_path for $branch_name" >&2
+    exit 1
+  fi
   echo "$worktree_path"
 }
 
@@ -365,6 +444,32 @@ CURRENT_STORY_ID=""
 # Resolve absolute path to PRD file so team lead always has the correct path
 PRD_ABS_PATH="$(cd "$(dirname "$PRD_FILE")" && pwd)/$(basename "$PRD_FILE")"
 ROOT_DIR="$(pwd)"
+CODEX_AGENT_DIR="${ROOT_DIR}/.codex/agents"
+
+run_codex_exec() {
+  local workdir="$1"
+  local prompt="$2"
+  shift 2
+
+  printf '%s' "$prompt" | codex \
+    -a never \
+    exec \
+    -C "$workdir" \
+    -s workspace-write \
+    --skip-git-repo-check \
+    --color never \
+    --enable multi_agent \
+    -c "agents.max_threads=3" \
+    -c "agents.max_depth=2" \
+    -c "agents.planner.description='Implementation planner for Ralph epic execution'" \
+    -c "agents.planner.config_file='${CODEX_AGENT_DIR}/planner.toml'" \
+    -c "agents.builder.description='Implementation builder for a single Ralph story'" \
+    -c "agents.builder.config_file='${CODEX_AGENT_DIR}/builder.toml'" \
+    -c "agents.validator.description='Independent validator for a single Ralph story'" \
+    -c "agents.validator.config_file='${CODEX_AGENT_DIR}/validator.toml'" \
+    "$@" \
+    -
+}
 
 normalize_epic_statuses() {
   local updated=false
@@ -372,6 +477,17 @@ normalize_epic_statuses() {
   for epic_index in $(seq 0 $((TOTAL_EPICS - 1))); do
     local epic_status
     epic_status=$(rjq read "$PRD_FILE" ".epics[$epic_index].status" "pending")
+    local epic_id
+    epic_id=$(rjq read "$PRD_FILE" ".epics[$epic_index].id")
+
+    if [ "$epic_status" = "failed" ] || [ "$epic_status" = "partial" ]; then
+      echo "  [$epic_id] previous status ${epic_status} — resetting to pending for rerun"
+      rjq set "$PRD_FILE" ".epics[$epic_index].status" '"pending"'
+      echo "[$epic_id] RETRY RESET (${epic_status} -> pending) — $(date)" >> "$PROGRESS_FILE"
+      epic_status="pending"
+      updated=true
+    fi
+
     [ "$epic_status" != "pending" ] && continue
 
     local story_count
@@ -382,8 +498,6 @@ normalize_epic_statuses() {
     passed_count=$(rjq count-where "$PRD_FILE" ".epics[$epic_index].userStories" "passes=true")
 
     if [ "$passed_count" -eq "$story_count" ]; then
-      local epic_id
-      epic_id=$(rjq read "$PRD_FILE" ".epics[$epic_index].id")
       echo "  [$epic_id] all stories already pass — marking epic completed"
       rjq set "$PRD_FILE" ".epics[$epic_index].status" '"completed"'
       echo "[$epic_id] AUTO-COMPLETED (all stories already passed) — $(date)" >> "$PROGRESS_FILE"
@@ -470,6 +584,8 @@ save_run_state() {
 {
   "version": 1,
   "prdFile": "${PRD_ABS_PATH}",
+  "sourceBranch": "${SOURCE_BRANCH}",
+  "loopBranch": "${LOOP_BRANCH}",
   "currentWave": ${CURRENT_WAVE},
   "activeEpics": ${active_epic_ids},
   "backend": "${BACKEND}",
@@ -594,8 +710,11 @@ $EPIC_JSON
 
 ## Instructions
 1. Spawn the Planner first and wait for the plan to be written to plans/plan-${EPIC_ID}.md
+   - If your agent runtime supports named sub-agents, use the dedicated planner role for this
 2. Process ALL user stories in priority order — do NOT stop until every story has been attempted
 3. For each story: check if passes=true in the PRD (skip those — they are already done), then Builder implements → Validator verifies → max 2 total cycles
+   - If your agent runtime supports named sub-agents, use the dedicated builder and validator roles for these handoffs
+   - Before assigning each story, check if guidance/guidance-{story-id}.md exists (e.g. guidance/guidance-US-003.md). If it does, explicitly include this in your Builder assignment: Guidance file for this story: guidance/guidance-{story-id}.md — read it before implementing and follow the instructions in it.
 4. Document any failures and move on to the next story
 5. When ALL stories have been processed (or skipped because already passed), write your result to: $RESULT_FILE
    - Write ONLY one line: PASS, PARTIAL, or FAIL with details
@@ -618,6 +737,10 @@ Begin."
     (
       echo "$TEAM_PROMPT" | $AGENT_CMD $AGENT_FLAGS > "$EPIC_LOG" 2>&1
     ) &
+  elif [ "$BACKEND" = "codex" ]; then
+    (
+      run_codex_exec "$WORKTREE_ABS_PATH" "$TEAM_PROMPT" --add-dir "$ROOT_DIR" > "$EPIC_LOG" 2>&1
+    ) &
   else
     (
       COPILOT_TEAM_PROMPT="$TEAM_PROMPT" \
@@ -629,7 +752,7 @@ Begin."
   LAST_SPAWN_LOG="$EPIC_LOG"
 }
 
-# merge_wave: merges completed epic branches back to the target branch sequentially.
+# merge_wave: merges completed epic branches back to the loop branch sequentially.
 # Takes epic IDs as arguments. Clean merges succeed without AI intervention.
 # On conflict, spawns the merger agent. Logs all outcomes to progress.txt.
 merge_wave() {
@@ -640,12 +763,14 @@ merge_wave() {
   fi
 
   echo ""
-  echo "  --- Merging completed epic branches ---"
+  echo "  --- Merging completed epic branches into ${LOOP_BRANCH} ---"
 
   local merge_failures=0
-  local target_branch
-  target_branch=$(rjq read "$PRD_FILE" .branchName "")
-  [ -z "$target_branch" ] && target_branch=$(git branch --show-current)
+  local target_branch="$LOOP_BRANCH"
+
+  if [ "$(git branch --show-current 2>/dev/null || echo "")" != "$target_branch" ]; then
+    git checkout "$target_branch" >/dev/null 2>&1
+  fi
 
   for epic_id in "${completed_epic_ids[@]}"; do
     local branch_name="ralph/${epic_id}"
@@ -703,6 +828,9 @@ Begin resolving."
           COPILOT_MERGE_PROMPT="$merge_prompt" \
             script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent merger --allow-all --no-ask-user --stream on -p "$COPILOT_MERGE_PROMPT"' \
             > "$merge_log" 2>&1 || true
+          ;;
+        codex)
+          run_codex_exec "$ROOT_DIR" "$merge_prompt" > "$merge_log" 2>&1 || true
           ;;
       esac
 

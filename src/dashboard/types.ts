@@ -13,6 +13,29 @@ export interface DashboardOptions {
   progressPath: string;
   /** How frequently to poll data files in milliseconds (default: 1500) */
   pollIntervalMs: number;
+  /**
+   * Directory in which to write guidance files for failed stories.
+   * Guidance files are written as `guidance-<storyId>.md` when the user
+   * exits discuss mode (e.g. `guidance/guidance-US-003.md`).
+   * If empty, guidance is not persisted.
+   */
+  guidanceDir: string;
+}
+
+/**
+ * Callbacks invoked when the user interacts with the post-run menu
+ * (shown in summary view when there are failed stories).
+ */
+export interface PostRunCallbacks {
+  /**
+   * Called when the user presses 'd' to discuss a failed story.
+   * Receives the storyId of the first failed story (or empty string if unavailable).
+   */
+  onDiscuss: (storyId: string) => void;
+  /** Called when the user presses 'r' to retry all failed stories. */
+  onRetry: () => void;
+  /** Called when the user presses 'q' to quit after the run is complete. */
+  onQuit: () => void;
 }
 
 export interface DashboardState {
@@ -26,11 +49,19 @@ export interface DashboardState {
   totalElapsed: string;
   /** Estimated total time string from run stats, e.g. '12m 30s' or '--' */
   totalTimeEstimate: string | null;
-  viewMode: 'dashboard' | 'logs' | 'epic-detail';
+  viewMode: 'dashboard' | 'logs' | 'epic-detail' | 'summary' | 'discuss';
   selectedEpicId: string | null;
   rawLogLines: string[];
   /** Merge events parsed from progress.txt (one per epic, latest state) */
   mergeEvents: MergeEvent[];
+  /** True when all epics have reached a terminal state (completed/failed/partial/merge-failed) */
+  runComplete: boolean;
+  /**
+   * Number of retry rounds completed so far (0 = first run, 1 = after first
+   * retry, etc.). Incremented by the retry controller when a new round starts.
+   * Used to display a "Retry #N" label in the summary view.
+   */
+  retryCount: number;
   /**
    * When true, the next numeric key press (1-9) should select an epic for detail view.
    * Set by pressing 'e', cleared after a digit is pressed or any other key.
@@ -90,3 +121,12 @@ export interface MergeEvent {
   status: 'merging' | 'merged-clean' | 'merged-ai' | 'merge-failed';
   detail: string;
 }
+
+/**
+ * A single message in the discuss conversation thread.
+ *   - 'context': auto-generated system message shown at the top (failure summary)
+ *   - 'user': guidance typed by the user
+ *
+ * Re-exported from views/discuss-view for convenience.
+ */
+export type { DiscussMessage } from './views/discuss-view';

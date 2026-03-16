@@ -244,6 +244,19 @@ export function parseWaveFromProgress(content: string): number {
 }
 
 /**
+ * Returns true if every epic in the list has reached a terminal state.
+ * Terminal states: 'completed', 'failed', 'partial', 'merge-failed'.
+ * Returns false if epics array is empty (run hasn't started yet).
+ *
+ * @param epics - EpicDisplayData array from the current dashboard state
+ */
+export function isRunComplete(epics: import('./types').EpicDisplayData[]): boolean {
+  if (epics.length === 0) return false;
+  const terminalStates = new Set(['completed', 'failed', 'partial', 'merge-failed']);
+  return epics.every(e => terminalStates.has(e.status));
+}
+
+/**
  * Computes a total elapsed time string from a run stats startedAt value.
  * Returns '--' if no start time is available.
  */
@@ -333,6 +346,8 @@ export function buildStateFromFiles(
     rawLogLines: [],
     mergeEvents,
     awaitingEpicNumber: false,
+    runComplete: isRunComplete(epics),
+    retryCount: 0,
   };
 }
 

@@ -15,7 +15,7 @@ export interface RalphConfig {
     validatorMaxPushbacks: number;
     /** Max epics to run in parallel (0 = unlimited). Default: 0. */
     parallel: number;
-    /** AI backend to use: 'claude' or 'copilot'. Default: 'claude'. */
+    /** AI backend to use: 'claude', 'copilot', or 'codex'. Default: 'claude'. */
     backend: string;
   };
   pricing: {
@@ -127,8 +127,8 @@ export function validateConfig(raw: unknown): { config: RalphConfig; errors: str
 
       if ('backend' in e) {
         const v = e['backend'];
-        if (v !== 'claude' && v !== 'copilot') {
-          errors.push(`execution.backend must be 'claude' or 'copilot', got '${v}'`);
+        if (v !== 'claude' && v !== 'copilot' && v !== 'codex') {
+          errors.push(`execution.backend must be 'claude', 'copilot', or 'codex', got '${v}'`);
         } else {
           config.execution.backend = v;
         }
