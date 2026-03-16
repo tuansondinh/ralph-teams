@@ -19,7 +19,7 @@ const program = new Command();
 program
   .name('ralph-teams')
   .description(chalk.bold('CLI for Ralph Teams'))
-  .version('0.1.1');
+  .version('0.1.2');
 
 program
   .command('status [path]')
@@ -42,8 +42,8 @@ program
   .option('--backend <backend>', 'AI backend to use (claude or copilot)', 'claude')
   .option('--parallel <n>', 'Max epics to run in parallel per wave (default: sequential)')
   .option('--no-dashboard', 'Disable TUI dashboard, show raw output')
-  .action((prdPath: string = './prd.json', options: { backend?: string; parallel?: string; dashboard?: boolean }) => {
-    runCommand(prdPath, options);
+  .action(async (prdPath: string = './prd.json', options: { backend?: string; parallel?: string; dashboard?: boolean }) => {
+    await runCommand(prdPath, options);
   });
 
 program

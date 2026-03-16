@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync, spawn, SpawnSyncReturns, ChildProcess } from 'child_process';
+import * as readline from 'readline/promises';
 import chalk from 'chalk';
 import { loadConfig, mergeCliOverrides } from '../config';
 import { startDashboard, resolveDashboardOptions } from '../dashboard';
@@ -56,11 +57,90 @@ function parseParallel(parallel: string): number | null {
   return parseInt(parallel, 10);
 }
 
-export function runCommand(
+function readBranchNameFromPrd(prdPath: string): string | null {
+  try {
+    const prd = JSON.parse(fs.readFileSync(prdPath, 'utf-8')) as { branchName?: unknown };
+    return typeof prd.branchName === 'string' && prd.branchName.trim() !== ''
+      ? prd.branchName
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function getCurrentGitBranch(deps: RunDeps): string | null {
+  const result = deps.spawnSync('git', ['branch', '--show-current'], {
+    encoding: 'utf-8',
+  });
+
+  if (result.status !== 0) {
+    return null;
+  }
+
+  const stdout = typeof result.stdout === 'string' ? result.stdout.trim() : '';
+  return stdout === '' ? null : stdout;
+}
+
+function hasDirtyGitWorktree(deps: RunDeps): boolean {
+  const unstaged = deps.spawnSync('git', ['diff', '--quiet']);
+  if (unstaged.status !== 0) {
+    return true;
+  }
+
+  const staged = deps.spawnSync('git', ['diff', '--cached', '--quiet']);
+  return staged.status !== 0;
+}
+
+async function promptForAutoCommit(targetBranch: string, deps: RunDeps): Promise<boolean> {
+  console.log(`Worktree has uncommitted changes and Ralph needs to switch to branch '${targetBranch}'.`);
+  console.log('Ralph will now stage and commit all current changes before the run.');
+
+  const statusResult = deps.spawnSync('git', ['status', '--short'], {
+    encoding: 'utf-8',
+  });
+  if (statusResult.status === 0 && typeof statusResult.stdout === 'string' && statusResult.stdout.trim() !== '') {
+    process.stdout.write(statusResult.stdout);
+  }
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  try {
+    const answer = await rl.question('Proceed with auto-commit before continuing? [y/N]: ');
+    const normalized = answer.trim().toLowerCase();
+    if (normalized !== 'y' && normalized !== 'yes') {
+      return false;
+    }
+  } finally {
+    rl.close();
+  }
+
+  const addResult = deps.spawnSync('git', ['add', '-A'], {
+    stdio: 'inherit',
+  });
+  if (addResult.status !== 0) {
+    console.error(chalk.red('Error: failed to stage changes before starting Ralph.'));
+    deps.exit(addResult.status ?? 1);
+  }
+
+  const commitResult = deps.spawnSync('git', ['commit', '-m', 'chore: auto-commit changes before ralph run'], {
+    stdio: 'inherit',
+  });
+  if (commitResult.status !== 0) {
+    console.error(chalk.red('Error: failed to auto-commit changes before starting Ralph.'));
+    deps.exit(commitResult.status ?? 1);
+  }
+
+  return true;
+}
+
+export async function runCommand(
   prdPath: string,
   options: { backend?: string; parallel?: string; dashboard?: boolean },
   deps: RunDeps = defaultDeps,
-): void {
+): Promise<void> {
   const resolved = path.resolve(prdPath);
   const parallel = options.parallel;
   // Commander sets --no-dashboard as dashboard: false, default is true
@@ -91,6 +171,7 @@ export function runCommand(
   // config is always defined here (exit called on error), but TypeScript needs this assertion
   const resolvedConfig = config!;
   const backend = resolvedConfig.execution.backend;
+  const targetBranch = readBranchNameFromPrd(resolved);
 
   if (backend === 'claude' && !isCommandInstalled('claude', deps)) {
     console.error(chalk.red('Error: claude CLI is not installed or not in PATH.'));
@@ -157,6 +238,17 @@ export function runCommand(
     RALPH_PARALLEL: String(resolvedConfig.execution.parallel),
     RALPH_BACKEND: resolvedConfig.execution.backend,
   };
+
+  if (useDashboard && targetBranch) {
+    const currentBranch = getCurrentGitBranch(deps);
+    if (currentBranch !== null && currentBranch !== targetBranch && hasDirtyGitWorktree(deps)) {
+      const confirmed = await promptForAutoCommit(targetBranch, deps);
+      if (!confirmed) {
+        console.log('Aborted: user declined auto-commit before run.');
+        deps.exit(1);
+      }
+    }
+  }
 
   if (!useDashboard) {
     // --no-dashboard: fall back to synchronous spawnSync with stdio:inherit
