@@ -7,7 +7,8 @@
 
 import * as path from 'path';
 import { DashboardOptions, DashboardState, PostRunCallbacks } from './types';
-import { createDashboardScreen, DashboardScreen } from './screen';
+import { createDashboardScreen, DashboardScreen, RetryController } from './screen';
+export type { RetryController };
 import { createPoller } from './poller';
 
 /** Handle returned by startDashboard for cleanup. */
@@ -26,7 +27,7 @@ export interface Dashboard {
  * @param postRunCallbacks - Optional callbacks for the post-run interactive menu
  * @returns Dashboard handle with a stop() method
  */
-export function startDashboard(options: DashboardOptions, postRunCallbacks?: PostRunCallbacks): Dashboard {
+export function startDashboard(options: DashboardOptions, postRunCallbacks?: PostRunCallbacks, retryController?: RetryController): Dashboard {
   let dashScreen: DashboardScreen | null = null;
 
   function onExit(): void {
@@ -46,6 +47,7 @@ export function startDashboard(options: DashboardOptions, postRunCallbacks?: Pos
     /* getProgressContent */ undefined,
     /* worktreesDir */ '',
     options.guidanceDir,
+    retryController,
   );
 
   const poller = createPoller(options, (state: DashboardState) => {

@@ -111,6 +111,7 @@ describe('renderHeader with estimates', () => {
     mergeEvents: [],
     awaitingEpicNumber: false,
     runComplete: false,
+    retryCount: 0,
   };
 
   it('renders basic two-line header with no estimates', () => {
@@ -408,6 +409,7 @@ describe('renderEpicList with merge events', () => {
     ],
     awaitingEpicNumber: false,
     runComplete: false,
+    retryCount: 0,
   };
 
   it('includes merge status line for epic with merge event', () => {

@@ -66,6 +66,7 @@ function makeState(overrides: Partial<DashboardState> = {}): DashboardState {
     mergeEvents: [],
     awaitingEpicNumber: false,
     runComplete: false,
+    retryCount: 0,
     ...overrides,
   };
 }

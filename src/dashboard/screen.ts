@@ -16,6 +16,17 @@
 
 import * as blessed from 'blessed';
 import { DashboardState, PostRunCallbacks } from './types';
+
+/**
+ * Controls retry behaviour from within the dashboard.
+ * Implemented in run.ts and injected into the screen.
+ */
+export interface RetryController {
+  /** Resets failed epics in the PRD and re-spawns ralph.sh. */
+  retryFailed(): void;
+  /** Returns true when a retry round is currently in progress. */
+  isRetrying(): boolean;
+}
 import {
   renderHeader,
   renderEpicList,
@@ -55,6 +66,7 @@ export interface DashboardScreen {
  * @param getProgressContent - Optional getter returning the latest raw progress.txt content
  * @param worktreesDir - Base directory for git worktrees (for code diff loading)
  * @param guidanceDir - Directory in which to persist guidance files when discuss exits
+ * @param retryController - Optional controller for the 'r' retry action in summary view
  */
 export function createDashboardScreen(
   onExit: () => void,
@@ -64,6 +76,7 @@ export function createDashboardScreen(
   getProgressContent?: () => string | null,
   worktreesDir: string = '',
   guidanceDir: string = '',
+  retryController?: RetryController,
 ): DashboardScreen {
   // Mutable view state — owned by screen, not the poller
   let currentState: DashboardState | null = null;
@@ -487,7 +500,9 @@ export function createDashboardScreen(
   });
 
   // 'r': context-sensitive
-  //   - summary mode with failed stories → invoke onRetry callback (or no-op stub)
+  //   - summary mode with failed stories + retryController → start retry round:
+  //       call retryFailed(), switch to dashboard view, reset summaryShown flag
+  //   - summary mode with failed stories + postRunCallbacks → invoke onRetry callback
   //   - other modes → manual refresh
   screen.key(['r', 'R'], () => {
     if (!currentState) {
@@ -495,10 +510,23 @@ export function createDashboardScreen(
       return;
     }
     if (currentState.viewMode === 'summary') {
-      if (computeHasFailedStories(currentState) && postRunCallbacks) {
-        postRunCallbacks.onRetry();
+      if (computeHasFailedStories(currentState)) {
+        if (retryController && !retryController.isRetrying()) {
+          // Reset summaryShown so the dashboard re-auto-transitions when the retry
+          // round completes and all epics are back in a terminal state.
+          summaryShown = false;
+          currentState = {
+            ...currentState,
+            viewMode: 'dashboard',
+            retryCount: (currentState.retryCount ?? 0) + 1,
+          };
+          retryController.retryFailed();
+          render();
+        } else if (postRunCallbacks) {
+          postRunCallbacks.onRetry();
+        }
       }
-      // no-op when no callbacks or no failures
+      // no-op when no failures or already retrying
       return;
     }
     render();

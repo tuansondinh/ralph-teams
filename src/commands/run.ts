@@ -4,8 +4,9 @@ import { spawnSync, spawn, SpawnSyncReturns, ChildProcess } from 'child_process'
 import * as readline from 'readline/promises';
 import chalk from 'chalk';
 import { loadConfig, mergeCliOverrides } from '../config';
-import { startDashboard, resolveDashboardOptions } from '../dashboard';
+import { startDashboard, resolveDashboardOptions, RetryController } from '../dashboard';
 import { gatherDiscussContext, runDiscussSession } from '../discuss';
+import { resetFailedEpics } from '../retry-controller';
 
 interface RunDeps {
   existsSync: typeof fs.existsSync;
@@ -124,6 +125,23 @@ async function promptForAutoCommit(targetBranch: string, deps: RunDeps): Promise
   }
 
   return true;
+}
+
+/**
+ * Spawns ralph.sh as a child process with piped stdio.
+ * Extracted so it can be reused for retry rounds.
+ */
+function spawnRalph(
+  ralphSh: string,
+  args: string[],
+  spawnEnv: NodeJS.ProcessEnv,
+  deps: RunDeps,
+): ChildProcess {
+  return deps.spawn(ralphSh, args, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: false,
+    env: spawnEnv,
+  });
 }
 
 export async function runCommand(
@@ -322,23 +340,65 @@ export async function runCommand(
       },
     };
 
-    const dashboard = startDashboard(dashboardOptions, postRunCallbacks);
+    // Track the active child process so we can terminate it on retry.
+    let activeChild: ChildProcess | null = null;
+    let retrying = false;
 
-    const child: ChildProcess = deps.spawn(ralphSh, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: false,
-      env: spawnEnv,
-    });
+    /**
+     * Attaches close/error handlers to a ralph child process.
+     * On close: if a retry is in progress the handler is a no-op (the
+     * retry spawned a new child already). Otherwise exit.
+     */
+    function wireChild(child: ChildProcess): void {
+      activeChild = child;
 
-    child.on('close', (code: number | null) => {
-      dashboard.stop();
-      deps.exit(code ?? 1);
-    });
+      child.on('close', (code: number | null) => {
+        // If a retry round just started, this is the old child finishing — ignore.
+        if (retrying) {
+          retrying = false;
+          return;
+        }
+        dashboard.stop();
+        deps.exit(code ?? 0);
+      });
 
-    child.on('error', (err: Error) => {
-      dashboard.stop();
-      console.error(chalk.red(`Error: ${err.message}`));
-      deps.exit(1);
-    });
+      child.on('error', (err: Error) => {
+        if (retrying) return;
+        dashboard.stop();
+        console.error(chalk.red(`Error: ${err.message}`));
+        deps.exit(1);
+      });
+    }
+
+    const retryController: RetryController = {
+      retryFailed() {
+        retrying = true;
+        // Reset failed/partial epics in the PRD so ralph re-processes them
+        try {
+          resetFailedEpics(resolved);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(chalk.red(`Retry: failed to reset PRD: ${msg}`));
+          retrying = false;
+          return;
+        }
+        // Terminate the old child process if it's still running
+        if (activeChild && !activeChild.killed) {
+          activeChild.kill();
+        }
+        // Spawn a new ralph round
+        const newChild = spawnRalph(ralphSh!, args, spawnEnv, deps);
+        wireChild(newChild);
+      },
+
+      isRetrying() {
+        return retrying;
+      },
+    };
+
+    const dashboard = startDashboard(dashboardOptions, postRunCallbacks, retryController);
+
+    const initialChild = spawnRalph(ralphSh!, args, spawnEnv, deps);
+    wireChild(initialChild);
   }
 }

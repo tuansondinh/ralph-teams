@@ -57,6 +57,12 @@ export interface DashboardState {
   /** True when all epics have reached a terminal state (completed/failed/partial/merge-failed) */
   runComplete: boolean;
   /**
+   * Number of retry rounds completed so far (0 = first run, 1 = after first
+   * retry, etc.). Incremented by the retry controller when a new round starts.
+   * Used to display a "Retry #N" label in the summary view.
+   */
+  retryCount: number;
+  /**
    * When true, the next numeric key press (1-9) should select an epic for detail view.
    * Set by pressing 'e', cleared after a digit is pressed or any other key.
    */

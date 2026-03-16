@@ -347,6 +347,7 @@ export function buildStateFromFiles(
     mergeEvents,
     awaitingEpicNumber: false,
     runComplete: isRunComplete(epics),
+    retryCount: 0,
   };
 }
 
