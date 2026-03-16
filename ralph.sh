@@ -254,11 +254,18 @@ fi
 
 # --- Worktree Management ---
 # Creates a git worktree at .worktrees/<epic_id> on branch ralph/<epic_id>.
-# Deletes any stale branch/worktree from a prior run first.
+# If the worktree already exists and is valid (e.g. from an interrupted run),
+# it is reused as-is. Otherwise, any stale entries are cleaned up first.
 create_epic_worktree() {
   local epic_id="$1"
   local branch_name="ralph/${epic_id}"
   local worktree_path=".worktrees/${epic_id}"
+
+  # Reuse existing worktree if it is already registered and present on disk
+  if [ -d "$worktree_path" ] && git worktree list | grep -q "$worktree_path"; then
+    echo "$worktree_path"
+    return
+  fi
 
   # Remove stale worktree entry if it exists
   git worktree remove "$worktree_path" --force 2>/dev/null || true
