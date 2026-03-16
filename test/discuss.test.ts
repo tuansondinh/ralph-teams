@@ -497,4 +497,24 @@ describe('runDiscussSession', () => {
       'prompt should instruct AI to converse about the failure',
     );
   });
+
+  it('persists guidance to guidance/guidance-<storyId>.md when guidanceDir is provided', async () => {
+    const tmpDir = makeTempDir();
+    const guidanceDir = path.join(tmpDir, 'guidance');
+    const { spawner } = makeMockSpawner('Follow the validator report');
+
+    try {
+      await runDiscussSession(baseContext, { spawnAgent: spawner, guidanceDir });
+
+      const savedPath = path.join(guidanceDir, 'guidance-US-018.md');
+      assert.equal(fs.existsSync(savedPath), true);
+
+      const content = fs.readFileSync(savedPath, 'utf-8');
+      assert.match(content, /## Failure Context/);
+      assert.match(content, /## User Instructions/);
+      assert.match(content, /Follow the validator report/);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

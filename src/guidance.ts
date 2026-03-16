@@ -5,9 +5,9 @@
  * is saved to a file so the Builder agent can incorporate it on the next run.
  *
  * Guidance files are written to:
- *   <guidanceDir>/<storyId>.md   (default guidanceDir: 'guidance')
+ *   <guidanceDir>/guidance-<storyId>.md   (default guidanceDir: 'guidance')
  * e.g.
- *   guidance/US-003.md
+ *   guidance/guidance-US-003.md
  *
  * Pure I/O module — no TUI or dashboard dependencies.
  */
@@ -27,9 +27,13 @@ const DEFAULT_GUIDANCE_DIR = 'guidance';
  *
  * @param storyId    - Story ID, e.g. 'US-003'
  * @param guidanceDir - Directory in which guidance files are stored (default: 'guidance')
- * @returns Path: `<guidanceDir>/<storyId>.md`
+ * @returns Path: `<guidanceDir>/guidance-<storyId>.md`
  */
 export function getGuidancePath(storyId: string, guidanceDir: string = DEFAULT_GUIDANCE_DIR): string {
+  return path.join(guidanceDir, `guidance-${storyId}.md`);
+}
+
+function getLegacyGuidancePath(storyId: string, guidanceDir: string = DEFAULT_GUIDANCE_DIR): string {
   return path.join(guidanceDir, `${storyId}.md`);
 }
 
@@ -110,12 +114,19 @@ export function saveGuidance(
  * @returns The guidance file contents, or null if the file does not exist
  */
 export function loadGuidance(storyId: string, guidanceDir: string = DEFAULT_GUIDANCE_DIR): string | null {
-  const filePath = getGuidancePath(storyId, guidanceDir);
   try {
-    if (!fs.existsSync(filePath)) {
-      return null;
+    const candidatePaths = [
+      getGuidancePath(storyId, guidanceDir),
+      getLegacyGuidancePath(storyId, guidanceDir),
+    ];
+
+    for (const filePath of candidatePaths) {
+      if (fs.existsSync(filePath)) {
+        return fs.readFileSync(filePath, 'utf-8');
+      }
     }
-    return fs.readFileSync(filePath, 'utf-8');
+
+    return null;
   } catch {
     return null;
   }

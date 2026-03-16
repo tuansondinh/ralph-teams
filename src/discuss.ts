@@ -61,7 +61,7 @@ export interface DiscussSessionOptions {
   spawnAgent?: AgentSpawner;
   /**
    * Directory in which to persist the guidance file after the session ends.
-   * When provided, the guidance is saved to `<guidanceDir>/<storyId>.md`.
+   * When provided, the guidance is saved to `<guidanceDir>/guidance-<storyId>.md`.
    * Defaults to 'guidance' if not specified.
    */
   guidanceDir?: string;
@@ -475,7 +475,7 @@ export async function runDiscussSession(
   process.stdout.write('\n');
 
   // Persist guidance to disk so the Builder can incorporate it on the next run.
-  // Saved to guidance/<storyId>.md (or <guidanceDir>/<storyId>.md if overridden).
+  // Saved to guidance/guidance-<storyId>.md (or <guidanceDir>/guidance-<storyId>.md if overridden).
   const guidancePath = saveGuidance(
     context.storyId,
     {

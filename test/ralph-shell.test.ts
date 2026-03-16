@@ -9,6 +9,37 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const scriptPath = path.join(repoRoot, 'ralph.sh');
 
+test('ralph.sh instructs the team lead to pass the canonical guidance file path to Builder', () => {
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+
+  assert.match(
+    script,
+    /Guidance file for this story: guidance\/guidance-\{story-id\}\.md/,
+  );
+  assert.match(
+    script,
+    /read it before implementing and follow the instructions in it/,
+  );
+});
+
+test('agent prompt assets reference the canonical guidance file path', () => {
+  const promptFiles = [
+    '.github/agents/team-lead.agent.md',
+    '.github/agents/builder.agent.md',
+    '.claude/agents/team-lead.md',
+    '.claude/agents/builder.md',
+  ];
+
+  for (const relativePath of promptFiles) {
+    const content = fs.readFileSync(path.join(repoRoot, relativePath), 'utf-8');
+    assert.match(
+      content,
+      /guidance\/guidance-\{story-id\}\.md|guidance\/guidance-US-003\.md/,
+      `${relativePath} should use the canonical guidance filename`,
+    );
+  }
+});
+
 function setupTempRepo() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-shell-'));
   const binDir = path.join(tempDir, 'bin');
