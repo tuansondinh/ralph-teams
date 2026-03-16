@@ -741,6 +741,14 @@ Begin resolving."
 }
 
 WAVE_NUM=0
+
+# Count total stories across all epics for running estimate calculations
+TOTAL_STORIES=0
+for i in $(seq 0 $((TOTAL_EPICS - 1))); do
+  sc=$(rjq length "$PRD_FILE" ".epics[$i].userStories")
+  TOTAL_STORIES=$((TOTAL_STORIES + sc))
+done
+
 while true; do
   # Find all epics ready for this wave
   WAVE_EPICS=()
@@ -927,6 +935,7 @@ while true; do
             --log-file "${active_logs[$slot]}" \
             --passed "$epic_passed" \
             --backend "$BACKEND" \
+            --stories-total "$TOTAL_STORIES" \
             ${_started_at:+--started-at "$_started_at"} \
             ${_completed_at:+--completed-at "$_completed_at"} 2>/dev/null || true
           unset 'active_pids[$slot]'

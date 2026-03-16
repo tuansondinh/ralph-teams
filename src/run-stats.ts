@@ -334,6 +334,65 @@ export function aggregateTotalStats(epics: EpicStats[]): RunStats['totals'] {
 }
 
 // ---------------------------------------------------------------------------
+// Estimates
+// ---------------------------------------------------------------------------
+
+/**
+ * Calculates running cost and time estimates based on completed story averages.
+ *
+ * Formula: estimatedTotal = actualCostSoFar + (avgCostPerStory * storiesRemaining)
+ * Same formula applied to time.
+ *
+ * Before any story with cost data completes, returns '--' strings and null numerics.
+ *
+ * @param stats - Current RunStats (after latest update)
+ * @param totalStoriesInRun - Total number of stories across all epics in this run
+ */
+export function calculateEstimates(stats: RunStats, totalStoriesInRun: number): RunStats['estimates'] {
+  // Only stories with cost data count toward the average
+  const completedStories = stats.epics.flatMap(e => e.stories).filter(s => s.costUsd !== null);
+  const completedCount = completedStories.length;
+
+  if (completedCount === 0) {
+    return {
+      estimatedTotalCostUsd: '--',
+      estimatedTotalTimeMs: null,
+      estimatedTotalTimeFormatted: '--',
+      averageCostPerStory: null,
+      averageTimePerStoryMs: null,
+      storiesRemaining: totalStoriesInRun,
+    };
+  }
+
+  const totalCostSoFar = completedStories.reduce((sum, s) => sum + (s.costUsd ?? 0), 0);
+  const avgCost = totalCostSoFar / completedCount;
+  const remaining = Math.max(0, totalStoriesInRun - completedCount);
+  const estimatedTotal = totalCostSoFar + (avgCost * remaining);
+
+  // Time estimates — only stories that have durationMs contribute
+  const storiesWithTime = completedStories.filter(s => s.durationMs !== null);
+  let avgTime: number | null = null;
+  let estimatedTimeMs: number | null = null;
+  let estimatedTimeFormatted: string | null = '--';
+
+  if (storiesWithTime.length > 0) {
+    const totalTimeSoFar = storiesWithTime.reduce((sum, s) => sum + (s.durationMs ?? 0), 0);
+    avgTime = totalTimeSoFar / storiesWithTime.length;
+    estimatedTimeMs = totalTimeSoFar + (avgTime * remaining);
+    estimatedTimeFormatted = formatDuration(estimatedTimeMs);
+  }
+
+  return {
+    estimatedTotalCostUsd: `$${estimatedTotal.toFixed(2)}`,
+    estimatedTotalTimeMs: estimatedTimeMs,
+    estimatedTotalTimeFormatted: estimatedTimeFormatted,
+    averageCostPerStory: avgCost,
+    averageTimePerStoryMs: avgTime,
+    storiesRemaining: remaining,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Update entry point
 // ---------------------------------------------------------------------------
 
@@ -345,8 +404,10 @@ export function aggregateTotalStats(epics: EpicStats[]): RunStats['totals'] {
  *
  * @param stats - Current RunStats (from loadRunStats)
  * @param storyStats - New or updated story data to upsert
+ * @param totalStoriesInRun - Total stories across all epics (for estimate calculation).
+ *   If omitted, defaults to the number of stories already tracked in the stats.
  */
-export function updateStoryStats(stats: RunStats, storyStats: StoryStats): RunStats {
+export function updateStoryStats(stats: RunStats, storyStats: StoryStats, totalStoriesInRun?: number): RunStats {
   const { epicId, storyId } = storyStats;
 
   // Find or create the epic entry
@@ -376,10 +437,19 @@ export function updateStoryStats(stats: RunStats, storyStats: StoryStats): RunSt
   // Recalculate totals (time fields derived from epic timestamps)
   const mergedTotals = aggregateTotalStats(updatedEpics);
 
-  return {
+  // Build an intermediate stats object to pass to calculateEstimates
+  const intermediate: RunStats = {
     ...stats,
     updatedAt: new Date().toISOString(),
     epics: updatedEpics,
     totals: mergedTotals,
   };
+
+  // Count total stories: use provided value, else fall back to stories already tracked
+  const allTrackedStories = updatedEpics.flatMap(e => e.stories).length;
+  const storiesTotalForEstimate = totalStoriesInRun ?? allTrackedStories;
+
+  const estimates = calculateEstimates(intermediate, storiesTotalForEstimate);
+
+  return { ...intermediate, estimates };
 }

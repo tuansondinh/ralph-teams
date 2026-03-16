@@ -5,6 +5,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   calculateCost,
+  calculateEstimates,
   createEmptyRunStats,
   loadRunStats,
   saveRunStats,
@@ -532,4 +533,117 @@ test('updateStoryStats propagates time from story through epic to totals', () =>
   assert.equal(updated.totals.startedAt, '2024-06-01T12:00:00.000Z');
   assert.equal(updated.totals.durationMs, 630_000);
   assert.equal(updated.totals.durationFormatted, '10m 30s');
+});
+
+// ---------------------------------------------------------------------------
+// calculateEstimates
+// ---------------------------------------------------------------------------
+
+test('calculateEstimates returns -- for cost and time when no stories completed', () => {
+  const stats = createEmptyRunStats();
+  const estimates = calculateEstimates(stats, 10);
+
+  assert.equal(estimates.estimatedTotalCostUsd, '--');
+  assert.equal(estimates.estimatedTotalTimeMs, null);
+  assert.equal(estimates.estimatedTotalTimeFormatted, '--');
+  assert.equal(estimates.averageCostPerStory, null);
+  assert.equal(estimates.averageTimePerStoryMs, null);
+  assert.equal(estimates.storiesRemaining, 10);
+});
+
+test('calculateEstimates calculates correct estimate with 2 of 10 stories done', () => {
+  let stats = createEmptyRunStats();
+  // 2 stories with $0.10 each = $0.20 total, avg $0.10, 8 remaining → est $0.20 + $0.80 = $1.00
+  stats = updateStoryStats(stats, makeStory({ storyId: 'US-001', epicId: 'EPIC-001', costUsd: 0.10, passed: true }));
+  stats = updateStoryStats(stats, makeStory({ storyId: 'US-002', epicId: 'EPIC-001', costUsd: 0.10, passed: true }));
+
+  const estimates = calculateEstimates(stats, 10);
+
+  assert.equal(estimates.estimatedTotalCostUsd, '$1.00');
+  assert.equal(estimates.averageCostPerStory, 0.10);
+  assert.equal(estimates.storiesRemaining, 8);
+});
+
+test('calculateEstimates estimate updates as more stories complete', () => {
+  let stats = createEmptyRunStats();
+  // After 1 of 4 stories: avg=$0.20, remaining=3, est = $0.20 + $0.60 = $0.80
+  stats = updateStoryStats(stats, makeStory({ storyId: 'US-001', epicId: 'EPIC-001', costUsd: 0.20, passed: true }), 4);
+  assert.equal(stats.estimates.estimatedTotalCostUsd, '$0.80');
+  assert.equal(stats.estimates.storiesRemaining, 3);
+
+  // After 2 of 4 stories: avg=$0.25 (0.20+0.30)/2, remaining=2, est = $0.50 + $0.50 = $1.00
+  stats = updateStoryStats(stats, makeStory({ storyId: 'US-002', epicId: 'EPIC-001', costUsd: 0.30, passed: true }), 4);
+  assert.equal(stats.estimates.estimatedTotalCostUsd, '$1.00');
+  assert.equal(stats.estimates.storiesRemaining, 2);
+});
+
+test('calculateEstimates excludes stories with null cost from average', () => {
+  let stats = createEmptyRunStats();
+  // Story with null cost is not counted
+  stats = updateStoryStats(stats, makeStory({ storyId: 'US-001', epicId: 'EPIC-001', costUsd: null, passed: true }));
+  // Still shows '--' because no priced stories yet
+  assert.equal(stats.estimates.estimatedTotalCostUsd, '--');
+
+  // Now add a priced story — only this one counts: avg=$0.20, remaining=(2-1)=1, est=$0.40
+  stats = updateStoryStats(stats, makeStory({ storyId: 'US-002', epicId: 'EPIC-001', costUsd: 0.20, passed: true }), 2);
+  assert.equal(stats.estimates.estimatedTotalCostUsd, '$0.40');
+  assert.equal(stats.estimates.averageCostPerStory, 0.20);
+});
+
+test('calculateEstimates time estimate works independently of cost', () => {
+  let stats = createEmptyRunStats();
+  // Story with cost data AND time data
+  stats = updateStoryStats(stats, makeStory({
+    storyId: 'US-001',
+    epicId: 'EPIC-001',
+    costUsd: 0.10,
+    durationMs: 60_000,   // 1 minute
+    passed: true,
+  }), 4);
+
+  const est = stats.estimates;
+  // avg time = 60000ms, remaining = 3, estimated = 60000 + 3*60000 = 240000ms = 4m 0s
+  assert.equal(est.averageTimePerStoryMs, 60_000);
+  assert.equal(est.estimatedTotalTimeMs, 240_000);
+  assert.equal(est.estimatedTotalTimeFormatted, '4m 0s');
+});
+
+test('calculateEstimates time estimate is -- when no stories have duration data', () => {
+  let stats = createEmptyRunStats();
+  // Story with cost but no time
+  stats = updateStoryStats(stats, makeStory({
+    storyId: 'US-001',
+    epicId: 'EPIC-001',
+    costUsd: 0.10,
+    durationMs: null,
+    passed: true,
+  }), 4);
+
+  assert.equal(stats.estimates.estimatedTotalTimeFormatted, '--');
+  assert.equal(stats.estimates.averageTimePerStoryMs, null);
+  assert.equal(stats.estimates.estimatedTotalTimeMs, null);
+  // Cost estimate still works
+  assert.equal(stats.estimates.estimatedTotalCostUsd, '$0.40');
+});
+
+test('calculateEstimates storiesRemaining is 0 when all stories complete', () => {
+  let stats = createEmptyRunStats();
+  stats = updateStoryStats(stats, makeStory({ storyId: 'US-001', epicId: 'EPIC-001', costUsd: 0.10, passed: true }), 1);
+
+  assert.equal(stats.estimates.storiesRemaining, 0);
+  // With 0 remaining, estimate equals actual cost
+  assert.equal(stats.estimates.estimatedTotalCostUsd, '$0.10');
+});
+
+test('calculateEstimates is refreshed on every updateStoryStats call', () => {
+  // updateStoryStats auto-calls calculateEstimates; estimates should reflect latest state
+  let stats = createEmptyRunStats();
+  stats = updateStoryStats(stats, makeStory({ storyId: 'US-001', epicId: 'EPIC-001', costUsd: 0.05, passed: true }), 5);
+  const firstEstimate = stats.estimates.estimatedTotalCostUsd;
+
+  stats = updateStoryStats(stats, makeStory({ storyId: 'US-002', epicId: 'EPIC-001', costUsd: 0.15, passed: true }), 5);
+  const secondEstimate = stats.estimates.estimatedTotalCostUsd;
+
+  // Estimates should differ as more data comes in
+  assert.notEqual(firstEstimate, secondEstimate);
 });

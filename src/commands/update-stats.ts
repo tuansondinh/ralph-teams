@@ -108,9 +108,15 @@ export function updateStatsCommand(
     passed: passed === 'true',
   };
 
+  // Parse total stories for estimate calculation (optional)
+  const totalStoriesInRun = options.storiesTotal !== undefined
+    ? parseInt(options.storiesTotal, 10)
+    : undefined;
+
   // Update and save
-  const updatedStats = deps.updateStoryStats(existingStats, storyEntry);
+  const updatedStats = deps.updateStoryStats(existingStats, storyEntry, totalStoriesInRun);
   deps.saveRunStats(statsPath, updatedStats);
 
-  deps.log(`[update-stats] Updated stats for ${epicId}/${storyId} — cost: ${costUsd !== null ? `$${costUsd.toFixed(4)}` : 'n/a'}`);
+  const estimatedCost = updatedStats.estimates.estimatedTotalCostUsd;
+  deps.log(`[update-stats] Updated stats for ${epicId}/${storyId} — cost: ${costUsd !== null ? `$${costUsd.toFixed(4)}` : 'n/a'} — estimated total: ${estimatedCost ?? '--'}`);
 }
