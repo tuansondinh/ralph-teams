@@ -415,6 +415,7 @@ The current execution contract is:
 - the backend team processes one epic per session
 - stories run sequentially inside that epic
 - already-passed stories are skipped
+- rerunning Ralph automatically resets `failed` and `partial` epics back to `pending` so only unfinished work is retried
 - each story gets at most two build/validate cycles
 - the validator checks output independently from the builder's reasoning
 - after writing `results/result-EPIC-xxx.txt`, the team lead must print the same result and exit the session immediately

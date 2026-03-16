@@ -283,6 +283,27 @@ prompt_to_commit_dirty_worktree() {
   esac
 }
 
+prompt_to_remove_stale_worktree_dir() {
+  local worktree_path="$1"
+  local branch_name="$2"
+
+  echo "Found a stale worktree directory at '$worktree_path' for branch '$branch_name'." >&2
+  echo "Git does not recognize it as an active worktree, but the directory still exists on disk." >&2
+  printf "Delete the stale directory and recreate the worktree? [y/N]: " >&2
+
+  local response
+  IFS= read -r response || response=""
+  case "$response" in
+    y|Y|yes|YES)
+      rm -rf "$worktree_path"
+      ;;
+    *)
+      echo "Aborted: user declined stale worktree directory removal." >&2
+      exit 1
+      ;;
+  esac
+}
+
 # --- Ensure loop branch exists and is checked out ---
 if [ "$CURRENT_BRANCH" != "$LOOP_BRANCH" ]; then
   if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
@@ -314,12 +335,23 @@ create_epic_worktree() {
     return
   fi
 
-  # Remove stale worktree entry if it exists
-  git worktree remove "$worktree_path" --force 2>/dev/null || true
-  # Remove stale branch if it exists
-  git branch -D "$branch_name" 2>/dev/null || true
+  # Prune stale git worktree metadata before cleanup.
+  git worktree prune >/dev/null 2>&1 || true
 
-  git worktree add "$worktree_path" -b "$branch_name" "$LOOP_BRANCH" >/dev/null 2>&1
+  # Remove stale worktree entry if it exists
+  git worktree remove "$worktree_path" --force >/dev/null 2>&1 || true
+  # If Git no longer knows about the worktree but the directory is still on disk,
+  # ask before removing the stale directory so a fresh worktree can be created.
+  if [ -d "$worktree_path" ]; then
+    prompt_to_remove_stale_worktree_dir "$worktree_path" "$branch_name"
+  fi
+  # Remove stale branch if it exists
+  git branch -D "$branch_name" >/dev/null 2>&1 || true
+
+  if ! git worktree add "$worktree_path" -b "$branch_name" "$LOOP_BRANCH" >/dev/null 2>&1; then
+    echo "Error: failed to create worktree $worktree_path for $branch_name" >&2
+    exit 1
+  fi
   echo "$worktree_path"
 }
 
@@ -445,6 +477,17 @@ normalize_epic_statuses() {
   for epic_index in $(seq 0 $((TOTAL_EPICS - 1))); do
     local epic_status
     epic_status=$(rjq read "$PRD_FILE" ".epics[$epic_index].status" "pending")
+    local epic_id
+    epic_id=$(rjq read "$PRD_FILE" ".epics[$epic_index].id")
+
+    if [ "$epic_status" = "failed" ] || [ "$epic_status" = "partial" ]; then
+      echo "  [$epic_id] previous status ${epic_status} — resetting to pending for rerun"
+      rjq set "$PRD_FILE" ".epics[$epic_index].status" '"pending"'
+      echo "[$epic_id] RETRY RESET (${epic_status} -> pending) — $(date)" >> "$PROGRESS_FILE"
+      epic_status="pending"
+      updated=true
+    fi
+
     [ "$epic_status" != "pending" ] && continue
 
     local story_count
@@ -455,8 +498,6 @@ normalize_epic_statuses() {
     passed_count=$(rjq count-where "$PRD_FILE" ".epics[$epic_index].userStories" "passes=true")
 
     if [ "$passed_count" -eq "$story_count" ]; then
-      local epic_id
-      epic_id=$(rjq read "$PRD_FILE" ".epics[$epic_index].id")
       echo "  [$epic_id] all stories already pass — marking epic completed"
       rjq set "$PRD_FILE" ".epics[$epic_index].status" '"completed"'
       echo "[$epic_id] AUTO-COMPLETED (all stories already passed) — $(date)" >> "$PROGRESS_FILE"
