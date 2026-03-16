@@ -114,6 +114,15 @@ function ensureBackendAvailable(backend: string): void {
     return;
   }
 
+  if (backend === 'codex') {
+    const codexResult = spawnSync('command', ['-v', 'codex'], { shell: true, stdio: 'ignore' });
+    if (codexResult.status !== 0) {
+      console.error(chalk.red('Error: codex CLI is not installed or not in PATH.'));
+      process.exit(1);
+    }
+    return;
+  }
+
   console.error(chalk.red(`Error: unsupported backend "${backend}"`));
   process.exit(1);
 }
@@ -145,6 +154,10 @@ export async function initCommand(options: InitOptions = {}): Promise<void> {
     });
   } else if (backend === 'copilot') {
     child = spawn('gh', ['copilot', '--', '--allow-all', '-i', prompt], {
+      stdio: 'inherit',
+    });
+  } else if (backend === 'codex') {
+    child = spawn('codex', ['-a', 'never', '-s', 'workspace-write', prompt], {
       stdio: 'inherit',
     });
   } else {

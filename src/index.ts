@@ -31,7 +31,7 @@ program
 program
   .command('init')
   .description('Interactively create a new prd.json file')
-  .option('--backend <backend>', 'AI backend to use for story generation (claude or copilot)', 'claude')
+  .option('--backend <backend>', 'AI backend to use for story generation (claude, copilot, or codex)', 'claude')
   .action(async (options: { backend?: string }) => {
     await initCommand(options);
   });
@@ -39,9 +39,9 @@ program
 program
   .command('run [path]')
   .description('Run ralph.sh with the given prd.json')
-  .option('--backend <backend>', 'AI backend to use (claude or copilot)', 'claude')
+  .option('--backend <backend>', 'AI backend to use (claude, copilot, or codex)', 'claude')
   .option('--parallel <n>', 'Max epics to run in parallel per wave (default: sequential)')
-  .option('--no-dashboard', 'Disable TUI dashboard, show raw output')
+  .option('--dashboard', 'Enable TUI dashboard')
   .action(async (prdPath: string = './prd.json', options: { backend?: string; parallel?: string; dashboard?: boolean }) => {
     await runCommand(prdPath, options);
   });

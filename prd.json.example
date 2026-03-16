@@ -1,6 +1,6 @@
 {
   "project": "MyApp",
-  "branchName": "ralph/task-priority",
+  "branchName": "main",
   "description": "Task management app with priority system and labels",
   "epics": [
     {

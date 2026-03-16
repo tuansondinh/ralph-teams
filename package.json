@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
-    "test": "node --import tsx --test test/**/*.test.ts",
+    "test": "node --import tsx --test $(find ./test -type f -name '*.test.ts' | sort)",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

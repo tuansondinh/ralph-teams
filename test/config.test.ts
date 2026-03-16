@@ -87,6 +87,18 @@ execution:
   assert.equal(config.execution.parallel, DEFAULT_CONFIG.execution.parallel);
 });
 
+test('loadConfig accepts codex as a valid backend', () => {
+  const dir = makeTempDir();
+  writeConfig(dir, `
+execution:
+  backend: codex
+`);
+
+  const config = loadConfig(dir);
+
+  assert.equal(config.execution.backend, 'codex');
+});
+
 // -------------------------------------------------------------------
 // loadConfig — invalid YAML syntax
 // -------------------------------------------------------------------

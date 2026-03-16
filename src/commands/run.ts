@@ -57,17 +57,6 @@ function parseParallel(parallel: string): number | null {
   return parseInt(parallel, 10);
 }
 
-function readBranchNameFromPrd(prdPath: string): string | null {
-  try {
-    const prd = JSON.parse(fs.readFileSync(prdPath, 'utf-8')) as { branchName?: unknown };
-    return typeof prd.branchName === 'string' && prd.branchName.trim() !== ''
-      ? prd.branchName
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 function getCurrentGitBranch(deps: RunDeps): string | null {
   const result = deps.spawnSync('git', ['branch', '--show-current'], {
     encoding: 'utf-8',
@@ -92,7 +81,7 @@ function hasDirtyGitWorktree(deps: RunDeps): boolean {
 }
 
 async function promptForAutoCommit(targetBranch: string, deps: RunDeps): Promise<boolean> {
-  console.log(`Worktree has uncommitted changes and Ralph needs to switch to branch '${targetBranch}'.`);
+  console.log(`Worktree has uncommitted changes and Ralph needs to create or switch to branch '${targetBranch}'.`);
   console.log('Ralph will now stage and commit all current changes before the run.');
 
   const statusResult = deps.spawnSync('git', ['status', '--short'], {
@@ -143,8 +132,7 @@ export async function runCommand(
 ): Promise<void> {
   const resolved = path.resolve(prdPath);
   const parallel = options.parallel;
-  // Commander sets --no-dashboard as dashboard: false, default is true
-  const useDashboard = options.dashboard !== false;
+  const useDashboard = options.dashboard === true;
 
   if (!deps.existsSync(resolved)) {
     console.error(chalk.red(`Error: prd.json not found at ${resolved}`));
@@ -171,7 +159,7 @@ export async function runCommand(
   // config is always defined here (exit called on error), but TypeScript needs this assertion
   const resolvedConfig = config!;
   const backend = resolvedConfig.execution.backend;
-  const targetBranch = readBranchNameFromPrd(resolved);
+  const currentBranch = getCurrentGitBranch(deps);
 
   if (backend === 'claude' && !isCommandInstalled('claude', deps)) {
     console.error(chalk.red('Error: claude CLI is not installed or not in PATH.'));
@@ -182,6 +170,12 @@ export async function runCommand(
   if (backend === 'copilot' && !isCommandInstalled('gh', deps)) {
     console.error(chalk.red('Error: gh CLI is not installed or not in PATH.'));
     console.error(chalk.dim('Install GitHub CLI: https://cli.github.com'));
+    deps.exit(1);
+  }
+
+  if (backend === 'codex' && !isCommandInstalled('codex', deps)) {
+    console.error(chalk.red('Error: codex CLI is not installed or not in PATH.'));
+    console.error(chalk.dim('Install Codex CLI: https://developers.openai.com/codex/'));
     deps.exit(1);
   }
 
@@ -239,19 +233,16 @@ export async function runCommand(
     RALPH_BACKEND: resolvedConfig.execution.backend,
   };
 
-  if (useDashboard && targetBranch) {
-    const currentBranch = getCurrentGitBranch(deps);
-    if (currentBranch !== null && currentBranch !== targetBranch && hasDirtyGitWorktree(deps)) {
-      const confirmed = await promptForAutoCommit(targetBranch, deps);
-      if (!confirmed) {
-        console.log('Aborted: user declined auto-commit before run.');
-        deps.exit(1);
-      }
+  if (useDashboard && currentBranch !== null && hasDirtyGitWorktree(deps)) {
+    const confirmed = await promptForAutoCommit(`a new Ralph loop branch from '${currentBranch}'`, deps);
+    if (!confirmed) {
+      console.log('Aborted: user declined auto-commit before run.');
+      deps.exit(1);
     }
   }
 
   if (!useDashboard) {
-    // --no-dashboard: fall back to synchronous spawnSync with stdio:inherit
+    // Default: fall back to synchronous spawnSync with stdio:inherit
     const result = deps.spawnSync(ralphSh, args, {
       stdio: 'inherit',
       shell: false,
@@ -260,7 +251,7 @@ export async function runCommand(
 
     deps.exit(result.status ?? 1);
   } else {
-    // Default: launch async with piped stdio and start dashboard
+    // --dashboard: launch async with piped stdio and start dashboard
     const dashboardOptions = resolveDashboardOptions(resolved, deps.cwd());
     const dashboard = startDashboard(dashboardOptions);
 

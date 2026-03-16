@@ -59,6 +59,7 @@ test('ralph.sh asks before auto-committing and aborts when declined', () => {
 
   assert.equal(result.status, 1);
   assert.match(result.stdout, /Ralph will now stage and commit all current changes before the run\./);
+  assert.match(result.stdout, /create or switch to branch 'ralph\/loop\//);
   assert.match(result.stdout, /Proceed with auto-commit before continuing\? \[y\/N\]: /);
   assert.match(result.stdout, /Aborted: user declined auto-commit before run\./);
   assert.match(execFileSync('git', ['status', '--short'], { cwd: tempDir, encoding: 'utf-8' }), /^ M README\.md$/m);
@@ -78,10 +79,10 @@ test('ralph.sh auto-commits dirty changes after confirmation and continues', () 
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /Proceed with auto-commit before continuing\? \[y\/N\]: /);
-  assert.match(result.stdout, /Switching to branch: feature\/test-run/);
+  assert.match(result.stdout, /Creating loop branch: ralph\/loop\//);
   assert.match(execFileSync('git', ['log', '-1', '--pretty=%s'], { cwd: tempDir, encoding: 'utf-8' }), /chore: auto-commit changes before ralph run/);
   assert.equal(execFileSync('git', ['status', '--short'], { cwd: tempDir, encoding: 'utf-8' }).trim(), '');
-  assert.equal(execFileSync('git', ['branch', '--show-current'], { cwd: tempDir, encoding: 'utf-8' }).trim(), 'feature/test-run');
+  assert.match(execFileSync('git', ['branch', '--show-current'], { cwd: tempDir, encoding: 'utf-8' }).trim(), /^ralph\/loop\//);
 });
 
 // ─── US-001: Wave Computation Helpers ────────────────────────────────────────
@@ -263,7 +264,7 @@ test('US-001: wave boundaries are logged to progress.txt', () => {
 
 // ─── US-002 Tests ─────────────────────────────────────────────────────────────
 
-test('US-002: worktree and branch are created per epic', () => {
+test('US-002: a loop branch is created for the run and an epic worktree is created per epic', () => {
   const { tempDir, env } = setupMultiEpicRepo(
     [{ id: 'EPIC-001', title: 'Alpha' }],
     { 'EPIC-001': 'PASS' },
@@ -272,10 +273,12 @@ test('US-002: worktree and branch are created per epic', () => {
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
 
+  assert.match(result.stdout, /Creating loop branch: ralph\/loop\//);
   // Ralph should report spawning the epic in a worktree (branch creation is logged)
   assert.match(result.stdout, /Spawning \[EPIC-001\] in worktree/);
   // The epic should complete (confirming the worktree + branch were usable)
   assert.match(result.stdout, /\[EPIC-001\] PASSED/);
+  assert.match(execFileSync('git', ['branch', '--show-current'], { cwd: tempDir, encoding: 'utf-8' }).trim(), /^ralph\/loop\//);
 });
 
 test('US-002: worktrees are cleaned up after wave completes', () => {
