@@ -673,7 +673,7 @@ $EPIC_JSON
 2. Process ALL user stories in priority order — do NOT stop until every story has been attempted
 3. For each story: check if passes=true in the PRD (skip those — they are already done), then Builder implements → Validator verifies → max 2 total cycles
    - If your agent runtime supports named sub-agents, use the dedicated builder and validator roles for these handoffs
-   - Tell the Builder to check guidance/guidance-{story-id}.md before implementing — if that file exists, the user has left guidance that MUST be followed
+   - Before assigning each story, check if guidance/guidance-{story-id}.md exists (e.g. guidance/guidance-US-003.md). If it does, explicitly include this in your Builder assignment: "Guidance file for this story: guidance/guidance-{story-id}.md — read it before implementing and follow the instructions in it."
 4. Document any failures and move on to the next story
 5. When ALL stories have been processed (or skipped because already passed), write your result to: $RESULT_FILE
    - Write ONLY one line: PASS, PARTIAL, or FAIL with details
