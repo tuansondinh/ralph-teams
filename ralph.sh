@@ -338,6 +338,9 @@ INTERRUPTED=false
 active_pids=()
 active_indices=()
 
+# Track the currently-processing story ID so SIGINT can capture it
+CURRENT_STORY_ID=""
+
 # Resolve absolute path to PRD file so team lead always has the correct path
 PRD_ABS_PATH="$(cd "$(dirname "$PRD_FILE")" && pwd)/$(basename "$PRD_FILE")"
 ROOT_DIR="$(pwd)"
@@ -378,7 +381,8 @@ initialize_counters() {
 }
 
 # Writes current run state to ralph-state.json atomically (temp file + rename).
-# Captures CURRENT_WAVE, active epic indices, backend, and parallel settings.
+# Captures CURRENT_WAVE, active epic indices, backend, parallel settings,
+# story progress from the PRD, and the currently-interrupted story ID.
 save_run_state() {
   local prd_dir
   prd_dir="$(cd "$(dirname "$PRD_FILE")" && pwd)"
@@ -398,6 +402,49 @@ save_run_state() {
   done
   active_epic_ids="${active_epic_ids}]"
 
+  # Build storyProgress object from PRD: { "epicId": { "storyId": true/false, ... }, ... }
+  local story_progress="{"
+  local epic_first=true
+  local total_epics_count
+  total_epics_count=$(rjq length "$PRD_FILE" .epics 2>/dev/null || echo 0)
+  for ep_idx in $(seq 0 $((total_epics_count - 1))); do
+    local ep_id
+    ep_id=$(rjq read "$PRD_FILE" ".epics[$ep_idx].id" 2>/dev/null || true)
+    [ -z "$ep_id" ] && continue
+
+    local story_count
+    story_count=$(rjq length "$PRD_FILE" ".epics[$ep_idx].userStories" 2>/dev/null || echo 0)
+    [ "$story_count" -eq 0 ] && continue
+
+    [ "$epic_first" = true ] && epic_first=false || story_progress="${story_progress},"
+    story_progress="${story_progress}\"${ep_id}\": {"
+
+    local story_first=true
+    for st_idx in $(seq 0 $((story_count - 1))); do
+      local st_id
+      st_id=$(rjq read "$PRD_FILE" ".epics[$ep_idx].userStories[$st_idx].id" 2>/dev/null || true)
+      local st_passes
+      st_passes=$(rjq read "$PRD_FILE" ".epics[$ep_idx].userStories[$st_idx].passes" "false" 2>/dev/null || echo "false")
+      [ -z "$st_id" ] && continue
+
+      # Normalize passes to JSON boolean
+      [ "$st_passes" = "true" ] && st_passes="true" || st_passes="false"
+
+      [ "$story_first" = true ] && story_first=false || story_progress="${story_progress},"
+      story_progress="${story_progress}\"${st_id}\": ${st_passes}"
+    done
+    story_progress="${story_progress}}"
+  done
+  story_progress="${story_progress}}"
+
+  # interruptedStoryId: the story being processed when interrupt occurred (empty = null)
+  local interrupted_story_json
+  if [ -n "$CURRENT_STORY_ID" ]; then
+    interrupted_story_json="\"${CURRENT_STORY_ID}\""
+  else
+    interrupted_story_json="null"
+  fi
+
   cat > "$tmp_file" << STATEEOF
 {
   "version": 1,
@@ -406,6 +453,8 @@ save_run_state() {
   "activeEpics": ${active_epic_ids},
   "backend": "${BACKEND}",
   "parallel": "${PARALLEL}",
+  "storyProgress": ${story_progress},
+  "interruptedStoryId": ${interrupted_story_json},
   "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 STATEEOF

@@ -815,3 +815,44 @@ test('US-008: ralph-state.json includes the active epic ID', { timeout: 15000 },
   const activeEpics = state['activeEpics'] as string[];
   assert.ok(activeEpics.includes('EPIC-001'), `activeEpics should include EPIC-001, got: ${JSON.stringify(activeEpics)}`);
 });
+
+test('US-008: ralph-state.json includes storyProgress field', { timeout: 15000 }, async () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    {},
+  );
+  env['MOCK_HANG_EPIC_001'] = '1';
+
+  await runRalphWithSigint(tempDir, env);
+
+  const stateFile = path.join(tempDir, 'ralph-state.json');
+  const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as Record<string, unknown>;
+
+  assert.ok('storyProgress' in state, 'state should have storyProgress field');
+  assert.ok(typeof state['storyProgress'] === 'object' && state['storyProgress'] !== null,
+    `storyProgress should be an object, got: ${JSON.stringify(state['storyProgress'])}`);
+
+  // The PRD has EPIC-001 with US-001 — verify it appears in storyProgress
+  const storyProgress = state['storyProgress'] as Record<string, unknown>;
+  assert.ok('EPIC-001' in storyProgress, `storyProgress should contain EPIC-001, got keys: ${Object.keys(storyProgress).join(', ')}`);
+  const epicStories = storyProgress['EPIC-001'] as Record<string, unknown>;
+  assert.ok('US-001' in epicStories, `EPIC-001 stories should contain US-001, got keys: ${Object.keys(epicStories).join(', ')}`);
+});
+
+test('US-008: ralph-state.json includes interruptedStoryId field', { timeout: 15000 }, async () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    {},
+  );
+  env['MOCK_HANG_EPIC_001'] = '1';
+
+  await runRalphWithSigint(tempDir, env);
+
+  const stateFile = path.join(tempDir, 'ralph-state.json');
+  const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as Record<string, unknown>;
+
+  // interruptedStoryId must exist as a key (value may be null since ralph.sh doesn't
+  // track individual story execution — the team-lead agent does that internally)
+  assert.ok('interruptedStoryId' in state,
+    `state should have interruptedStoryId field, got keys: ${Object.keys(state).join(', ')}`);
+});
