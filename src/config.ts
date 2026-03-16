@@ -18,6 +18,16 @@ export interface RalphConfig {
     /** AI backend to use: 'claude' or 'copilot'. Default: 'claude'. */
     backend: string;
   };
+  pricing: {
+    /** USD cost per 1k input tokens. Default: 0.015 (Claude Sonnet). */
+    inputTokenCostPer1k: number;
+    /** USD cost per 1k output tokens. Default: 0.075 (Claude Sonnet). */
+    outputTokenCostPer1k: number;
+    /** USD cost per 1k cache read tokens. Default: 0.0015. */
+    cacheReadCostPer1k: number;
+    /** USD cost per 1k cache creation tokens. Default: 0.01875. */
+    cacheCreationCostPer1k: number;
+  };
 }
 
 /** Default configuration values used when no ralph.config.yml is present. */
@@ -30,6 +40,12 @@ export const DEFAULT_CONFIG: RalphConfig = {
     validatorMaxPushbacks: 1,
     parallel: 0,
     backend: 'claude',
+  },
+  pricing: {
+    inputTokenCostPer1k: 0.015,
+    outputTokenCostPer1k: 0.075,
+    cacheReadCostPer1k: 0.0015,
+    cacheCreationCostPer1k: 0.01875,
   },
 };
 
@@ -45,6 +61,7 @@ export function validateConfig(raw: unknown): { config: RalphConfig; errors: str
   const config: RalphConfig = {
     timeouts: { ...DEFAULT_CONFIG.timeouts },
     execution: { ...DEFAULT_CONFIG.execution },
+    pricing: { ...DEFAULT_CONFIG.pricing },
   };
 
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -119,6 +136,34 @@ export function validateConfig(raw: unknown): { config: RalphConfig; errors: str
     }
   }
 
+  // --- pricing ---
+  if ('pricing' in obj) {
+    const pricing = obj['pricing'];
+    if (pricing === null || typeof pricing !== 'object' || Array.isArray(pricing)) {
+      errors.push('pricing must be an object');
+    } else {
+      const p = pricing as Record<string, unknown>;
+
+      const pricingFields = [
+        'inputTokenCostPer1k',
+        'outputTokenCostPer1k',
+        'cacheReadCostPer1k',
+        'cacheCreationCostPer1k',
+      ] as const;
+
+      for (const field of pricingFields) {
+        if (field in p) {
+          const v = p[field];
+          if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) {
+            errors.push(`pricing.${field} must be a non-negative number, got '${v}'`);
+          } else {
+            config.pricing[field] = v;
+          }
+        }
+      }
+    }
+  }
+
   return { config, errors };
 }
 
@@ -134,7 +179,7 @@ export function loadConfig(projectRoot: string): RalphConfig {
   const configPath = path.join(projectRoot, 'ralph.config.yml');
 
   if (!fs.existsSync(configPath)) {
-    return { ...DEFAULT_CONFIG, timeouts: { ...DEFAULT_CONFIG.timeouts }, execution: { ...DEFAULT_CONFIG.execution } };
+    return { ...DEFAULT_CONFIG, timeouts: { ...DEFAULT_CONFIG.timeouts }, execution: { ...DEFAULT_CONFIG.execution }, pricing: { ...DEFAULT_CONFIG.pricing } };
   }
 
   let raw: unknown;
@@ -173,5 +218,6 @@ export function mergeCliOverrides(
       ...(overrides.backend !== undefined ? { backend: overrides.backend } : {}),
       ...(overrides.parallel !== undefined ? { parallel: overrides.parallel } : {}),
     },
+    pricing: { ...config.pricing },
   };
 }

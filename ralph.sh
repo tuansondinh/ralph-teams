@@ -907,6 +907,15 @@ while true; do
           if [ "$post_status" = "completed" ]; then
             wave_completed_ids+=("$finished_epic_id")
           fi
+          # Update run stats (failures are non-fatal — stats tracking must not break the run)
+          local epic_passed="false"
+          [ "$post_status" = "completed" ] && epic_passed="true"
+          ralph-teams update-stats \
+            --epic-id "$finished_epic_id" \
+            --story-id "all" \
+            --log-file "${active_logs[$slot]}" \
+            --passed "$epic_passed" \
+            --backend "$BACKEND" 2>/dev/null || true
           unset 'active_pids[$slot]'
           unset 'active_indices[$slot]'
           unset 'active_start_times[$slot]'
