@@ -344,6 +344,7 @@ INTERRUPTED=false
 # Script-level arrays so the SIGINT handler can access them
 active_pids=()
 active_indices=()
+active_start_times=()
 
 # Track the currently-processing story ID so SIGINT can capture it
 CURRENT_STORY_ID=""
@@ -788,9 +789,10 @@ while true; do
   fi
 
   # Reset script-level active tracking arrays for this wave
-  # (active_pids and active_indices are script-level so SIGINT handler can access them)
+  # (active_pids, active_indices, and active_start_times are script-level so SIGINT handler can access them)
   active_pids=()
   active_indices=()
+  active_start_times=()
   declare -a active_logs=()
   declare -a active_log_lines=()
   # wave_completed_ids collects epic IDs that completed successfully (for merge_wave)
@@ -801,6 +803,8 @@ while true; do
   # processes its result, and removes it from the arrays.
   wait_for_one_slot() {
     while true; do
+      local now
+      now=$(date +%s)
       for slot in "${!active_pids[@]}"; do
         local finished_epic_id
         finished_epic_id=$(rjq read "$PRD_FILE" ".epics[${active_indices[$slot]}].id")
@@ -809,6 +813,30 @@ while true; do
 
         emit_new_log_output "$finished_epic_id" "${active_logs[$slot]}" "${active_log_lines[$slot]:-0}"
         active_log_lines[$slot]="$LAST_LOG_LINE_COUNT"
+
+        # Check epic timeout
+        local elapsed=$(( now - ${active_start_times[$slot]:-$now} ))
+        if [ "$elapsed" -ge "$EPIC_TIMEOUT" ]; then
+          echo ""
+          echo "  [$finished_epic_id] TIMED OUT after ${EPIC_TIMEOUT}s"
+          terminate_process_tree "${active_pids[$slot]}"
+          wait "${active_pids[$slot]}" 2>/dev/null || true
+          cleanup_epic_worktree "$finished_epic_id"
+          # Mark epic as failed in PRD
+          rjq set "$PRD_FILE" ".epics[${active_indices[$slot]}].status" '"failed"'
+          FAILED=$((FAILED + 1))
+          # Log timeout to progress.txt and epic log
+          echo "[$finished_epic_id] FAILED (epic timeout after ${EPIC_TIMEOUT}s) — $(date)" >> "$PROGRESS_FILE"
+          echo "TIMEOUT: Epic exceeded ${EPIC_TIMEOUT}s limit" >> "${active_logs[$slot]}"
+          # Clean up tracking arrays
+          unset 'active_pids[$slot]'
+          unset 'active_indices[$slot]'
+          unset 'active_start_times[$slot]'
+          active_pids=("${active_pids[@]+"${active_pids[@]}"}")
+          active_indices=("${active_indices[@]+"${active_indices[@]}"}")
+          active_start_times=("${active_start_times[@]+"${active_start_times[@]}"}")
+          return
+        fi
 
         if ! kill -0 "${active_pids[$slot]}" 2>/dev/null; then
           process_finished=true
@@ -832,8 +860,10 @@ while true; do
           fi
           unset 'active_pids[$slot]'
           unset 'active_indices[$slot]'
+          unset 'active_start_times[$slot]'
           active_pids=("${active_pids[@]+"${active_pids[@]}"}")
           active_indices=("${active_indices[@]+"${active_indices[@]}"}")
+          active_start_times=("${active_start_times[@]+"${active_start_times[@]}"}")
           return
         fi
 
@@ -870,6 +900,7 @@ while true; do
     spawn_epic_bg "$EPIC_INDEX"
     active_pids+=("$LAST_SPAWN_PID")
     active_indices+=("$EPIC_INDEX")
+    active_start_times+=("$(date +%s)")
     active_logs+=("$LAST_SPAWN_LOG")
     active_log_lines+=("0")
   done
