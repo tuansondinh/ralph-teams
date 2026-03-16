@@ -36,13 +36,26 @@ export async function addEpicCommand(prdPath: string): Promise<void> {
   // Show existing epics for dependency selection
   let dependsOn: string[] = [];
   if (prd.epics.length > 0) {
+    const validEpicIds = new Set(prd.epics.map((epic) => epic.id));
     console.log(chalk.dim('\nExisting epics:'));
     for (const e of prd.epics) {
       console.log(chalk.dim(`  ${e.id}: ${e.title}`));
     }
-    const depsInput = await ask(rl, chalk.cyan('\nDependencies (comma-separated epic IDs, or Enter for none): '));
-    if (depsInput.trim() !== '') {
-      dependsOn = depsInput.split(',').map(d => d.trim()).filter(d => d !== '');
+
+    while (true) {
+      const depsInput = await ask(rl, chalk.cyan('\nDependencies (comma-separated epic IDs, or Enter for none): '));
+      if (depsInput.trim() === '') {
+        break;
+      }
+
+      const candidateDeps = depsInput.split(',').map(d => d.trim()).filter(d => d !== '');
+      const unknownDeps = candidateDeps.filter((dep) => !validEpicIds.has(dep));
+      if (unknownDeps.length === 0) {
+        dependsOn = candidateDeps;
+        break;
+      }
+
+      console.log(chalk.red(`Unknown epic IDs: ${unknownDeps.join(', ')}`));
     }
   }
 

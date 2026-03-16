@@ -51,7 +51,7 @@ See `prd.json.example` for the expected format. Key fields:
 
 | Backend | Command | Agent Files | Sub-agent Tool | Permissions |
 |---------|---------|------------|----------------|-------------|
-| `claude` (default) | `claude` CLI | `.claude/agents/*.md` | `Agent` tool + `TeamCreate` | `--dangerously-skip-permissions` |
+| `claude` (default) | `claude` CLI | `.claude/agents/*.md` | `Agent` tool | `--dangerously-skip-permissions` |
 | `copilot` | `gh copilot` | `.github/agents/*.agent.md` | `task` tool | `--allow-all --no-ask-user` |
 
 Both backends support sub-agent spawning. The team lead spawns planner, builder, and validator as sub-agents using their respective tool systems.

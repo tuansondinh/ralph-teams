@@ -16,7 +16,7 @@ export interface Epic {
   id: string;
   title: string;
   description?: string;
-  status: 'pending' | 'completed' | 'partial' | 'failed';
+  status: 'pending' | 'completed' | 'partial' | 'failed' | 'merge-failed';
   dependsOn?: string[];
   userStories: UserStory[];
 }
@@ -53,6 +53,7 @@ export function epicStatusColor(status: string): string {
   switch (status) {
     case 'completed': return chalk.green(status);
     case 'failed':    return chalk.red(status);
+    case 'merge-failed': return chalk.red(status);
     case 'partial':   return chalk.yellow(status);
     default:          return chalk.yellow(status);
   }

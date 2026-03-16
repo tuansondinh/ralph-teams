@@ -3,7 +3,8 @@
   "version": "0.1.1",
   "description": "CLI tool for Ralph Teams",
   "bin": {
-    "ralph-teams": "dist/index.js"
+    "ralph-teams": "dist/index.js",
+    "rjq": "dist/json-tool.js"
   },
   "files": [
     "dist",

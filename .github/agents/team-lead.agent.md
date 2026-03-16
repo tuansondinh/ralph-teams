@@ -103,7 +103,8 @@ After processing ALL stories in the epic:
    - If some passed: `PARTIAL: X/Y stories passed. Failed: [list story IDs]`
    - If all failed: `FAIL: 0/Y stories passed.`
 
-2. **Output the result** — Print the same result line. Then stop.
+2. **Output the result** — Print the same result line.
+3. **Exit immediately** — End the session right after writing and printing the result. Do not wait for more work, do not idle, and do not keep sub-agents alive.
 
 ## Rules
 
@@ -113,3 +114,4 @@ After processing ALL stories in the epic:
 - ALWAYS process ALL stories before writing the result file
 - ALWAYS check `passes` field before starting a story
 - ALWAYS pass the commit SHA from Builder to Validator
+- ALWAYS exit the session immediately after writing and printing the final result

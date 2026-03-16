@@ -41,9 +41,18 @@ function isCommandInstalled(cmd: string, deps: RunDeps): boolean {
   return result.status === 0;
 }
 
-export function runCommand(prdPath: string, options: { backend?: string }, deps: RunDeps = defaultDeps): void {
+function parseParallel(parallel: string): number | null {
+  if (!/^\d+$/.test(parallel)) {
+    return null;
+  }
+
+  return parseInt(parallel, 10);
+}
+
+export function runCommand(prdPath: string, options: { backend?: string; parallel?: string }, deps: RunDeps = defaultDeps): void {
   const resolved = path.resolve(prdPath);
   const backend = options.backend || 'claude';
+  const parallel = options.parallel;
 
   if (!deps.existsSync(resolved)) {
     console.error(chalk.red(`Error: prd.json not found at ${resolved}`));
@@ -78,9 +87,33 @@ export function runCommand(prdPath: string, options: { backend?: string }, deps:
 
   console.log(chalk.dim(`Using PRD: ${resolved}`));
   console.log(chalk.dim(`Using backend: ${backend}`));
-  console.log(chalk.dim(`Using ralph.sh: ${ralphSh}\n`));
+  console.log(chalk.dim(`Using ralph.sh: ${ralphSh}`));
+  if (parallel !== undefined) {
+    const parallelCount = parseParallel(parallel);
+    if (parallelCount === null) {
+      console.error(chalk.red('Error: --parallel must be a whole number'));
+      deps.exit(1);
+    }
+
+    if (parallelCount <= 0) {
+      console.error(chalk.red('Error: --parallel must be greater than 0'));
+      deps.exit(1);
+    }
+
+    console.log(chalk.dim(`Parallel: ${parallelCount} epics per wave\n`));
+  } else {
+    console.log(chalk.dim('Mode: sequential\n'));
+  }
 
   const args = [resolved, '--backend', backend];
+  if (parallel !== undefined) {
+    const parallelCount = parseParallel(parallel);
+    if (parallelCount === null || parallelCount <= 0) {
+      deps.exit(1);
+    }
+
+    args.push('--parallel', String(parallelCount));
+  }
   const result = deps.spawnSync(ralphSh, args, {
     stdio: 'inherit',
     shell: false,

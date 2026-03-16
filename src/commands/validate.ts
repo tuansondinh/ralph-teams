@@ -76,11 +76,19 @@ export function validateCommand(prdPath: string): void {
   }
 
   const epics = root.epics as unknown[];
+  if (epics.length === 0) {
+    errors.push('Missing required field: epics (must be a non-empty array)');
+  }
+
+  if (typeof root.project !== 'string' || root.project.trim() === '') {
+    errors.push('Missing required field: project (must be a non-empty string)');
+  }
+
   const epicIds = new Set<string>();
   const duplicateEpicIds = new Set<string>();
   const allStoryIds = new Set<string>();
   const duplicateStoryIds = new Set<string>();
-  const validStatuses = new Set(['pending', 'completed', 'partial', 'failed']);
+  const validStatuses = new Set(['pending', 'completed', 'partial', 'failed', 'merge-failed']);
 
   const validEpics: Array<{ id: string; dependsOn?: string[] }> = [];
 
@@ -110,13 +118,16 @@ export function validateCommand(prdPath: string): void {
     if (typeof e.status !== 'string') {
       errors.push(`epics[${i}] (${typeof e.id === 'string' ? e.id : i}) missing required string field: status`);
     } else if (!validStatuses.has(e.status)) {
-      errors.push(`epics[${i}] (${e.id}) invalid status "${e.status}" — must be one of: pending, completed, partial, failed`);
+      errors.push(`epics[${i}] (${e.id}) invalid status "${e.status}" — must be one of: pending, completed, partial, failed, merge-failed`);
     }
 
     if (!Array.isArray(e.userStories)) {
       errors.push(`epics[${i}] (${typeof e.id === 'string' ? e.id : i}) missing required field: userStories (must be an array)`);
     } else {
       const stories = e.userStories as unknown[];
+      if (stories.length === 0) {
+        errors.push(`epics[${i}] (${typeof e.id === 'string' ? e.id : i}) userStories must be a non-empty array`);
+      }
       for (let j = 0; j < stories.length; j++) {
         const story = stories[j];
         if (typeof story !== 'object' || story === null || Array.isArray(story)) {
@@ -141,6 +152,18 @@ export function validateCommand(prdPath: string): void {
 
         if (typeof s.passes !== 'boolean') {
           errors.push(`epics[${i}].userStories[${j}] (${typeof s.id === 'string' ? s.id : j}) missing required boolean field: passes`);
+        }
+      }
+    }
+
+    if (e.dependsOn !== undefined) {
+      if (!Array.isArray(e.dependsOn)) {
+        errors.push(`epics[${i}] (${typeof e.id === 'string' ? e.id : i}) dependsOn must be an array`);
+      } else {
+        for (let j = 0; j < e.dependsOn.length; j++) {
+          if (typeof e.dependsOn[j] !== 'string') {
+            errors.push(`epics[${i}] (${typeof e.id === 'string' ? e.id : i}) dependsOn[${j}] must be a string`);
+          }
         }
       }
     }

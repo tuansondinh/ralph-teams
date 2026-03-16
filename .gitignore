@@ -17,5 +17,8 @@ ralph-flow.png
 ralph-team-agents.png
 ralph-team-agents.svg
 
+# Git worktrees created by Ralph for parallel epic execution
+.worktrees/
+
 # OS files
 .DS_Store
