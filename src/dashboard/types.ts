@@ -53,12 +53,35 @@ export interface EpicDisplayData {
   mergeStatus: string | null;
 }
 
+/**
+ * Result of one Builder→Validator cycle for a single user story.
+ * Parsed from the progress.txt narrative logged by the Team Lead.
+ */
+export interface CycleResult {
+  /** Attempt number (1-based): 1 = first attempt, 2 = retry */
+  attempt: number;
+  /** Overall result of this cycle: 'pass' = Validator accepted, 'fail' = rejected */
+  result: 'pass' | 'fail';
+  /** Short summary of what failed (from Validator feedback), or null if passed */
+  failureDetail: string | null;
+}
+
 export interface StoryDisplayData {
   id: string;
   title: string;
   state: 'queued' | 'building' | 'validating' | 'pass' | 'fail';
   failureReason: string | null;
   duration: string | null;
+  /**
+   * Total number of build+validate cycles run for this story (1 or 2).
+   * 0 means the story hasn't started yet or no cycle data is available.
+   */
+  attempts: number;
+  /**
+   * Per-cycle detail for completed cycles, ordered by attempt number.
+   * Empty when no cycle data is available from progress.txt.
+   */
+  cycles: CycleResult[];
 }
 
 /** A merge event for a single epic, parsed from progress.txt. */

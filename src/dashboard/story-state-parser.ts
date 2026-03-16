@@ -6,6 +6,8 @@
  * unit-test without a filesystem.
  */
 
+import { CycleResult } from './types';
+
 /** Five possible story states shown in the dashboard. */
 export type StoryState = 'queued' | 'building' | 'validating' | 'pass' | 'fail';
 
@@ -177,4 +179,119 @@ export function filterProgressLinesForStory(
   const lines = progressContent.split('\n');
   // Match lines containing the story ID directly
   return lines.filter(line => line.includes(storyId) || line.includes(`[${epicId}]`));
+}
+
+/**
+ * Parses Builder→Validator cycle details from a progress.txt story block.
+ *
+ * The Team Lead logs story progress in this format:
+ * ```
+ * ## [Date/Time] — [Story ID] - [Story Title]
+ * Result: PASS | FAIL (attempt X/2)
+ * - What was implemented / attempted
+ * - Validator verdict summary
+ * ```
+ *
+ * This function finds the story's block(s) and extracts cycle results.
+ * A story may have 1 or 2 blocks (one per attempt).
+ *
+ * Strategy:
+ * - Find all story blocks that contain the storyId
+ * - From each block extract `Result: PASS|FAIL (attempt X/2)` lines
+ * - If no structured `Result:` lines exist, fall back to counting
+ *   PASS/FAIL signal lines for the story
+ *
+ * Returns an empty array if no cycle data is found.
+ *
+ * @param progressContent - Full progress.txt content
+ * @param storyId - Story ID to find, e.g. "US-003"
+ */
+export function parseCyclesFromProgress(
+  progressContent: string,
+  storyId: string,
+): CycleResult[] {
+  if (!progressContent || !storyId) return [];
+
+  const cycles: CycleResult[] = [];
+
+  // Strategy 1: parse structured "Result: PASS|FAIL (attempt X/2)" lines
+  // These are written by the Team Lead after each story cycle.
+  const resultLineRe = /^Result:\s*(PASS|FAIL)\s*\(attempt\s*(\d+)\/\d+\)/im;
+  const failDetailRe = /^[-*]\s*(?:Validator\s*(?:verdict|feedback)[:\s]+)(.+)/im;
+
+  // Split into story blocks by "## " headings that mention the story ID
+  const blockRe = new RegExp(
+    `^##[^\n]*${escapeRegex(storyId)}[^\n]*$`,
+    'gim',
+  );
+
+  const blockMatches: Array<{ index: number }> = [];
+  let m: RegExpExecArray | null;
+  while ((m = blockRe.exec(progressContent)) !== null) {
+    blockMatches.push({ index: m.index });
+  }
+
+  if (blockMatches.length > 0) {
+    for (let i = 0; i < blockMatches.length; i++) {
+      const start = blockMatches[i].index;
+      const end = i + 1 < blockMatches.length
+        ? blockMatches[i + 1].index
+        : progressContent.length;
+      const block = progressContent.slice(start, end);
+
+      const resultMatch = resultLineRe.exec(block);
+      if (resultMatch) {
+        const result = resultMatch[1].toUpperCase() === 'PASS' ? 'pass' : 'fail';
+        const attempt = parseInt(resultMatch[2], 10);
+
+        let failureDetail: string | null = null;
+        if (result === 'fail') {
+          const detailMatch = failDetailRe.exec(block);
+          if (detailMatch) {
+            failureDetail = detailMatch[1].trim().substring(0, 80) || null;
+          }
+        }
+
+        // Only add if we don't already have this attempt number
+        if (!cycles.find(c => c.attempt === attempt)) {
+          cycles.push({ attempt, result, failureDetail });
+        }
+      }
+    }
+
+    if (cycles.length > 0) {
+      return cycles.sort((a, b) => a.attempt - b.attempt);
+    }
+  }
+
+  // Strategy 2: fall back to counting PASS/FAIL lines that mention the story ID
+  // Used when Team Lead didn't write structured blocks (e.g. older format).
+  const storyLines = progressContent
+    .split('\n')
+    .filter(line => line.includes(storyId));
+
+  let attempt = 0;
+  for (const line of storyLines) {
+    const isPass = /\bPASS\b/i.test(line);
+    const isFail = /\bFAIL\b/i.test(line);
+    if (isPass || isFail) {
+      attempt++;
+      const result: 'pass' | 'fail' = isPass ? 'pass' : 'fail';
+      let failureDetail: string | null = null;
+      if (isFail) {
+        const reasonMatch = /FAIL[:\s]+(.+)/i.exec(line);
+        failureDetail = reasonMatch ? reasonMatch[1].trim().substring(0, 80) : null;
+      }
+      cycles.push({ attempt, result, failureDetail });
+    }
+  }
+
+  return cycles.sort((a, b) => a.attempt - b.attempt);
+}
+
+/**
+ * Escapes special regex characters in a string for safe use in RegExp constructor.
+ */
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

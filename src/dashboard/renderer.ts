@@ -280,6 +280,15 @@ export function renderEpicDetailContent(
       }
 
       lines.push(`  ${num}. ${icon} ${story.id}  ${titlePart}${detail}`);
+
+      // Render per-cycle Builder→Validator details when available
+      if (story.cycles && story.cycles.length > 0) {
+        for (const cycle of story.cycles) {
+          const cycleResult = cycle.result === 'pass' ? 'PASS' : 'FAIL';
+          const failStr = cycle.failureDetail ? ` — ${cycle.failureDetail}` : '';
+          lines.push(`       Attempt ${cycle.attempt}: Builder→Validator ${cycleResult}${failStr}`);
+        }
+      }
     });
   }
 

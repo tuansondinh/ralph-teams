@@ -14,6 +14,7 @@ import {
   hasValidatingSignalInProgress,
   hasBuildingSignalInProgress,
   filterProgressLinesForStory,
+  parseCyclesFromProgress,
   StoryStateInput,
 } from '../src/dashboard/story-state-parser';
 
@@ -461,4 +462,129 @@ test('parseEpicsFromPrd without progress content still assigns pass/fail from st
   assert.equal(stories[0].state, 'pass');
   assert.equal(stories[1].state, 'fail');
   assert.equal(stories[1].failureReason, null); // no progress content
+});
+
+// ---------------------------------------------------------------------------
+// parseCyclesFromProgress
+// ---------------------------------------------------------------------------
+
+test('parseCyclesFromProgress returns empty array for empty content', () => {
+  assert.deepEqual(parseCyclesFromProgress('', 'US-001'), []);
+});
+
+test('parseCyclesFromProgress returns empty array when story not mentioned', () => {
+  const content = '## 2024-01-01 — US-002 - Other Story\nResult: PASS (attempt 1/2)\n---';
+  assert.deepEqual(parseCyclesFromProgress(content, 'US-001'), []);
+});
+
+test('parseCyclesFromProgress parses single PASS cycle from structured block', () => {
+  const content = [
+    '## 2024-01-01 — US-001 - My Story',
+    'Result: PASS (attempt 1/2)',
+    '- What was implemented: everything',
+    '- Validator verdict summary: all tests pass',
+    '---',
+  ].join('\n');
+  const cycles = parseCyclesFromProgress(content, 'US-001');
+  assert.equal(cycles.length, 1);
+  assert.equal(cycles[0].attempt, 1);
+  assert.equal(cycles[0].result, 'pass');
+  assert.equal(cycles[0].failureDetail, null);
+});
+
+test('parseCyclesFromProgress parses single FAIL cycle from structured block', () => {
+  const content = [
+    '## 2024-01-01 — US-001 - My Story',
+    'Result: FAIL (attempt 1/2)',
+    '- What was attempted: something',
+    '- Validator feedback: typecheck not passing',
+    '---',
+  ].join('\n');
+  const cycles = parseCyclesFromProgress(content, 'US-001');
+  assert.equal(cycles.length, 1);
+  assert.equal(cycles[0].attempt, 1);
+  assert.equal(cycles[0].result, 'fail');
+  assert.ok(cycles[0].failureDetail !== null, 'should have failureDetail');
+});
+
+test('parseCyclesFromProgress parses two cycles (fail then pass)', () => {
+  const content = [
+    '## 2024-01-01 — US-001 - My Story',
+    'Result: FAIL (attempt 1/2)',
+    '- Validator feedback: tests failed',
+    '---',
+    '## 2024-01-01 — US-001 - My Story',
+    'Result: PASS (attempt 2/2)',
+    '- All tests now pass',
+    '---',
+  ].join('\n');
+  const cycles = parseCyclesFromProgress(content, 'US-001');
+  assert.equal(cycles.length, 2);
+  assert.equal(cycles[0].attempt, 1);
+  assert.equal(cycles[0].result, 'fail');
+  assert.equal(cycles[1].attempt, 2);
+  assert.equal(cycles[1].result, 'pass');
+});
+
+test('parseCyclesFromProgress parses two FAIL cycles', () => {
+  const content = [
+    '## 2024-01-01 — US-003 - Hard Story',
+    'Result: FAIL (attempt 1/2)',
+    '- Validator feedback: missing acceptance criteria',
+    '---',
+    '## 2024-01-01 — US-003 - Hard Story',
+    'Result: FAIL (attempt 2/2)',
+    '- Validator feedback: still missing criteria',
+    '---',
+  ].join('\n');
+  const cycles = parseCyclesFromProgress(content, 'US-003');
+  assert.equal(cycles.length, 2);
+  assert.equal(cycles[0].result, 'fail');
+  assert.equal(cycles[1].result, 'fail');
+});
+
+test('parseCyclesFromProgress orders cycles by attempt number', () => {
+  // Blocks in reverse order in content
+  const content = [
+    '## date — US-001 - My Story',
+    'Result: PASS (attempt 2/2)',
+    '---',
+    '## date — US-001 - My Story',
+    'Result: FAIL (attempt 1/2)',
+    '---',
+  ].join('\n');
+  const cycles = parseCyclesFromProgress(content, 'US-001');
+  assert.equal(cycles[0].attempt, 1);
+  assert.equal(cycles[1].attempt, 2);
+});
+
+test('parseCyclesFromProgress falls back to line-scan when no structured blocks', () => {
+  const content = [
+    'US-001 PASS — implemented feature',
+  ].join('\n');
+  const cycles = parseCyclesFromProgress(content, 'US-001');
+  assert.equal(cycles.length, 1);
+  assert.equal(cycles[0].result, 'pass');
+});
+
+test('parseCyclesFromProgress fallback handles FAIL with reason', () => {
+  const content = 'US-002 FAIL: tests not passing — see log';
+  const cycles = parseCyclesFromProgress(content, 'US-002');
+  assert.equal(cycles.length, 1);
+  assert.equal(cycles[0].result, 'fail');
+  assert.ok(cycles[0].failureDetail !== null);
+});
+
+test('parseCyclesFromProgress ignores blocks for other stories', () => {
+  const content = [
+    '## date — US-002 - Other Story',
+    'Result: FAIL (attempt 1/2)',
+    '---',
+    '## date — US-001 - My Story',
+    'Result: PASS (attempt 1/2)',
+    '---',
+  ].join('\n');
+  const cycles = parseCyclesFromProgress(content, 'US-001');
+  assert.equal(cycles.length, 1);
+  assert.equal(cycles[0].result, 'pass');
 });

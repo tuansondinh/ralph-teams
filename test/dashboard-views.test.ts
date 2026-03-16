@@ -49,6 +49,8 @@ function makeStory(overrides: Partial<StoryDisplayData> = {}): StoryDisplayData 
     state: 'queued',
     failureReason: null,
     duration: null,
+    attempts: 0,
+    cycles: [],
     ...overrides,
   };
 }
@@ -470,5 +472,91 @@ describe('view mode state transitions', () => {
   it('awaitingEpicNumber footer is NOT shown when false', () => {
     const footer = renderFooter('dashboard', false);
     assert.ok(!footer.includes('1-9'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cycle detail rendering
+// ---------------------------------------------------------------------------
+
+import type { CycleResult } from '../src/dashboard/types';
+
+describe('renderDetailStoryRow with cycles', () => {
+  it('renders no cycle lines when cycles array is empty', () => {
+    const story = makeStory({ state: 'pass', cycles: [] });
+    const row = renderDetailStoryRow(story, 0);
+    assert.ok(!row.includes('Attempt'), 'no Attempt lines expected');
+  });
+
+  it('renders single pass cycle', () => {
+    const cycle: CycleResult = { attempt: 1, result: 'pass', failureDetail: null };
+    const story = makeStory({ state: 'pass', attempts: 1, cycles: [cycle] });
+    const row = renderDetailStoryRow(story, 0);
+    assert.ok(row.includes('Attempt 1'));
+    assert.ok(row.includes('Builder→Validator PASS'));
+  });
+
+  it('renders single fail cycle with detail', () => {
+    const cycle: CycleResult = { attempt: 1, result: 'fail', failureDetail: 'typecheck failed' };
+    const story = makeStory({ state: 'fail', attempts: 1, cycles: [cycle] });
+    const row = renderDetailStoryRow(story, 0);
+    assert.ok(row.includes('Attempt 1'));
+    assert.ok(row.includes('Builder→Validator FAIL'));
+    assert.ok(row.includes('typecheck failed'));
+  });
+
+  it('renders two cycles: fail then pass', () => {
+    const cycles: CycleResult[] = [
+      { attempt: 1, result: 'fail', failureDetail: 'tests broken' },
+      { attempt: 2, result: 'pass', failureDetail: null },
+    ];
+    const story = makeStory({ state: 'pass', attempts: 2, cycles });
+    const row = renderDetailStoryRow(story, 0);
+    assert.ok(row.includes('Attempt 1: Builder→Validator FAIL — tests broken'));
+    assert.ok(row.includes('Attempt 2: Builder→Validator PASS'));
+  });
+
+  it('renders two fail cycles', () => {
+    const cycles: CycleResult[] = [
+      { attempt: 1, result: 'fail', failureDetail: 'missing feature' },
+      { attempt: 2, result: 'fail', failureDetail: 'still missing' },
+    ];
+    const story = makeStory({ state: 'fail', attempts: 2, cycles });
+    const row = renderDetailStoryRow(story, 0);
+    assert.ok(row.includes('Attempt 1: Builder→Validator FAIL — missing feature'));
+    assert.ok(row.includes('Attempt 2: Builder→Validator FAIL — still missing'));
+  });
+
+  it('renders cycle with no failure detail when detail is null', () => {
+    const cycle: CycleResult = { attempt: 1, result: 'fail', failureDetail: null };
+    const story = makeStory({ state: 'fail', attempts: 1, cycles: [cycle] });
+    const row = renderDetailStoryRow(story, 0);
+    assert.ok(row.includes('Attempt 1: Builder→Validator FAIL'));
+    assert.ok(!row.includes(' — '), 'no separator when no detail');
+  });
+});
+
+describe('renderEpicDetailContent with cycle details', () => {
+  it('shows cycle detail lines in epic detail content', () => {
+    const cycles: CycleResult[] = [
+      { attempt: 1, result: 'fail', failureDetail: 'typecheck fails' },
+      { attempt: 2, result: 'pass', failureDetail: null },
+    ];
+    const epic = makeEpic({
+      stories: [makeStory({ id: 'US-001', state: 'pass', attempts: 2, cycles })],
+    });
+    const state = makeState({ epics: [epic] });
+    const result = renderEpicDetailContent(state, 'EPIC-001', '');
+    assert.ok(result.includes('Attempt 1: Builder→Validator FAIL — typecheck fails'));
+    assert.ok(result.includes('Attempt 2: Builder→Validator PASS'));
+  });
+
+  it('shows no cycle lines when cycles is empty', () => {
+    const epic = makeEpic({
+      stories: [makeStory({ id: 'US-001', state: 'pass', cycles: [] })],
+    });
+    const state = makeState({ epics: [epic] });
+    const result = renderEpicDetailContent(state, 'EPIC-001', '');
+    assert.ok(!result.includes('Attempt '));
   });
 });

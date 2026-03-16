@@ -15,6 +15,7 @@ import { formatDuration } from '../time-utils';
 import {
   determineStoryState,
   filterProgressLinesForStory,
+  parseCyclesFromProgress,
   StoryStateInput,
 } from './story-state-parser';
 import {
@@ -208,12 +209,19 @@ function buildStoryDisplayData(
 
     const result = determineStoryState(input);
 
+    // Parse cycle details from progress.txt for the epic detail view
+    const cycles = progressContent
+      ? parseCyclesFromProgress(progressContent, story.id)
+      : [];
+
     return {
       id: story.id,
       title: story.title,
       state: result.state,
       failureReason: result.failureReason,
       duration: result.duration,
+      attempts: cycles.length,
+      cycles,
     };
   });
 }

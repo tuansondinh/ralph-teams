@@ -251,6 +251,8 @@ function makeStory(overrides: Partial<StoryDisplayData> = {}): StoryDisplayData 
     state: 'queued',
     failureReason: null,
     duration: null,
+    attempts: 0,
+    cycles: [],
     ...overrides,
   };
 }

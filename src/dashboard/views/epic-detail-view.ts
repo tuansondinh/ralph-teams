@@ -17,9 +17,17 @@ const LOG_TAIL_LINE_COUNT = 15;
 
 /**
  * Renders a detailed story row for the epic detail view.
- * Includes story ID, title, state icon, duration, and failure reason if any.
+ * Includes story ID, title, state icon, duration, failure reason, and cycle details.
  *
- * @param story - Full StoryDisplayData
+ * Format:
+ *   " 1. + US-001  Title...                              PASS  [2m 0s]"
+ *   "      Attempt 1: Builder→Validator PASS"
+ *
+ *   " 2. x US-002  Title...                              FAIL: reason  [3m]"
+ *   "      Attempt 1: Builder→Validator FAIL — typecheck error"
+ *   "      Attempt 2: Builder→Validator FAIL — still failing"
+ *
+ * @param story - Full StoryDisplayData including cycles
  * @param index - 0-based position (used for visual numbering)
  */
 export function renderDetailStoryRow(story: StoryDisplayData, index: number): string {
@@ -40,7 +48,18 @@ export function renderDetailStoryRow(story: StoryDisplayData, index: number): st
     detail = '  validating...';
   }
 
-  return `  ${num}. ${icon} ${story.id}  ${titlePart}${detail}`;
+  const lines: string[] = [`  ${num}. ${icon} ${story.id}  ${titlePart}${detail}`];
+
+  // Append per-cycle detail lines when available
+  if (story.cycles && story.cycles.length > 0) {
+    for (const cycle of story.cycles) {
+      const cycleResult = cycle.result === 'pass' ? 'PASS' : 'FAIL';
+      const failStr = cycle.failureDetail ? ` — ${cycle.failureDetail}` : '';
+      lines.push(`       Attempt ${cycle.attempt}: Builder→Validator ${cycleResult}${failStr}`);
+    }
+  }
+
+  return lines.join('\n');
 }
 
 /**
