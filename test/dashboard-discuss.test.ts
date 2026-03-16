@@ -394,6 +394,33 @@ describe('renderDiscussView', () => {
 });
 
 // ---------------------------------------------------------------------------
+// getCodeDiff
+// ---------------------------------------------------------------------------
+
+describe('getCodeDiff', () => {
+  it('returns empty string when worktreesDir is empty', () => {
+    const result = getCodeDiff('', 'EPIC-001', 'US-003');
+    assert.equal(result, '', 'should return empty string for empty worktreesDir');
+  });
+
+  it('returns a string with worktree-not-found message when dir does not exist', () => {
+    const result = getCodeDiff('/nonexistent/worktrees', 'EPIC-001', 'US-003');
+    assert.ok(typeof result === 'string', 'should return a string');
+    assert.ok(
+      result.includes('not found') || result.includes('worktree'),
+      'should describe why diff is unavailable',
+    );
+  });
+
+  it('always returns a string (never throws)', () => {
+    // Should not throw even with totally invalid paths
+    assert.doesNotThrow(() => {
+      getCodeDiff('/totally/invalid/path', 'EPIC-XYZ', 'US-999');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // buildDiscussContext
 // ---------------------------------------------------------------------------
 
