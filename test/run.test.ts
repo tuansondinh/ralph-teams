@@ -15,6 +15,7 @@ function createRunDeps(overrides: Partial<Parameters<typeof runCommand>[2]> = {}
   return {
     existsSync: fs.existsSync,
     chmodSync: fs.chmodSync,
+    unlinkSync: fs.unlinkSync,
     spawnSync: () => ({ status: 0 }) as ReturnType<NonNullable<Parameters<typeof runCommand>[2]>['spawnSync']>,
     spawn: spawn,
     exit: (code?: number) => {
@@ -114,6 +115,38 @@ test('runCommand invokes ralph.sh with the resolved PRD path and backend', async
   assert.equal(chmodTarget, resolvedRalphSh);
   assert.ok(logs.some(line => line.includes(`Using PRD: ${path.resolve(prdPath)}`)));
   assert.ok(logs.some(line => line.includes('Using backend: copilot')));
+});
+
+test('runCommand removes stale ralph-state.json before a fresh run', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
+  const prdPath = path.join(tempDir, 'prd.json');
+  fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
+  const stateFile = path.join(tempDir, 'ralph-state.json');
+  fs.writeFileSync(stateFile, JSON.stringify({ sourceBranch: 'stale' }));
+
+  const tempRalphSh = path.join(tempDir, 'ralph.sh');
+  fs.writeFileSync(tempRalphSh, '#!/bin/sh\n');
+
+  let unlinkedPath: string | undefined;
+  const deps = createRunDeps({
+    existsSync: (target: fs.PathLike) => fs.existsSync(target),
+    unlinkSync: ((target: fs.PathLike) => {
+      unlinkedPath = String(target);
+      fs.unlinkSync(target);
+    }) as typeof fs.unlinkSync,
+    spawnSync: (() => ({ status: 0 })) as NonNullable<Parameters<typeof runCommand>[2]>['spawnSync'],
+    chmodSync: (() => {}) as typeof fs.chmodSync,
+    cwd: () => tempDir,
+  });
+
+  await assert.rejects(runCommand(prdPath, { backend: 'claude', dashboard: false }, deps), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 0);
+    return true;
+  });
+
+  assert.equal(unlinkedPath, stateFile);
+  assert.equal(fs.existsSync(stateFile), false, 'stale state file should be removed before run');
 });
 
 test('runCommand with --parallel passes flag to ralph.sh', async () => {

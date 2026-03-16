@@ -255,8 +255,9 @@ test('US-001: two independent epics run in the same wave', () => {
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
 
-  // Both epics should appear in wave 1
-  assert.match(result.stdout, /Wave 1 — 2 epic\(s\)/);
+  // Both epics should be counted as remaining for the sequential run
+  assert.match(result.stdout, /2 epic\(s\) remaining to run sequentially/);
+  assert.doesNotMatch(result.stdout, /Wave 1/);
   assert.doesNotMatch(result.stdout, /Wave 2/);
 
   // Both should pass
@@ -276,17 +277,17 @@ test('US-001: dependent epic runs after its dependency completes', () => {
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
 
-  // Should have two separate waves
-  assert.match(result.stdout, /Wave 1 — 1 epic\(s\)/);
-  assert.match(result.stdout, /Wave 2 — 1 epic\(s\)/);
+  // Sequential mode should show the total remaining backlog decreasing
+  const remainingMatches = result.stdout.match(/[12] epic\(s\) remaining to run sequentially/g) ?? [];
+  assert.equal(remainingMatches.length, 2, `Expected two sequential remaining banners, got stdout: ${result.stdout}`);
 
-  // EPIC-001 in wave 1, EPIC-002 in wave 2
-  const wave1Pos = result.stdout.indexOf('Wave 1');
-  const wave2Pos = result.stdout.indexOf('Wave 2');
+  // EPIC-001 should complete before the backlog decreases from 2 to 1 for EPIC-002
+  const firstRemainingPos = result.stdout.indexOf('2 epic(s) remaining to run sequentially');
+  const secondRemainingPos = result.stdout.indexOf('1 epic(s) remaining to run sequentially');
   const epic1Pos = result.stdout.indexOf('[EPIC-001] PASSED');
   const epic2Pos = result.stdout.indexOf('[EPIC-002] PASSED');
-  assert.ok(wave1Pos < epic1Pos && epic1Pos < wave2Pos, 'EPIC-001 should complete before Wave 2 starts');
-  assert.ok(wave2Pos < epic2Pos, 'EPIC-002 should complete in Wave 2');
+  assert.ok(firstRemainingPos < epic1Pos && epic1Pos < secondRemainingPos, 'EPIC-001 should complete before the remaining count drops to 1');
+  assert.ok(secondRemainingPos < epic2Pos, 'EPIC-002 should complete after the remaining count drops to 1');
 });
 
 test('US-001: circular dependency detected — exits with code 1', () => {

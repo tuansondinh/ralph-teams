@@ -143,6 +143,7 @@ export function resumeCommand(deps: ResumeDeps = defaultDeps, backendOverride?: 
   // Pass config values to ralph.sh via environment variables
   const spawnEnv: NodeJS.ProcessEnv = {
     ...process.env,
+    RALPH_RESUME: '1',
     RALPH_EPIC_TIMEOUT: String(resolvedConfig.timeouts.epicTimeout),
     RALPH_IDLE_TIMEOUT: String(resolvedConfig.timeouts.idleTimeout),
     RALPH_VALIDATOR_MAX_PUSHBACKS: String(resolvedConfig.execution.validatorMaxPushbacks),
