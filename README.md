@@ -71,7 +71,6 @@ flowchart TB
 ## Requirements
 
 - Node.js 18+
-- `jq` in `PATH`
 - Git available if you want Ralph to switch/create the target branch
 
 Backend-specific requirements:
@@ -81,12 +80,6 @@ Backend-specific requirements:
 - Copilot backend:
   - `gh` CLI in `PATH`
   - GitHub Copilot CLI available through `gh copilot`
-
-Install `jq` on macOS:
-
-```bash
-brew install jq
-```
 
 ## Install
 
@@ -108,6 +101,7 @@ Then verify:
 
 ```bash
 ralph-teams --help
+rjq --help
 ```
 
 ## Quick Start
@@ -193,7 +187,7 @@ ralph-teams run --parallel 2
 
 Behavior:
 
-- validates that the selected backend dependencies, `jq`, and the PRD are available
+- validates that the selected backend dependencies, `rjq`, and the PRD are available
 - locates bundled `ralph.sh`
 - streams Ralph output directly to the terminal
 - exits with Ralph's exit code
@@ -221,6 +215,8 @@ Shows `progress.txt` with light colorization.
 ralph-teams logs
 ralph-teams logs --tail 20
 ```
+
+`--tail` shows the last `N` wave blocks from `progress.txt`.
 
 ### `ralph-teams reset <epicId> [path]`
 
@@ -348,7 +344,7 @@ Example:
 
 Important fields:
 
-- `epics[].status`: `pending` | `completed` | `partial` | `failed`
+- `epics[].status`: `pending` | `completed` | `partial` | `failed` | `merge-failed`
 - `epics[].dependsOn`: epic IDs that must be completed first
 - `userStories[].passes`: whether the story is currently marked as passing
 
@@ -378,6 +374,8 @@ The current execution contract is:
 
 - Ralph loops through epics in PRD order
 - blocked epics are skipped until dependencies are complete
+- runs sequentially by default
+- experimental wave parallelism is enabled only with `--parallel <n>`
 - the backend team processes one epic per session
 - stories run sequentially inside that epic
 - already-passed stories are skipped
@@ -400,6 +398,8 @@ Or from this repo:
 ```bash
 npm link
 ```
+
+The package also installs `rjq`, which `ralph.sh` uses internally.
 
 ### `Error: 'claude' CLI not found`
 
@@ -431,12 +431,12 @@ If that still does not stream, the issue is likely in the local `gh copilot` env
 
 Install Claude Code and ensure `claude` is on your `PATH`.
 
-### `Error: 'jq' not found`
+### `Error: 'rjq' not found`
 
-Install `jq`:
+Install or relink the package so the bundled JSON CLI is on your `PATH`:
 
 ```bash
-brew install jq
+npm install -g ralph-teams
 ```
 
 ### Ralph cannot switch branches
@@ -450,7 +450,13 @@ Useful commands in this repo:
 ```bash
 npm run build
 npm run typecheck
+npm test
 npm link
 ```
 
-The packaged CLI entrypoint is `dist/index.js`, and the runtime orchestrator is `ralph.sh`.
+Packaged binaries:
+
+- `ralph-teams`: main CLI entrypoint (`dist/index.js`)
+- `rjq`: bundled JSON query/manipulation CLI used by `ralph.sh` (`dist/json-tool.js`)
+
+The runtime orchestrator is `ralph.sh`.
