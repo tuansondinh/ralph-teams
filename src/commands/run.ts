@@ -5,6 +5,7 @@ import * as readline from 'readline/promises';
 import chalk from 'chalk';
 import { loadConfig, mergeCliOverrides } from '../config';
 import { startDashboard, resolveDashboardOptions } from '../dashboard';
+import { gatherDiscussContext, runDiscussSession } from '../discuss';
 
 interface RunDeps {
   existsSync: typeof fs.existsSync;
@@ -253,7 +254,74 @@ export async function runCommand(
   } else {
     // --dashboard: launch async with piped stdio and start dashboard
     const dashboardOptions = resolveDashboardOptions(resolved, deps.cwd());
-    const dashboard = startDashboard(dashboardOptions);
+    const cwd = deps.cwd();
+
+    const postRunCallbacks = {
+      onDiscuss: (storyId: string) => {
+        // Stop the dashboard screen temporarily so readline can take over the terminal
+        dashboard.stop();
+
+        // Gather context from prd.json, progress.txt, plans/, and worktrees/
+        const progressPath = path.join(cwd, 'progress.txt');
+        const plansDir = path.join(cwd, 'plans');
+
+        // Find the epic ID from the story ID so we can locate the correct worktree
+        const prd = fs.existsSync(resolved)
+          ? (() => {
+              try {
+                return JSON.parse(fs.readFileSync(resolved, 'utf-8')) as {
+                  epics: Array<{ id: string; userStories: Array<{ id: string }> }>;
+                };
+              } catch {
+                return { epics: [] };
+              }
+            })()
+          : { epics: [] };
+
+        let epicId = '';
+        for (const epic of prd.epics) {
+          if (epic.userStories.some(s => s.id === storyId)) {
+            epicId = epic.id;
+            break;
+          }
+        }
+
+        const worktreeDir = epicId
+          ? path.join(cwd, '.worktrees', epicId)
+          : cwd;
+
+        const context = gatherDiscussContext(
+          storyId,
+          resolved,
+          progressPath,
+          plansDir,
+          worktreeDir,
+        );
+
+        // Run the interactive discuss session (async, but we fire-and-forget here)
+        // The dashboard was already stopped above so readline can use the terminal
+        runDiscussSession(context).then(() => {
+          // After the session, exit cleanly — user can restart the dashboard if needed
+          deps.exit(0);
+        }).catch((err: Error) => {
+          console.error(chalk.red(`Discuss session error: ${err.message}`));
+          deps.exit(1);
+        });
+      },
+
+      onRetry: () => {
+        // Retry is handled by re-running ralph — just exit for now
+        dashboard.stop();
+        deps.exit(0);
+      },
+
+      onQuit: () => {
+        dashboard.stop();
+        deps.exit(0);
+      },
+    };
+
+    const dashboard = startDashboard(dashboardOptions, postRunCallbacks);
 
     const child: ChildProcess = deps.spawn(ralphSh, args, {
       stdio: ['ignore', 'pipe', 'pipe'],

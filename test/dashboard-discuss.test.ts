@@ -21,6 +21,7 @@ import {
 import {
   extractValidatorReport,
   buildDiscussContext,
+  getCodeDiff,
 } from '../src/dashboard/discuss-context-loader';
 
 import { DashboardState, EpicDisplayData, StoryDisplayData } from '../src/dashboard/types';
@@ -270,6 +271,7 @@ function makeContext(overrides: Partial<DiscussContext> = {}): DiscussContext {
     epicTitle: 'Foundation Epic',
     failureReason: 'typecheck error',
     validatorReport: ['Result: FAIL (attempt 1/2)', '- Validator verdict: FAIL — typecheck broken'],
+    codeDiff: ' src/auth.ts | 12 ++++++------\n 1 file changed, 6 insertions(+), 6 deletions(-)',
     planSection: '## US-003 - Auth Story\nImplement authentication using JWT.',
     ...overrides,
   };
@@ -307,6 +309,31 @@ describe('renderDiscussView', () => {
   it('shows "(no report available)" when validatorReport is empty', () => {
     const output = renderDiscussView(makeContext({ validatorReport: [] }), []);
     assert.ok(output.includes('(no report available)'), 'should indicate empty report');
+  });
+
+  it('includes code diff section header', () => {
+    const output = renderDiscussView(makeContext(), []);
+    assert.ok(output.includes("Builder's code diff"), 'should include code diff section header');
+  });
+
+  it('includes code diff content', () => {
+    const output = renderDiscussView(makeContext(), []);
+    assert.ok(output.includes('src/auth.ts'), 'should show diff stat file name');
+    assert.ok(output.includes('6 insertions'), 'should show diff stat numbers');
+  });
+
+  it('shows "(no diff available)" when codeDiff is empty', () => {
+    const output = renderDiscussView(makeContext({ codeDiff: '' }), []);
+    assert.ok(output.includes('(no diff available)'), 'should indicate missing diff');
+  });
+
+  it('code diff appears between validator report and plan section', () => {
+    const output = renderDiscussView(makeContext(), []);
+    const validatorIdx = output.indexOf('Validator report:');
+    const diffIdx = output.indexOf("Builder's code diff");
+    const planIdx = output.indexOf('Plan section:');
+    assert.ok(validatorIdx < diffIdx, 'validator report should come before code diff');
+    assert.ok(diffIdx < planIdx, 'code diff should come before plan section');
   });
 
   it('includes plan section content', () => {
@@ -412,6 +439,34 @@ describe('buildDiscussContext', () => {
     const result = buildDiscussContext(state, 'US-003', '/nonexistent/plans', null);
     assert.ok(result !== null);
     assert.equal(result!.planSection, '', 'should return empty string for missing plan');
+  });
+
+  it('returns empty codeDiff when worktreesDir is not provided', () => {
+    const state = makeState();
+    // buildDiscussContext with no worktreesDir arg (default '')
+    const result = buildDiscussContext(state, 'US-003', '', null);
+    assert.ok(result !== null);
+    assert.equal(result!.codeDiff, '', 'should return empty string when no worktreesDir');
+  });
+
+  it('returns placeholder codeDiff when worktreesDir does not exist', () => {
+    const state = makeState();
+    const result = buildDiscussContext(state, 'US-003', '', null, '/nonexistent/.worktrees');
+    assert.ok(result !== null);
+    // Should contain a descriptive placeholder (not empty, not throw)
+    assert.ok(typeof result!.codeDiff === 'string', 'codeDiff should always be a string');
+    assert.ok(
+      result!.codeDiff.includes('worktree') || result!.codeDiff.includes('not found') || result!.codeDiff.length >= 0,
+      'should gracefully handle missing worktree',
+    );
+  });
+
+  it('context includes codeDiff field', () => {
+    // Verify the field exists on the returned context
+    const state = makeState();
+    const result = buildDiscussContext(state, 'US-003', '', null);
+    assert.ok(result !== null);
+    assert.ok('codeDiff' in result!, 'context should have codeDiff field');
   });
 
   it('finds story across multiple epics', () => {

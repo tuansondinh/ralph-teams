@@ -52,6 +52,7 @@ export interface DashboardScreen {
  * @param postRunCallbacks - Optional callbacks for the post-run interactive menu (summary view)
  * @param plansDir - Directory containing plan-<epicId>.md files (for discuss context)
  * @param getProgressContent - Optional getter returning the latest raw progress.txt content
+ * @param worktreesDir - Base directory for git worktrees (for code diff loading)
  */
 export function createDashboardScreen(
   onExit: () => void,
@@ -59,6 +60,7 @@ export function createDashboardScreen(
   postRunCallbacks?: PostRunCallbacks,
   plansDir: string = '',
   getProgressContent?: () => string | null,
+  worktreesDir: string = '',
 ): DashboardScreen {
   // Mutable view state — owned by screen, not the poller
   let currentState: DashboardState | null = null;
@@ -174,7 +176,7 @@ export function createDashboardScreen(
   function enterDiscussMode(storyId: string): void {
     if (!currentState) return;
     const progress = getProgressContent ? getProgressContent() : null;
-    const ctx = buildDiscussContext(currentState, storyId, plansDir, progress);
+    const ctx = buildDiscussContext(currentState, storyId, plansDir, progress, worktreesDir);
     if (!ctx) return;
 
     discussContext = ctx;

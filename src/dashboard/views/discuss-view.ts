@@ -29,6 +29,11 @@ export interface DiscussContext {
    */
   validatorReport: string[];
   /**
+   * Git diff (--stat) of commits relevant to this story from the epic's worktree.
+   * Empty string when the worktree is missing or git commands fail.
+   */
+  codeDiff: string;
+  /**
    * The plan section describing this story's implementation requirements.
    * Empty string when the plan file is missing or the story section is not found.
    */
@@ -116,6 +121,9 @@ const SEP = '─'.repeat(72);
  *   Validator report:
  *     <validator lines or "(no report available)">
  *   ────────────────────────────────────────────────────────────────────────
+ *   Builder's code diff (--stat):
+ *     <diff lines or "(no diff available)">
+ *   ────────────────────────────────────────────────────────────────────────
  *   Plan section:
  *     <plan text or "(no plan section found)">
  *   ────────────────────────────────────────────────────────────────────────
@@ -144,6 +152,16 @@ export function renderDiscussView(
     lines.push('    (no report available)');
   } else {
     for (const line of context.validatorReport) {
+      lines.push(`    ${line}`);
+    }
+  }
+
+  lines.push(SEP, "  Builder's code diff (--stat):");
+  if (!context.codeDiff) {
+    lines.push('    (no diff available)');
+  } else {
+    const diffLines = context.codeDiff.split('\n');
+    for (const line of diffLines) {
       lines.push(`    ${line}`);
     }
   }
