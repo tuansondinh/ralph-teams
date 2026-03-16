@@ -18,6 +18,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync, spawn, ChildProcess } from 'child_process';
+import { saveGuidance } from './guidance';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -58,6 +59,12 @@ export interface DiscussSessionOptions {
    * runs `claude` in interactive mode with the context as the initial prompt.
    */
   spawnAgent?: AgentSpawner;
+  /**
+   * Directory in which to persist the guidance file after the session ends.
+   * When provided, the guidance is saved to `<guidanceDir>/<storyId>.md`.
+   * Defaults to 'guidance' if not specified.
+   */
+  guidanceDir?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -466,6 +473,19 @@ export async function runDiscussSession(
     process.stdout.write('[Discuss session ended]\n');
   }
   process.stdout.write('\n');
+
+  // Persist guidance to disk so the Builder can incorporate it on the next run.
+  // Saved to guidance/<storyId>.md (or <guidanceDir>/<storyId>.md if overridden).
+  const guidancePath = saveGuidance(
+    context.storyId,
+    {
+      failureContext: context.failureReport,
+      userInstructions: trimmedGuidance,
+      approach: '',
+    },
+    options?.guidanceDir ?? 'guidance',
+  );
+  process.stdout.write(`[Guidance saved to ${guidancePath}]\n`);
 
   return { storyId: context.storyId, guidance: trimmedGuidance };
 }

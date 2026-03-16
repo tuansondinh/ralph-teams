@@ -300,7 +300,8 @@ export async function runCommand(
 
         // Run the interactive discuss session (async, but we fire-and-forget here)
         // The dashboard was already stopped above so readline can use the terminal
-        runDiscussSession(context).then(() => {
+        const guidanceDir = path.join(cwd, 'guidance');
+        runDiscussSession(context, { guidanceDir }).then(() => {
           // After the session, exit cleanly — user can restart the dashboard if needed
           deps.exit(0);
         }).catch((err: Error) => {
