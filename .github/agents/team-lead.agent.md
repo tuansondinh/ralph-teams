@@ -39,6 +39,7 @@ Before starting a story, check the `passes` field in the PRD file.
    - The story details and acceptance criteria
    - The relevant section from the implementation plan
    - Any context from previous stories
+   - Note: the Builder should check `guidance/guidance-{story-id}.md` for any user guidance from a previous discuss session
 2. Wait for Builder to complete and return the commit SHA
 
 ### Validate Phase

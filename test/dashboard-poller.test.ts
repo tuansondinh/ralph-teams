@@ -209,6 +209,7 @@ test('createPoller calls onUpdate when prd.json is created', async () => {
     statsPath,
     logsDir: tempDir,
     progressPath,
+    guidanceDir: tempDir,
     pollIntervalMs: 50,
   };
 
@@ -236,6 +237,7 @@ test('createPoller returns default state when prd.json is missing', async () => 
     statsPath,
     logsDir: tempDir,
     progressPath,
+    guidanceDir: tempDir,
     pollIntervalMs: 50,
   };
 
@@ -268,6 +270,7 @@ test('createPoller stop() prevents further updates', async () => {
     statsPath,
     logsDir: tempDir,
     progressPath,
+    guidanceDir: tempDir,
     pollIntervalMs: 50,
   };
 
@@ -300,6 +303,7 @@ test('createPoller uses mtime caching — does not call onUpdate when file uncha
     statsPath,
     logsDir: tempDir,
     progressPath,
+    guidanceDir: tempDir,
     pollIntervalMs: 50,
   };
 

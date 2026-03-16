@@ -31,6 +31,7 @@ import {
   renderDiscussView,
 } from './views/discuss-view';
 import { buildDiscussContext } from './discuss-context-loader';
+import { saveGuidance, guidanceExists } from './guidance-writer';
 
 export interface DashboardScreen {
   screen: blessed.Widgets.Screen;
@@ -53,6 +54,7 @@ export interface DashboardScreen {
  * @param plansDir - Directory containing plan-<epicId>.md files (for discuss context)
  * @param getProgressContent - Optional getter returning the latest raw progress.txt content
  * @param worktreesDir - Base directory for git worktrees (for code diff loading)
+ * @param guidanceDir - Directory in which to persist guidance files when discuss exits
  */
 export function createDashboardScreen(
   onExit: () => void,
@@ -61,6 +63,7 @@ export function createDashboardScreen(
   plansDir: string = '',
   getProgressContent?: () => string | null,
   worktreesDir: string = '',
+  guidanceDir: string = '',
 ): DashboardScreen {
   // Mutable view state — owned by screen, not the poller
   let currentState: DashboardState | null = null;
@@ -195,9 +198,13 @@ export function createDashboardScreen(
 
   /**
    * Exits discuss mode and returns to the summary view.
-   * Hides the input box and restores normal content area height.
+   * If guidanceDir is set, persists guidance to disk and shows a brief
+   * confirmation message in the footer.
    */
   function exitDiscussMode(): void {
+    const savedContext = discussContext;
+    const savedMessages = discussMessages;
+
     discussContext = null;
     discussMessages = [];
     inputBox.hide();
@@ -207,6 +214,22 @@ export function createDashboardScreen(
     }
     epicListBox.focus();
     render();
+
+    // Persist guidance if a directory is configured and a session was active
+    if (guidanceDir && savedContext) {
+      try {
+        saveGuidance(guidanceDir, savedContext.storyId, savedContext, savedMessages);
+        const alreadyExisted = guidanceExists(guidanceDir, savedContext.storyId);
+        // guidanceExists returns true after writing — check whether it was new
+        const verb = alreadyExisted ? 'Updated' : 'Saved';
+        footerBox.setContent(
+          `  ${verb} guidance: guidance-${savedContext.storyId}.md  |  [q] quit`,
+        );
+        screen.render();
+      } catch {
+        // Guidance save failure is non-fatal — the summary view remains usable
+      }
+    }
   }
 
   /**

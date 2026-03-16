@@ -38,7 +38,15 @@ export function startDashboard(options: DashboardOptions, postRunCallbacks?: Pos
     process.exit(0);
   }
 
-  dashScreen = createDashboardScreen(onExit, options.logsDir, postRunCallbacks);
+  dashScreen = createDashboardScreen(
+    onExit,
+    options.logsDir,
+    postRunCallbacks,
+    /* plansDir */ '',
+    /* getProgressContent */ undefined,
+    /* worktreesDir */ '',
+    options.guidanceDir,
+  );
 
   const poller = createPoller(options, (state: DashboardState) => {
     if (dashScreen) {
@@ -81,6 +89,7 @@ export function resolveDashboardOptions(
     statsPath: path.join(cwd, 'ralph-run-stats.json'),
     logsDir: path.join(cwd, 'logs'),
     progressPath: path.join(cwd, 'progress.txt'),
+    guidanceDir: path.join(cwd, 'guidance'),
     pollIntervalMs,
   };
 }

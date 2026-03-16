@@ -44,7 +44,8 @@ Before starting a story, check the `passes` field in the PRD file (at the path p
    - Full acceptance criteria
    - The relevant section from the implementation plan
    - Any context from previous stories or prior validator feedback
-3. Wait for Builder to complete and message back with the commit SHA
+   - Note: the Builder should check `guidance/guidance-{story-id}.md` for any user guidance from a previous discuss session
+2. Wait for Builder to complete and message back with the commit SHA
 
 ### Validate Phase
 4. Send Validator a direct message with: the story's acceptance criteria + the commit SHA from Builder + "verify the implementation. Use `git diff <sha>~1 <sha>` to see exactly what changed."

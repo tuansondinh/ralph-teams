@@ -419,9 +419,10 @@ run_codex_exec() {
   local prompt="$2"
   shift 2
 
-  printf '%s' "$prompt" | codex exec \
-    -C "$workdir" \
+  printf '%s' "$prompt" | codex \
     -a never \
+    exec \
+    -C "$workdir" \
     -s workspace-write \
     --skip-git-repo-check \
     --color never \
@@ -672,6 +673,7 @@ $EPIC_JSON
 2. Process ALL user stories in priority order — do NOT stop until every story has been attempted
 3. For each story: check if passes=true in the PRD (skip those — they are already done), then Builder implements → Validator verifies → max 2 total cycles
    - If your agent runtime supports named sub-agents, use the dedicated builder and validator roles for these handoffs
+   - Tell the Builder to check guidance/guidance-{story-id}.md before implementing — if that file exists, the user has left guidance that MUST be followed
 4. Document any failures and move on to the next story
 5. When ALL stories have been processed (or skipped because already passed), write your result to: $RESULT_FILE
    - Write ONLY one line: PASS, PARTIAL, or FAIL with details

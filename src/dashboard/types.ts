@@ -13,6 +13,13 @@ export interface DashboardOptions {
   progressPath: string;
   /** How frequently to poll data files in milliseconds (default: 1500) */
   pollIntervalMs: number;
+  /**
+   * Directory in which to write guidance files for failed stories.
+   * Guidance files are written as `guidance-<storyId>.md` when the user
+   * exits discuss mode (e.g. `guidance/guidance-US-003.md`).
+   * If empty, guidance is not persisted.
+   */
+  guidanceDir: string;
 }
 
 /**
