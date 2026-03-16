@@ -331,6 +331,12 @@ emit_new_log_output() {
 COMPLETED=0
 FAILED=0
 PROCESSED=0
+CURRENT_WAVE=0
+INTERRUPTED=false
+
+# Script-level arrays so the SIGINT handler can access them
+active_pids=()
+active_indices=()
 
 # Resolve absolute path to PRD file so team lead always has the correct path
 PRD_ABS_PATH="$(cd "$(dirname "$PRD_FILE")" && pwd)/$(basename "$PRD_FILE")"
@@ -371,13 +377,69 @@ initialize_counters() {
   FAILED=$(rjq count-where "$PRD_FILE" .epics "status=failed|merge-failed" --default pending)
 }
 
+# Writes current run state to ralph-state.json atomically (temp file + rename).
+# Captures CURRENT_WAVE, active epic indices, backend, and parallel settings.
+save_run_state() {
+  local prd_dir
+  prd_dir="$(cd "$(dirname "$PRD_FILE")" && pwd)"
+  local tmp_file
+  tmp_file=$(mktemp "${prd_dir}/.ralph-state.json.XXXXXX")
+
+  # Build JSON array of active epic IDs
+  local active_epic_ids="["
+  local first=true
+  for idx in "${active_indices[@]+"${active_indices[@]}"}"; do
+    local epic_id
+    epic_id=$(rjq read "$PRD_FILE" ".epics[$idx].id" 2>/dev/null || true)
+    if [ -n "$epic_id" ]; then
+      [ "$first" = true ] && first=false || active_epic_ids="${active_epic_ids},"
+      active_epic_ids="${active_epic_ids}\"${epic_id}\""
+    fi
+  done
+  active_epic_ids="${active_epic_ids}]"
+
+  cat > "$tmp_file" << STATEEOF
+{
+  "version": 1,
+  "prdFile": "${PRD_ABS_PATH}",
+  "currentWave": ${CURRENT_WAVE},
+  "activeEpics": ${active_epic_ids},
+  "backend": "${BACKEND}",
+  "parallel": "${PARALLEL}",
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+STATEEOF
+
+  mv "$tmp_file" "${prd_dir}/ralph-state.json"
+}
+
+# SIGINT handler — kills active agents, saves state, then exits 130.
+handle_sigint() {
+  INTERRUPTED=true
+  echo ""
+  echo "Interrupt received — saving state..."
+
+  # Kill all active agent processes
+  for pid in "${active_pids[@]+"${active_pids[@]}"}"; do
+    terminate_process_tree "$pid"
+  done
+
+  # Save run state atomically
+  save_run_state
+
+  echo "Run interrupted. Resume with: ralph-teams resume"
+  exit 130
+}
+
+trap handle_sigint INT
+
 # Detect circular dependencies before starting
 detect_circular_deps "$PRD_FILE" "$TOTAL_EPICS"
 normalize_epic_statuses
 initialize_counters
 
-# Cleanup worktrees on exit (Ctrl+C, error, or normal finish)
-trap 'cleanup_all_worktrees; kill $(jobs -p) 2>/dev/null || true' EXIT
+# Cleanup worktrees on exit only when NOT interrupted (on interrupt, worktrees are preserved for resume)
+trap 'if [ "$INTERRUPTED" = false ]; then cleanup_all_worktrees; fi; kill $(jobs -p) 2>/dev/null || true' EXIT
 
 # process_epic_result: parse result file and update PRD status for a given epic index
 process_epic_result() {
@@ -645,6 +707,7 @@ while true; do
   [ ${#WAVE_EPICS[@]} -eq 0 ] && break
 
   WAVE_NUM=$((WAVE_NUM + 1))
+  CURRENT_WAVE=$WAVE_NUM
   echo ""
   echo "========================================================"
   echo "  Wave $WAVE_NUM — ${#WAVE_EPICS[@]} epic(s)"
@@ -668,9 +731,10 @@ while true; do
     local_max_slots=1
   fi
 
-  # active_pids[i] and active_indices[i] track running background processes
-  declare -a active_pids=()
-  declare -a active_indices=()
+  # Reset script-level active tracking arrays for this wave
+  # (active_pids and active_indices are script-level so SIGINT handler can access them)
+  active_pids=()
+  active_indices=()
   declare -a active_logs=()
   declare -a active_log_lines=()
   # wave_completed_ids collects epic IDs that completed successfully (for merge_wave)

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -685,4 +685,133 @@ test('US-003: --max-epics with --parallel both respected', () => {
   const passedCount = (result.stdout.match(/PASSED/g) ?? []).length;
   assert.ok(passedCount <= 3, `Expected at most 3 PASSEDs, got ${passedCount}\nstdout: ${result.stdout}`);
   assert.match(result.stdout, /Reached max epics limit/);
+});
+
+// ─── US-008 Tests (Graceful shutdown on ctrl+c) ───────────────────────────────
+
+/**
+ * Helper: run ralph.sh with spawn (non-blocking), wait until the process has
+ * written its worktree path to stdout (meaning it's past validation and into
+ * the wave loop), then send SIGINT. Returns a Promise that resolves to
+ * { stdout, stderr, code } when the process exits.
+ */
+function runRalphWithSigint(
+  tempDir: string,
+  env: Record<string, string>,
+  args: string[] = [],
+  timeoutMs = 10000,
+): Promise<{ stdout: string; stderr: string; code: number | null }> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('bash', [scriptPath, 'prd.json', ...args], {
+      cwd: tempDir,
+      env,
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let sigintSent = false;
+
+    const timer = setTimeout(() => {
+      proc.kill('SIGKILL');
+      reject(new Error(`ralph.sh timed out after ${timeoutMs}ms. stdout so far:\n${stdout}`));
+    }, timeoutMs);
+
+    proc.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+      // Send SIGINT once the process is past validation and into the wave loop
+      // (detected by "Spawning" appearing in output, meaning agents are active)
+      if (!sigintSent && stdout.includes('Spawning')) {
+        sigintSent = true;
+        // Small delay to let the agent process start
+        setTimeout(() => proc.kill('SIGINT'), 200);
+      }
+    });
+
+    proc.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      resolve({ stdout, stderr, code });
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
+test('US-008: SIGINT writes ralph-state.json with expected fields', { timeout: 15000 }, async () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    {},  // No result — so the mock hangs
+  );
+  // Make the mock agent hang so we can send SIGINT
+  env['MOCK_HANG_EPIC_001'] = '1';
+
+  await runRalphWithSigint(tempDir, env);
+
+  const stateFile = path.join(tempDir, 'ralph-state.json');
+  assert.ok(fs.existsSync(stateFile), 'ralph-state.json should exist after SIGINT');
+
+  const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as Record<string, unknown>;
+  assert.equal(state['version'], 1, 'state.version should be 1');
+  assert.ok(typeof state['prdFile'] === 'string', 'state.prdFile should be a string');
+  assert.ok(typeof state['currentWave'] === 'number', 'state.currentWave should be a number');
+  assert.ok(Array.isArray(state['activeEpics']), 'state.activeEpics should be an array');
+  assert.ok(typeof state['backend'] === 'string', 'state.backend should be a string');
+  assert.ok(typeof state['timestamp'] === 'string', 'state.timestamp should be a string');
+});
+
+test('US-008: SIGINT prints resume message', { timeout: 15000 }, async () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    {},
+  );
+  env['MOCK_HANG_EPIC_001'] = '1';
+
+  const { stdout } = await runRalphWithSigint(tempDir, env);
+  assert.match(stdout, /Run interrupted\. Resume with: ralph-teams resume/);
+});
+
+test('US-008: SIGINT exits with code 130', { timeout: 15000 }, async () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    {},
+  );
+  env['MOCK_HANG_EPIC_001'] = '1';
+
+  const { code } = await runRalphWithSigint(tempDir, env);
+  assert.equal(code, 130, 'should exit with code 130 on SIGINT');
+});
+
+test('US-008: worktrees are preserved after SIGINT (not cleaned up)', { timeout: 15000 }, async () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    {},
+  );
+  env['MOCK_HANG_EPIC_001'] = '1';
+
+  await runRalphWithSigint(tempDir, env);
+
+  // Worktree should still exist (not cleaned up so resume is possible)
+  const worktreeDir = path.join(tempDir, '.worktrees', 'EPIC-001');
+  assert.ok(fs.existsSync(worktreeDir), 'worktree should be preserved after SIGINT');
+});
+
+test('US-008: ralph-state.json includes the active epic ID', { timeout: 15000 }, async () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    {},
+  );
+  env['MOCK_HANG_EPIC_001'] = '1';
+
+  await runRalphWithSigint(tempDir, env);
+
+  const stateFile = path.join(tempDir, 'ralph-state.json');
+  const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as Record<string, unknown>;
+  const activeEpics = state['activeEpics'] as string[];
+  assert.ok(activeEpics.includes('EPIC-001'), `activeEpics should include EPIC-001, got: ${JSON.stringify(activeEpics)}`);
 });
