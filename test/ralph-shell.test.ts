@@ -957,3 +957,147 @@ test('US-004 (timeout): with two independent epics, one times out and the other 
   assert.equal(epic1Status, 'failed', `EPIC-001 should be failed (timed out), got: ${epic1Status}`);
   assert.equal(epic2Status, 'completed', `EPIC-002 should be completed, got: ${epic2Status}\nstdout: ${result.stdout}`);
 });
+
+// ─── US-005 (Idle Timeout) Tests ──────────────────────────────────────────────
+
+/**
+ * Helper: sets up a repo where the mock claude agent sleeps without writing
+ * any output to the log file. This simulates an agent that is stuck/idle.
+ * Use MOCK_SILENT_<EPIC_ID> env var to make the mock sleep silently.
+ */
+function setupIdleTimeoutRepo(
+  epics: Array<{ id: string; title: string }>,
+  resultMap: Record<string, string> = {},
+) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-idle-'));
+  const binDir = path.join(tempDir, 'bin');
+  fs.mkdirSync(binDir);
+
+  // Mock claude: if MOCK_SILENT_<EPIC_ID> is set, sleep 30 without writing any output.
+  // Otherwise, if MOCK_RESULT_<EPIC_ID> is set, write the result file.
+  // The key difference from setupMultiEpicRepo: silent mode writes nothing to stdout,
+  // so the log file has no output (simulating an idle/stuck agent).
+  const mockClaude = [
+    '#!/bin/sh',
+    'STDIN=$(cat)',
+    'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
+    'if [ -n "$EPIC_ID" ]; then',
+    '  SILENT_KEY="MOCK_SILENT_$(printf "%s" "$EPIC_ID" | tr - _)"',
+    '  SILENT_VAL=$(printenv "$SILENT_KEY" 2>/dev/null || true)',
+    '  RESULT_KEY="MOCK_RESULT_$(printf "%s" "$EPIC_ID" | tr - _)"',
+    '  RESULT_VAL=$(printenv "$RESULT_KEY" 2>/dev/null || true)',
+    '  if [ "$SILENT_VAL" = "1" ]; then',
+    '    # Sleep without writing any output — simulates idle/stuck agent',
+    '    sleep 30',
+    '  elif [ -n "$RESULT_VAL" ]; then',
+    '    mkdir -p results',
+    '    printf "%s\\n" "$RESULT_VAL" > "results/result-${EPIC_ID}.txt"',
+    '  fi',
+    'fi',
+    'exit 0',
+  ].join('\n');
+  fs.writeFileSync(path.join(binDir, 'claude'), mockClaude);
+  fs.chmodSync(path.join(binDir, 'claude'), 0o755);
+
+  execFileSync('git', ['init', '-b', 'main'], { cwd: tempDir });
+  execFileSync('git', ['config', 'user.name', 'Ralph Test'], { cwd: tempDir });
+  execFileSync('git', ['config', 'user.email', 'ralph@example.com'], { cwd: tempDir });
+
+  const prd = {
+    project: 'Idle Timeout Test',
+    epics: epics.map((e) => ({
+      id: e.id,
+      title: e.title,
+      status: 'pending',
+      userStories: [{ id: 'US-001', title: 'Story', passes: false }],
+    })),
+  };
+  fs.writeFileSync(path.join(tempDir, 'prd.json'), JSON.stringify(prd, null, 2));
+  fs.writeFileSync(path.join(tempDir, 'README.md'), 'initial\n');
+  execFileSync('git', ['add', '.'], { cwd: tempDir });
+  execFileSync('git', ['commit', '-m', 'chore: initial'], { cwd: tempDir });
+
+  const env: Record<string, string> = {
+    ...process.env as Record<string, string>,
+    PATH: `${binDir}:${process.env.PATH ?? ''}`,
+  };
+  for (const [epicId, result] of Object.entries(resultMap)) {
+    const envKey = `MOCK_RESULT_${epicId.replace(/-/g, '_')}`;
+    env[envKey] = result;
+  }
+
+  return { tempDir, binDir, env };
+}
+
+test('US-005 (idle timeout): idle epic is killed and marked failed after RALPH_IDLE_TIMEOUT seconds', { timeout: 15000 }, () => {
+  const { tempDir, env } = setupIdleTimeoutRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+  );
+  // Make mock agent sleep silently (no output) — triggers idle timeout
+  env['MOCK_SILENT_EPIC_001'] = '1';
+  env['RALPH_IDLE_TIMEOUT'] = '2';
+
+  const start = Date.now();
+  const result = spawnSync('bash', [scriptPath, 'prd.json'], {
+    cwd: tempDir,
+    encoding: 'utf-8',
+    env,
+    timeout: 12000,
+  });
+  const elapsed = Date.now() - start;
+
+  // Should finish well before the 30s mock hang (killed by idle timeout after ~2s)
+  assert.ok(elapsed < 10000, `Expected to finish quickly after idle timeout, took ${elapsed}ms`);
+
+  // Epic should be marked as failed in PRD
+  const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
+  assert.equal(prd.epics[0].status, 'failed', `Expected failed status, got: ${prd.epics[0].status}`);
+
+  // IDLE TIMEOUT message should appear in stdout
+  assert.match(result.stdout, /\[EPIC-001\] IDLE TIMEOUT — no output for 2s/);
+});
+
+test('US-005 (idle timeout): idle timeout event is logged to progress.txt', { timeout: 15000 }, () => {
+  const { tempDir, env } = setupIdleTimeoutRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+  );
+  env['MOCK_SILENT_EPIC_001'] = '1';
+  env['RALPH_IDLE_TIMEOUT'] = '2';
+
+  spawnSync('bash', [scriptPath, 'prd.json'], {
+    cwd: tempDir,
+    encoding: 'utf-8',
+    env,
+    timeout: 12000,
+  });
+
+  const progress = fs.readFileSync(path.join(tempDir, 'progress.txt'), 'utf-8');
+  assert.match(progress, /\[EPIC-001\] FAILED \(idle timeout — no output for 2s\)/);
+});
+
+test('US-005 (idle timeout): with two epics, only idle one is killed while active one completes', { timeout: 15000 }, () => {
+  const { tempDir, env } = setupIdleTimeoutRepo(
+    [
+      { id: 'EPIC-001', title: 'Alpha' },
+      { id: 'EPIC-002', title: 'Beta' },
+    ],
+    { 'EPIC-002': 'PASS' },
+  );
+  // EPIC-001 is silent (idle), EPIC-002 writes output and completes
+  env['MOCK_SILENT_EPIC_001'] = '1';
+  env['RALPH_IDLE_TIMEOUT'] = '2';
+
+  const result = spawnSync('bash', [scriptPath, 'prd.json', '--parallel', '2'], {
+    cwd: tempDir,
+    encoding: 'utf-8',
+    env,
+    timeout: 12000,
+  });
+
+  const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
+  const epic1Status = prd.epics.find((e: { id: string }) => e.id === 'EPIC-001').status;
+  const epic2Status = prd.epics.find((e: { id: string }) => e.id === 'EPIC-002').status;
+
+  assert.equal(epic1Status, 'failed', `EPIC-001 should be failed (idle timeout), got: ${epic1Status}`);
+  assert.equal(epic2Status, 'completed', `EPIC-002 should be completed, got: ${epic2Status}\nstdout: ${result.stdout}`);
+});

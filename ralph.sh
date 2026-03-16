@@ -289,6 +289,19 @@ cleanup_all_worktrees() {
   done
 }
 
+get_file_mtime() {
+  local file="$1"
+  if [ ! -f "$file" ]; then
+    echo "0"
+    return
+  fi
+  # macOS: stat -f %m, Linux: stat -c %Y
+  if stat -f %m "$file" 2>/dev/null; then
+    return
+  fi
+  stat -c %Y "$file" 2>/dev/null || echo "0"
+}
+
 terminate_process_tree() {
   local pid="$1"
   local child_pids
@@ -832,6 +845,42 @@ while true; do
           unset 'active_pids[$slot]'
           unset 'active_indices[$slot]'
           unset 'active_start_times[$slot]'
+          unset 'active_logs[$slot]'
+          unset 'active_log_lines[$slot]'
+          active_pids=("${active_pids[@]+"${active_pids[@]}"}")
+          active_indices=("${active_indices[@]+"${active_indices[@]}"}")
+          active_start_times=("${active_start_times[@]+"${active_start_times[@]}"}")
+          return
+        fi
+
+        # Check idle timeout — kill if log file has had no new output for IDLE_TIMEOUT seconds
+        local log_mtime
+        log_mtime=$(get_file_mtime "${active_logs[$slot]}")
+        local idle_seconds
+        if [ "$log_mtime" -eq 0 ]; then
+          # Log file doesn't exist yet — use start time as baseline
+          idle_seconds=$(( now - ${active_start_times[$slot]:-$now} ))
+        else
+          idle_seconds=$(( now - log_mtime ))
+        fi
+
+        if [ "$idle_seconds" -ge "$IDLE_TIMEOUT" ]; then
+          echo ""
+          echo "  [$finished_epic_id] IDLE TIMEOUT — no output for ${IDLE_TIMEOUT}s"
+          terminate_process_tree "${active_pids[$slot]}"
+          wait "${active_pids[$slot]}" 2>/dev/null || true
+          cleanup_epic_worktree "$finished_epic_id"
+          # Mark epic as failed in PRD
+          rjq set "$PRD_FILE" ".epics[${active_indices[$slot]}].status" '"failed"'
+          FAILED=$((FAILED + 1))
+          # Log idle timeout to progress.txt
+          echo "[$finished_epic_id] FAILED (idle timeout — no output for ${IDLE_TIMEOUT}s) — $(date)" >> "$PROGRESS_FILE"
+          # Clean up tracking arrays
+          unset 'active_pids[$slot]'
+          unset 'active_indices[$slot]'
+          unset 'active_start_times[$slot]'
+          unset 'active_logs[$slot]'
+          unset 'active_log_lines[$slot]'
           active_pids=("${active_pids[@]+"${active_pids[@]}"}")
           active_indices=("${active_indices[@]+"${active_indices[@]}"}")
           active_start_times=("${active_start_times[@]+"${active_start_times[@]}"}")
@@ -861,6 +910,8 @@ while true; do
           unset 'active_pids[$slot]'
           unset 'active_indices[$slot]'
           unset 'active_start_times[$slot]'
+          unset 'active_logs[$slot]'
+          unset 'active_log_lines[$slot]'
           active_pids=("${active_pids[@]+"${active_pids[@]}"}")
           active_indices=("${active_indices[@]+"${active_indices[@]}"}")
           active_start_times=("${active_start_times[@]+"${active_start_times[@]}"}")
