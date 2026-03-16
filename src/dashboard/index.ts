@@ -84,10 +84,12 @@ export function startDashboard(options: DashboardOptions, postRunCallbacks?: Pos
 export function resolveDashboardOptions(
   prdPath: string,
   cwd: string,
+  backend: string,
   pollIntervalMs: number = 1500,
 ): DashboardOptions {
   return {
     prdPath,
+    backend,
     statsPath: path.join(cwd, 'ralph-run-stats.json'),
     logsDir: path.join(cwd, 'logs'),
     progressPath: path.join(cwd, 'progress.txt'),

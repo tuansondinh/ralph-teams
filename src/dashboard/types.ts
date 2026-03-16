@@ -5,6 +5,8 @@
 export interface DashboardOptions {
   /** Path to prd.json */
   prdPath: string;
+  /** Backend used for the current run */
+  backend: string;
   /** Path to ralph-run-stats.json */
   statsPath: string;
   /** Directory containing epic log files */

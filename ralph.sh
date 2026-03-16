@@ -6,6 +6,8 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # --- Config ---
 PRD_FILE="${1:-prd.json}"
 MAX_EPICS=10
@@ -444,7 +446,7 @@ CURRENT_STORY_ID=""
 # Resolve absolute path to PRD file so team lead always has the correct path
 PRD_ABS_PATH="$(cd "$(dirname "$PRD_FILE")" && pwd)/$(basename "$PRD_FILE")"
 ROOT_DIR="$(pwd)"
-CODEX_AGENT_DIR="${ROOT_DIR}/.codex/agents"
+CODEX_AGENT_DIR="${SCRIPT_DIR}/.codex/agents"
 
 run_codex_exec() {
   local workdir="$1"
@@ -679,6 +681,9 @@ spawn_epic_bg() {
   EPIC_TITLE=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].title")
   local EPIC_JSON
   EPIC_JSON=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX]")
+  local PENDING_STORIES_JSON
+  PENDING_STORIES_JSON=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].userStories" | \
+    node -e 'const fs=require("fs"); const stories=JSON.parse(fs.readFileSync(0,"utf8")); process.stdout.write(JSON.stringify(stories.filter(s => s.passes !== true)));')
 
   local RESULT_FILE="${ROOT_DIR}/results/result-${EPIC_ID}.txt"
   local EPIC_LOG="${ROOT_DIR}/logs/epic-${EPIC_ID}-$(date +%s).log"
@@ -708,8 +713,13 @@ $PRD_ABS_PATH
 ## Epic
 $EPIC_JSON
 
+## Stories To Plan And Execute
+Only these stories should be planned or worked in this run. Stories omitted here are already passed and must be treated as done context only.
+$PENDING_STORIES_JSON
+
 ## Instructions
 1. Spawn the Planner first and wait for the plan to be written to plans/plan-${EPIC_ID}.md
+   - The planner must plan ONLY the stories listed in \"Stories To Plan And Execute\"
    - If your agent runtime supports named sub-agents, use the dedicated planner role for this
 2. Process ALL user stories in priority order — do NOT stop until every story has been attempted
 3. For each story: check if passes=true in the PRD (skip those — they are already done), then Builder implements → Validator verifies → max 2 total cycles

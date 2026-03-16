@@ -1,6 +1,6 @@
 {
   "name": "ralph-teams",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "CLI tool for Ralph Teams",
   "bin": {
     "ralph-teams": "dist/index.js",
@@ -8,6 +8,9 @@
   },
   "files": [
     "dist",
+    ".claude",
+    ".github/agents",
+    ".codex",
     "ralph.sh",
     "prd.json.example"
   ],

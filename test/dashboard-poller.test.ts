@@ -206,6 +206,7 @@ test('createPoller calls onUpdate when prd.json is created', async () => {
 
   const options: DashboardOptions = {
     prdPath,
+    backend: 'claude',
     statsPath,
     logsDir: tempDir,
     progressPath,
@@ -234,6 +235,7 @@ test('createPoller returns default state when prd.json is missing', async () => 
 
   const options: DashboardOptions = {
     prdPath,
+    backend: 'claude',
     statsPath,
     logsDir: tempDir,
     progressPath,
@@ -267,6 +269,7 @@ test('createPoller stop() prevents further updates', async () => {
 
   const options: DashboardOptions = {
     prdPath,
+    backend: 'claude',
     statsPath,
     logsDir: tempDir,
     progressPath,
@@ -300,6 +303,7 @@ test('createPoller uses mtime caching — does not call onUpdate when file uncha
 
   const options: DashboardOptions = {
     prdPath,
+    backend: 'claude',
     statsPath,
     logsDir: tempDir,
     progressPath,

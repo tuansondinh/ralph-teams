@@ -271,7 +271,7 @@ export async function runCommand(
     deps.exit(result.status ?? 1);
   } else {
     // --dashboard: launch async with piped stdio and start dashboard
-    const dashboardOptions = resolveDashboardOptions(resolved, deps.cwd());
+    const dashboardOptions = resolveDashboardOptions(resolved, deps.cwd(), backend);
     const cwd = deps.cwd();
 
     const postRunCallbacks = {
