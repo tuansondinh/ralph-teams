@@ -1,0 +1,719 @@
+{
+  "project": "ralph-web",
+  "branchName": "main",
+  "description": "Mobile-first web app for managing ralph-teams loops. Users authenticate, connect GitHub repos as projects, run epics via a dashboard, and chat with an AI assistant (opencode SDK + MCP) that can operate ralph-teams on their behalf. Stack: Next.js 15 App Router, TypeScript, Tailwind CSS, Supabase (auth + Postgres + Realtime), Runner service (Express on Node), opencode SDK for chat, MCP server wrapping ralph-teams CLI.",
+  "epics": [
+    {
+      "id": "EPIC-001",
+      "title": "MCP Server",
+      "description": "Standalone stdio-based MCP server that wraps ralph-teams CLI commands as tools. The opencode server on the runner uses this to give the AI assistant the ability to operate ralph-teams. Lives in mcp-server/ directory. Uses @modelcontextprotocol/sdk. Each tool receives PROJECT_PATH from env and scopes all operations to that directory.",
+      "status": "pending",
+      "planned": false,
+      "dependsOn": [],
+      "userStories": [
+        {
+          "id": "US-001",
+          "title": "MCP server scaffold and transport",
+          "description": "As a developer, I need the MCP server entry point wired up with stdio transport so it can be spawned as a child process by opencode.",
+          "acceptanceCriteria": [
+            "mcp-server/index.ts creates an MCP server with name 'ralph-teams' using @modelcontextprotocol/sdk StdioServerTransport",
+            "Server starts and responds to MCP initialize handshake",
+            "PROJECT_PATH env var is validated on startup — server exits with clear error if missing",
+            "package.json in mcp-server/ has build script outputting to dist/",
+            "Typecheck passes"
+          ],
+          "priority": 1,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-002",
+          "title": "Read tools: get_prd, get_status, get_logs, validate_prd",
+          "description": "As the AI assistant, I need read-only tools to inspect the current state of a project so I can answer user questions and decide what actions to take.",
+          "acceptanceCriteria": [
+            "get_prd tool reads and returns parsed prd.json from PROJECT_PATH",
+            "get_status tool returns epic/story pass-fail summary (epic id, title, status, story counts)",
+            "get_logs tool reads progress.txt from PROJECT_PATH, accepts optional 'lines' param (default 50), returns last N lines",
+            "validate_prd tool runs rjq validate on the prd.json and returns any errors",
+            "All tools return structured JSON responses",
+            "Typecheck passes"
+          ],
+          "priority": 2,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-003",
+          "title": "Run control tools: run_epics, stop_run, resume_run",
+          "description": "As the AI assistant, I need tools to start, stop, and resume ralph-teams runs so I can act on the user's behalf.",
+          "acceptanceCriteria": [
+            "run_epics tool POSTs to runner API /run/:projectId with backend param (default 'claude'), returns runId or error if already running",
+            "stop_run tool POSTs to runner API /run/:projectId/stop, returns success/error",
+            "resume_run tool POSTs to runner API /run/:projectId/resume, returns success/error if no ralph-state.json",
+            "All tools call runner via RUNNER_URL env var",
+            "Typecheck passes"
+          ],
+          "priority": 3,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-004",
+          "title": "Edit tools: reset_epic, update_story",
+          "description": "As the AI assistant, I need tools to modify the PRD so I can help users adjust their plan mid-run.",
+          "acceptanceCriteria": [
+            "reset_epic tool accepts epicId, uses rjq to set epic status to 'pending' and all its stories passes to false in PROJECT_PATH/prd.json",
+            "update_story tool accepts storyId and a fields object (title, description, acceptanceCriteria, passes), applies updates to prd.json using rjq",
+            "Both tools validate the id exists before modifying — return clear error if not found",
+            "Typecheck passes"
+          ],
+          "priority": 4,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-005",
+          "title": "Git tools: sync_repo, push_results",
+          "description": "As the AI assistant, I need git tools to keep the project repo in sync with GitHub.",
+          "acceptanceCriteria": [
+            "sync_repo tool runs git pull origin in PROJECT_PATH, returns stdout/stderr and success flag",
+            "push_results tool accepts optional commitMessage and openPr (boolean) params",
+            "push_results runs git add -A, git commit, git push in PROJECT_PATH using stored GitHub token from GITHUB_TOKEN env var",
+            "If openPr is true, tool calls GitHub API to open a PR from current branch to main and returns PR URL",
+            "Typecheck passes"
+          ],
+          "priority": 5,
+          "passes": false,
+          "failureReason": null
+        }
+      ]
+    },
+    {
+      "id": "EPIC-002",
+      "title": "Runner Service",
+      "description": "Express.js service deployed on Hetzner/Coolify (single persistent container). Manages ralph.sh processes (one per project), streams logs to Supabase, syncs project status to Supabase, and hosts the opencode server per chat session. Lives in runner/ directory.",
+      "status": "pending",
+      "planned": false,
+      "dependsOn": ["EPIC-001"],
+      "userStories": [
+        {
+          "id": "US-006",
+          "title": "Express server with health check and auth middleware",
+          "description": "As a developer, I need the runner Express server set up with a shared secret auth middleware so only the web app can call it.",
+          "acceptanceCriteria": [
+            "runner/index.ts creates Express app on PORT env var (default 3001)",
+            "All routes except GET /health require Authorization: Bearer <RUNNER_SECRET> header",
+            "GET /health returns { status: 'ok', runningProjects: string[] }",
+            "Supabase client initialised with SUPABASE_URL and SUPABASE_SERVICE_KEY env vars",
+            "Typecheck passes"
+          ],
+          "priority": 1,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-007",
+          "title": "Process registry and run API routes",
+          "description": "As the web app, I need to start, stop, and check the status of ralph.sh runs via the runner API.",
+          "acceptanceCriteria": [
+            "In-memory process registry: Map<projectId, { process, runId, startedAt }>",
+            "POST /run/:projectId spawns ralph.sh with prd.json in project's local path, inserts run record to Supabase runs table, rejects with 409 if project already running",
+            "DELETE /run/:projectId sends SIGINT to process, updates run status to 'stopped'",
+            "POST /run/:projectId/resume runs ralph-teams resume in project path",
+            "GET /run/:projectId/status returns { status: 'running' | 'idle', runId?, startedAt? }",
+            "On process exit, updates run record ended_at and status in Supabase",
+            "Typecheck passes"
+          ],
+          "priority": 2,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-008",
+          "title": "Log streamer: pipe ralph.sh output to Supabase",
+          "description": "As the web app, I need run logs written to Supabase in real-time so the browser can subscribe via Realtime.",
+          "acceptanceCriteria": [
+            "runner/lib/log-streamer.ts attaches to stdout/stderr of ralph.sh child process",
+            "Each line is inserted into Supabase run_logs table with run_id, ts, and line",
+            "Inserts are batched (max 50ms delay) to avoid excessive Supabase writes",
+            "Log streamer handles process exit cleanly without hanging",
+            "Typecheck passes"
+          ],
+          "priority": 3,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-009",
+          "title": "Status syncer: parse prd.json changes to Supabase",
+          "description": "As the web app, I need epic and story status synced to Supabase so the dashboard can show live pass/fail state without polling files.",
+          "acceptanceCriteria": [
+            "runner/lib/status-syncer.ts watches prd.json in a project path using fs.watch",
+            "On change, reads prd.json and upserts all epic/story statuses to Supabase project_status table",
+            "Watcher is started when a run begins and stopped when the process exits",
+            "Handles rapid file changes by debouncing (200ms)",
+            "Typecheck passes"
+          ],
+          "priority": 4,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-010",
+          "title": "Opencode session manager and chat SSE route",
+          "description": "As the web app, I need the runner to host opencode server instances and stream chat responses via SSE.",
+          "acceptanceCriteria": [
+            "runner/lib/opencode-manager.ts spawns an opencode server per project using @opencode-ai/sdk createOpencode()",
+            "Opencode server configured with MCP server pointing to mcp-server/dist/index.js with PROJECT_PATH set to project local path",
+            "GET /chat/:projectId accepts a 'message' query param, creates or reuses opencode session, sends prompt, streams SSE response back",
+            "SSE events include text deltas, tool_call, tool_result, and done event types",
+            "Opencode servers are reused across messages in the same session (sessionId in query param)",
+            "Typecheck passes"
+          ],
+          "priority": 5,
+          "passes": false,
+          "failureReason": null
+        }
+      ]
+    },
+    {
+      "id": "EPIC-003",
+      "title": "Supabase Schema and Auth",
+      "description": "Database schema with RLS policies, and authentication (email/password + GitHub OAuth). This is the foundation the web app and runner both depend on. Includes Next.js auth setup with Supabase SSR client.",
+      "status": "pending",
+      "planned": false,
+      "dependsOn": [],
+      "userStories": [
+        {
+          "id": "US-011",
+          "title": "Database schema and RLS policies",
+          "description": "As a developer, I need the Supabase schema created with proper row-level security so users can only access their own data.",
+          "acceptanceCriteria": [
+            "supabase/migrations/001_init.sql creates tables: projects, runs, run_logs, project_status, chat_sessions, chat_messages",
+            "projects: id uuid pk, user_id uuid refs auth.users, name text, repo_owner text, repo_name text, repo_url text, local_path text, created_at",
+            "runs: id uuid pk, project_id uuid refs projects, status text, started_at, ended_at",
+            "run_logs: id bigserial pk, run_id uuid refs runs, ts timestamptz, line text",
+            "project_status: project_id+epic_id+story_id composite pk, passes bool, updated_at",
+            "chat_sessions: id uuid pk, project_id uuid, created_at",
+            "chat_messages: id uuid pk, session_id uuid, role text, content text, created_at",
+            "RLS enabled on all tables — users can only read/write rows where project.user_id = auth.uid()",
+            "run_logs and project_status inherit access through their parent project",
+            "Supabase types generated to web/lib/supabase/types.ts"
+          ],
+          "priority": 1,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-012",
+          "title": "Email/password auth pages",
+          "description": "As a new user, I want to register and log in with email and password.",
+          "acceptanceCriteria": [
+            "web/app/(auth)/login/page.tsx renders email + password form with submit button",
+            "web/app/(auth)/register/page.tsx renders email + password + confirm password form",
+            "Both use Supabase Auth signInWithPassword and signUp",
+            "Form validation: email format, password min 8 chars, passwords match on register",
+            "On success: redirect to / (project list)",
+            "On error: show inline error message (invalid credentials, email taken, etc.)",
+            "Tailwind styled, mobile-first (full-width inputs, large touch targets)",
+            "Typecheck passes"
+          ],
+          "priority": 2,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-013",
+          "title": "GitHub OAuth login and token storage",
+          "description": "As a user, I want to sign in with GitHub so I can access my repos without entering credentials separately.",
+          "acceptanceCriteria": [
+            "'Sign in with GitHub' button on login page triggers Supabase signInWithOAuth({ provider: 'github', scopes: 'repo' })",
+            "OAuth callback handled at web/app/auth/callback/route.ts — exchanges code for session",
+            "GitHub access token extracted from session and stored encrypted in Supabase users metadata (user_metadata.github_token)",
+            "Login page shows both email/password form and GitHub OAuth button separated by 'or'",
+            "Typecheck passes"
+          ],
+          "priority": 3,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-014",
+          "title": "Auth guard and session middleware",
+          "description": "As a developer, I need unauthenticated users redirected to login and authenticated users to have a Supabase session available in all app routes.",
+          "acceptanceCriteria": [
+            "web/middleware.ts uses Supabase SSR to refresh session on every request",
+            "Requests to /app/* without a valid session redirect to /login",
+            "Requests to /login or /register with a valid session redirect to /",
+            "web/lib/supabase/server.ts exports createServerClient helper for use in API routes and server components",
+            "web/lib/supabase/client.ts exports createBrowserClient for use in client components",
+            "Typecheck passes"
+          ],
+          "priority": 4,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-015",
+          "title": "User account page and logout",
+          "description": "As a user, I want to see my account info and log out.",
+          "acceptanceCriteria": [
+            "web/app/(app)/account/page.tsx shows email, auth provider (email or GitHub), account created date",
+            "Logout button calls supabase.auth.signOut() and redirects to /login",
+            "Account page accessible from bottom nav or header avatar",
+            "Typecheck passes"
+          ],
+          "priority": 5,
+          "passes": false,
+          "failureReason": null
+        }
+      ]
+    },
+    {
+      "id": "EPIC-004",
+      "title": "Project Management",
+      "description": "Users can create projects by linking a GitHub repo, view all their projects, and delete projects. Creating a project clones the repo to the runner's persistent volume via the runner API.",
+      "status": "pending",
+      "planned": false,
+      "dependsOn": ["EPIC-002", "EPIC-003"],
+      "userStories": [
+        {
+          "id": "US-016",
+          "title": "Project list page",
+          "description": "As a user, I want to see all my projects on the home screen with their current run status.",
+          "acceptanceCriteria": [
+            "web/app/(app)/page.tsx fetches projects from Supabase for the authenticated user",
+            "Each project shown as a card with: name, repo (owner/name), run status badge (running=green dot, idle=gray dot)",
+            "Run status fetched from GET /run/:projectId/status on runner",
+            "Empty state: 'No projects yet' with a prominent Create Project button",
+            "Cards are tappable and navigate to /projects/[id]",
+            "Mobile-first card grid (1 column on mobile, 2 on tablet+)",
+            "Typecheck passes"
+          ],
+          "priority": 1,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-017",
+          "title": "GitHub repo picker",
+          "description": "As a user creating a project, I want to browse and select one of my GitHub repos.",
+          "acceptanceCriteria": [
+            "web/app/(app)/projects/new/page.tsx shows a searchable list of user's GitHub repos",
+            "Repos fetched from GET /api/github/repos which calls GitHub API using stored github_token",
+            "List shows repo name, visibility (public/private), and last updated date",
+            "Search filters by repo name client-side",
+            "Selecting a repo populates project name (editable) and proceeds to confirmation",
+            "Typecheck passes"
+          ],
+          "priority": 2,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-018",
+          "title": "Create project and clone repo",
+          "description": "As a user, I want to create a project which clones the selected GitHub repo to the runner so ralph-teams can work on it.",
+          "acceptanceCriteria": [
+            "POST /api/projects inserts project record to Supabase and calls runner POST /projects with { projectId, repoUrl, githubToken }",
+            "Runner POST /projects handler clones repo to /repos/<projectId>/ using git clone with token-authenticated URL",
+            "Runner returns local_path which is stored in Supabase projects.local_path",
+            "On success: redirect to /projects/[id]",
+            "Show loading state during clone (can take a few seconds)",
+            "If clone fails: show error and do not insert project record (rollback)",
+            "Typecheck passes"
+          ],
+          "priority": 3,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-019",
+          "title": "Delete project",
+          "description": "As a user, I want to delete a project to remove it from my list and clean up runner files.",
+          "acceptanceCriteria": [
+            "Delete option accessible from project settings or project card long-press",
+            "Confirmation dialog before deletion",
+            "DELETE /api/projects/[id] stops any running process, calls runner DELETE /projects/:projectId to remove /repos/<projectId>/, deletes Supabase project record (cascades to runs, logs, status)",
+            "After delete: redirect to / with success toast",
+            "Typecheck passes"
+          ],
+          "priority": 4,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-020",
+          "title": "Project settings page",
+          "description": "As a user, I want to view and update my project's details.",
+          "acceptanceCriteria": [
+            "web/app/(app)/projects/[id]/settings/page.tsx shows project name (editable), linked repo URL, local path on runner, created date",
+            "Save button updates project name in Supabase",
+            "Sync repo button calls POST /api/projects/[id]/sync which calls runner POST /sync/:projectId (git pull), shows output in a log box",
+            "Delete project button (red, with confirmation) as described in US-019",
+            "Typecheck passes"
+          ],
+          "priority": 5,
+          "passes": false,
+          "failureReason": null
+        }
+      ]
+    },
+    {
+      "id": "EPIC-005",
+      "title": "Dashboard and Run Controls",
+      "description": "Per-project dashboard showing epic/story status, run controls (start/stop/resume), and a live log stream. This is the main operational view of the app.",
+      "status": "pending",
+      "planned": false,
+      "dependsOn": ["EPIC-004"],
+      "userStories": [
+        {
+          "id": "US-021",
+          "title": "Epic status cards",
+          "description": "As a user, I want to see the status of all epics and stories in my project at a glance.",
+          "acceptanceCriteria": [
+            "web/app/(app)/projects/[id]/page.tsx fetches project_status from Supabase for all epics/stories",
+            "Each epic rendered as a card with: title, status badge (pending/running/completed/partial/failed), story progress dots (filled=passed, empty=not passed)",
+            "Story count shown as 'X/Y passed'",
+            "Tapping an epic card expands it to show individual story rows with pass/fail icons",
+            "Cards subscribe to Supabase Realtime on project_status table — update live as runner syncs status",
+            "Typecheck passes"
+          ],
+          "priority": 1,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-022",
+          "title": "Run controls: start, stop, resume",
+          "description": "As a user, I want to start, stop, and resume ralph-teams runs from the dashboard.",
+          "acceptanceCriteria": [
+            "Run button (▶) shown when project is idle — calls POST /api/projects/[id]/run",
+            "Stop button (■) shown when project is running — calls DELETE /api/projects/[id]/run with confirmation dialog",
+            "Resume button shown when ralph-state.json exists (check via GET /run/:projectId/status returning canResume: true) — calls POST /api/projects/[id]/run/resume",
+            "Backend selector (claude/copilot/codex) shown as a small pill toggle before starting",
+            "Button states update immediately optimistically then confirm via status poll",
+            "Typecheck passes"
+          ],
+          "priority": 2,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-023",
+          "title": "Live log stream",
+          "description": "As a user, I want to see ralph.sh log output in real-time while a run is active.",
+          "acceptanceCriteria": [
+            "web/app/(app)/projects/[id]/logs/page.tsx shows a scrollable log terminal",
+            "On load, fetches last 200 lines from Supabase run_logs for the latest run",
+            "Subscribes to Supabase Realtime on run_logs filtered by run_id — appends new lines as they arrive",
+            "Auto-scrolls to bottom on new lines (unless user has manually scrolled up)",
+            "Log lines colorized: lines containing 'PASS' in green, 'FAIL' or 'ERROR' in red, 'WARN' in yellow",
+            "Monospace font, dark background (terminal aesthetic)",
+            "Typecheck passes"
+          ],
+          "priority": 3,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-024",
+          "title": "Run history",
+          "description": "As a user, I want to see past runs for a project so I can review what happened.",
+          "acceptanceCriteria": [
+            "Run history section on project dashboard (collapsed by default, expandable)",
+            "Lists last 10 runs from Supabase runs table: started_at, ended_at, status badge, duration",
+            "Tapping a run shows its logs (same log view but for that run_id)",
+            "Typecheck passes"
+          ],
+          "priority": 4,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-025",
+          "title": "Push results to GitHub",
+          "description": "As a user, I want to push committed changes from a run back to GitHub.",
+          "acceptanceCriteria": [
+            "Push button shown on dashboard after a run completes",
+            "Calls POST /api/projects/[id]/push with optional { openPr: boolean }",
+            "API route calls runner POST /push/:projectId which runs git push using stored GitHub token",
+            "If openPr: true, opens a PR and returns URL — show PR URL as a tappable link",
+            "Show success toast with branch name and commit count pushed",
+            "Show error if push fails (e.g. conflicts) with git output",
+            "Typecheck passes"
+          ],
+          "priority": 5,
+          "passes": false,
+          "failureReason": null
+        }
+      ]
+    },
+    {
+      "id": "EPIC-006",
+      "title": "PRD Editor",
+      "description": "In-app editor for viewing and modifying the project's prd.json. Users can add/edit/remove epics and stories, reset epics, and validate the PRD — all without leaving the web app.",
+      "status": "pending",
+      "planned": false,
+      "dependsOn": ["EPIC-004"],
+      "userStories": [
+        {
+          "id": "US-026",
+          "title": "PRD viewer: epics and stories list",
+          "description": "As a user, I want to view the full PRD structure in the app.",
+          "acceptanceCriteria": [
+            "web/app/(app)/projects/[id]/prd/page.tsx fetches prd.json via GET /api/projects/[id]/prd",
+            "API route reads prd.json from project local_path via runner GET /projects/:projectId/prd",
+            "Renders accordion list: epics expandable to show stories",
+            "Each story shows title, priority badge, passes status icon, and acceptance criteria count",
+            "Typecheck passes"
+          ],
+          "priority": 1,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-027",
+          "title": "Edit story fields",
+          "description": "As a user, I want to edit a story's title, description, and acceptance criteria in a mobile-friendly form.",
+          "acceptanceCriteria": [
+            "Tapping a story opens a bottom sheet (mobile) or modal (tablet+) with an edit form",
+            "Form fields: title (text input), description (textarea), acceptance criteria (multi-line list with add/remove per item)",
+            "Save calls PATCH /api/projects/[id]/stories/[storyId] which calls runner PATCH /projects/:projectId/stories/:storyId",
+            "Runner handler uses rjq to update story fields in prd.json",
+            "Optimistic UI update: form closes and list updates before server confirms",
+            "Typecheck passes"
+          ],
+          "priority": 2,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-028",
+          "title": "Add and remove epics and stories",
+          "description": "As a user, I want to add new epics/stories and remove existing ones from the PRD.",
+          "acceptanceCriteria": [
+            "Add Epic button opens a form: title, description, dependsOn (multiselect of existing epic IDs)",
+            "Add Story button within an epic opens a form: title, description, acceptance criteria (at least one required)",
+            "New IDs auto-generated as next EPIC-### and US-### using rjq length queries",
+            "Remove epic/story: swipe-to-delete on mobile, delete icon on desktop — confirmation dialog",
+            "All mutations call runner API which uses rjq to modify prd.json",
+            "Typecheck passes"
+          ],
+          "priority": 3,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-029",
+          "title": "Reset epic from UI",
+          "description": "As a user, I want to reset a failed epic back to pending so I can re-run it.",
+          "acceptanceCriteria": [
+            "Reset option in epic's action menu (three-dot menu on epic card)",
+            "Calls POST /api/projects/[id]/epics/[epicId]/reset which calls runner POST /projects/:projectId/epics/:epicId/reset",
+            "Runner uses rjq to set epic status to 'pending' and all stories passes to false",
+            "PRD viewer re-fetches after reset and shows updated state",
+            "Action disabled if a run is currently active (show tooltip: 'Stop the run first')",
+            "Typecheck passes"
+          ],
+          "priority": 4,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-030",
+          "title": "Validate PRD and show errors inline",
+          "description": "As a user, I want to validate my PRD and see any errors highlighted directly in the editor.",
+          "acceptanceCriteria": [
+            "Validate button in PRD editor header calls POST /api/projects/[id]/prd/validate",
+            "API calls runner which runs ralph-teams validate and returns structured error list",
+            "Errors shown inline: epics or stories with issues highlighted with red border and error tooltip",
+            "Success state: green checkmark with 'PRD is valid' message",
+            "Validation also runs automatically before starting a run — blocks run start if invalid",
+            "Typecheck passes"
+          ],
+          "priority": 5,
+          "passes": false,
+          "failureReason": null
+        }
+      ]
+    },
+    {
+      "id": "EPIC-007",
+      "title": "AI Chat",
+      "description": "Per-project AI chat using opencode SDK (proxied through runner). The assistant has access to all MCP tools and can operate ralph-teams on behalf of the user. Chat history persisted in Supabase.",
+      "status": "pending",
+      "planned": false,
+      "dependsOn": ["EPIC-002", "EPIC-004"],
+      "userStories": [
+        {
+          "id": "US-031",
+          "title": "Chat page UI",
+          "description": "As a user, I want a clean mobile-optimized chat interface for talking to the AI assistant.",
+          "acceptanceCriteria": [
+            "web/app/(app)/projects/[id]/chat/page.tsx renders a full-height chat interface",
+            "Message thread scrollable, pinned to bottom on new messages",
+            "User messages right-aligned (blue bubble), assistant messages left-aligned (gray bubble)",
+            "Text input fixed at bottom with send button, submit on Enter (Shift+Enter for newline)",
+            "Tool call events shown as collapsed pills between messages: '🔧 get_status' expandable to show input/output",
+            "Loading indicator (animated dots) while assistant is responding",
+            "Chat history loaded from Supabase chat_messages on page load",
+            "Typecheck passes"
+          ],
+          "priority": 1,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-032",
+          "title": "Chat SSE streaming via runner proxy",
+          "description": "As the chat UI, I need assistant responses streamed in real-time from the opencode server on the runner.",
+          "acceptanceCriteria": [
+            "POST /api/projects/[id]/chat sends message + sessionId to runner GET /chat/:projectId?message=...&sessionId=...",
+            "Next.js API route proxies runner SSE stream to browser as a ReadableStream response",
+            "Browser EventSource or fetch with ReadableStream reader processes: text_delta, tool_call, tool_result, done event types",
+            "Text deltas appended to current assistant message bubble in real-time",
+            "On done event: full message saved to Supabase chat_messages",
+            "Typecheck passes"
+          ],
+          "priority": 2,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-033",
+          "title": "Chat session management",
+          "description": "As a user, I want to start new chat sessions and access recent ones.",
+          "acceptanceCriteria": [
+            "New Chat button creates a new chat_sessions record in Supabase and clears the message thread",
+            "Session list accessible via a sessions drawer (swipe from left on mobile)",
+            "Drawer shows last 10 sessions with first message preview and date",
+            "Tapping a session loads its messages from Supabase chat_messages",
+            "Current sessionId passed to runner on every message so opencode maintains context",
+            "Typecheck passes"
+          ],
+          "priority": 3,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-034",
+          "title": "Assistant system prompt and context injection",
+          "description": "As the AI assistant, I need project context injected into my system prompt so I can give relevant, accurate responses.",
+          "acceptanceCriteria": [
+            "Runner injects system prompt into opencode session on creation: project name, repo URL, current epic/story status summary, available MCP tools list",
+            "System prompt instructs assistant to always check get_status before answering questions about progress",
+            "System prompt instructs assistant not to run_epics without explicit user confirmation",
+            "System prompt format defined in runner/lib/opencode-manager.ts",
+            "Typecheck passes"
+          ],
+          "priority": 4,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-035",
+          "title": "Suggested prompts and quick actions",
+          "description": "As a user, I want suggested prompts when starting a chat so I know what I can ask.",
+          "acceptanceCriteria": [
+            "Empty chat state shows 4 suggested prompt chips: 'What's the current status?', 'Start a new run', 'Why did the last run fail?', 'Reset failed epics'",
+            "Tapping a chip sends that prompt immediately",
+            "Chips disappear once first message is sent",
+            "Typecheck passes"
+          ],
+          "priority": 5,
+          "passes": false,
+          "failureReason": null
+        }
+      ]
+    },
+    {
+      "id": "EPIC-008",
+      "title": "Mobile Polish and PWA",
+      "description": "Mobile-first UI polish pass: bottom navigation, PWA support, loading/error/empty states, touch interactions, and responsive layout across all pages.",
+      "status": "pending",
+      "planned": false,
+      "dependsOn": ["EPIC-005", "EPIC-006", "EPIC-007"],
+      "userStories": [
+        {
+          "id": "US-036",
+          "title": "Bottom navigation",
+          "description": "As a mobile user, I want a bottom navigation bar to switch between the main sections of a project.",
+          "acceptanceCriteria": [
+            "web/components/BottomNav.tsx renders a fixed bottom bar with 4 tabs: Dashboard, PRD, Chat, Logs",
+            "Active tab highlighted, uses Next.js usePathname to detect current route",
+            "Navigation bar only visible within /projects/[id]/* routes",
+            "Top-level / (project list) has its own header with account avatar linking to /account",
+            "Tab icons from lucide-react (LayoutDashboard, FileText, MessageSquare, ScrollText)",
+            "Typecheck passes"
+          ],
+          "priority": 1,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-037",
+          "title": "PWA manifest and icons",
+          "description": "As a mobile user, I want to add the app to my home screen for a native-like experience.",
+          "acceptanceCriteria": [
+            "web/public/manifest.json with name 'Ralph', short_name 'Ralph', start_url '/', display 'standalone', theme_color and background_color",
+            "App icons at 192x192 and 512x512 in web/public/icons/",
+            "web/app/layout.tsx includes manifest link and apple-touch-icon meta tags",
+            "Viewport meta tag set for mobile: width=device-width, initial-scale=1, maximum-scale=1",
+            "Typecheck passes"
+          ],
+          "priority": 2,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-038",
+          "title": "Loading skeletons and error boundaries",
+          "description": "As a user, I want clear loading and error states on every page so the app never feels broken.",
+          "acceptanceCriteria": [
+            "Every page that fetches data has a loading.tsx with skeleton UI matching the page layout",
+            "Every page has an error.tsx that shows a friendly error message with a Retry button",
+            "Supabase fetch errors display toast notifications (use a simple toast component, not a library)",
+            "Runner API errors (5xx, network) shown as inline error banners with retry",
+            "Typecheck passes"
+          ],
+          "priority": 3,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-039",
+          "title": "Touch interactions and responsive layout",
+          "description": "As a mobile user, I want all interactions to feel native with proper touch targets and responsive layouts.",
+          "acceptanceCriteria": [
+            "All tappable elements minimum 44x44px touch target",
+            "Project cards on home page: 1 column on mobile (<640px), 2 columns on tablet (640px+)",
+            "Epic cards on dashboard: full width on mobile, 2 columns on desktop (1024px+)",
+            "Bottom sheet component used for edit forms on mobile (slides up from bottom, dismissable by dragging down)",
+            "No horizontal overflow on any page at 375px viewport width",
+            "Typecheck passes"
+          ],
+          "priority": 4,
+          "passes": false,
+          "failureReason": null
+        },
+        {
+          "id": "US-040",
+          "title": "Empty states and onboarding flow",
+          "description": "As a new user, I want clear guidance on what to do next at every empty state.",
+          "acceptanceCriteria": [
+            "Project list empty state: illustration + 'Create your first project' button",
+            "PRD editor empty state (no epics): 'Your prd.json is empty. Ask the AI to help you create one.' with a button linking to Chat",
+            "Log view empty state (no run yet): 'No runs yet. Start a run from the Dashboard.'",
+            "Chat empty state: as described in US-035 suggested prompts",
+            "All empty states are centered vertically, mobile-friendly, with helpful copy",
+            "Typecheck passes"
+          ],
+          "priority": 5,
+          "passes": false,
+          "failureReason": null
+        }
+      ]
+    }
+  ]
+}
