@@ -26,7 +26,7 @@ export interface DashboardState {
   totalElapsed: string;
   /** Estimated total time string from run stats, e.g. '12m 30s' or '--' */
   totalTimeEstimate: string | null;
-  viewMode: 'dashboard' | 'logs' | 'epic-detail' | 'summary';
+  viewMode: 'dashboard' | 'logs' | 'epic-detail' | 'summary' | 'discuss';
   selectedEpicId: string | null;
   rawLogLines: string[];
   /** Merge events parsed from progress.txt (one per epic, latest state) */

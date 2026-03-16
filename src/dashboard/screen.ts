@@ -10,6 +10,8 @@
  *   - 'dashboard': epic list with activity
  *   - 'logs': raw log output from ralph
  *   - 'epic-detail': detailed story/log view for one epic
+ *   - 'summary': final run summary (shown after run completes)
+ *   - 'discuss': discuss a failed story (stub for US-018)
  */
 
 import * as blessed from 'blessed';
@@ -117,6 +119,14 @@ export function createDashboardScreen(
   });
 
   /**
+   * Returns true when the current state has at least one story in 'fail' state.
+   * Used to decide which summary footer / menu to show.
+   */
+  function computeHasFailedStories(state: DashboardState): boolean {
+    return state.epics.some(epic => epic.stories.some(s => s.state === 'fail'));
+  }
+
+  /**
    * Re-renders the content box and footer based on current view mode.
    * Called after any state or view mode change.
    */
@@ -127,9 +137,10 @@ export function createDashboardScreen(
     }
 
     const state = currentState;
+    const hasFailedStories = computeHasFailedStories(state);
 
-    // Update footer based on view mode and awaitingEpicNumber
-    footerBox.setContent(renderFooter(state.viewMode, awaitingEpicNumber));
+    // Update footer based on view mode, awaitingEpicNumber, and hasFailedStories
+    footerBox.setContent(renderFooter(state.viewMode, awaitingEpicNumber, hasFailedStories));
 
     switch (state.viewMode) {
       case 'logs':
@@ -161,6 +172,11 @@ export function createDashboardScreen(
         break;
       }
 
+      case 'discuss':
+        // Stub: discuss view will be implemented in US-018
+        epicListBox.setContent('[Discuss — coming soon]');
+        break;
+
       default:
         epicListBox.setContent(renderEpicList(state));
         break;
@@ -176,7 +192,10 @@ export function createDashboardScreen(
     onExit();
   });
 
-  // 'q' / Escape: exit from dashboard/summary, or return to dashboard from other views
+  // 'q' / Escape: context-sensitive quit/back
+  //   - dashboard or summary → exit
+  //   - discuss → return to summary
+  //   - logs, epic-detail → return to dashboard
   screen.key(['q', 'Q', 'escape'], () => {
     if (!currentState) {
       onExit();
@@ -184,6 +203,9 @@ export function createDashboardScreen(
     }
     if (currentState.viewMode === 'dashboard' || currentState.viewMode === 'summary') {
       onExit();
+    } else if (currentState.viewMode === 'discuss') {
+      currentState = { ...currentState, viewMode: 'summary' };
+      render();
     } else {
       currentState = { ...currentState, viewMode: 'dashboard', selectedEpicId: null };
       awaitingEpicNumber = false;
@@ -191,9 +213,21 @@ export function createDashboardScreen(
     }
   });
 
-  // 'd': toggle between dashboard and log view
+  // 'd': context-sensitive
+  //   - summary mode with failed stories → enter discuss view (US-018 stub)
+  //   - dashboard/logs → toggle between dashboard and log view
+  //   - other modes → no-op
   screen.key(['d', 'D'], () => {
     if (!currentState) return;
+    if (currentState.viewMode === 'summary') {
+      if (computeHasFailedStories(currentState)) {
+        currentState = { ...currentState, viewMode: 'discuss' };
+        render();
+      }
+      return;
+    }
+    // Guard: only toggle logs in non-summary modes
+    if (currentState.viewMode === 'discuss') return;
     awaitingEpicNumber = false;
     currentState = {
       ...currentState,
@@ -239,8 +273,18 @@ export function createDashboardScreen(
     screen.render();
   });
 
-  // Manual refresh
+  // 'r': context-sensitive
+  //   - summary mode with failed stories → retry all failed (no-op stub for US-020)
+  //   - other modes → manual refresh
   screen.key(['r', 'R'], () => {
+    if (!currentState) {
+      render();
+      return;
+    }
+    if (currentState.viewMode === 'summary') {
+      // no-op: retry logic will be implemented in US-020
+      return;
+    }
     render();
   });
 

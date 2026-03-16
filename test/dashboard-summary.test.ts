@@ -381,23 +381,93 @@ describe('renderSummaryView', () => {
 });
 
 // ---------------------------------------------------------------------------
-// renderFooter — summary mode
+// renderFooter — summary mode (no failed stories / all passed)
 // ---------------------------------------------------------------------------
 
-describe('renderFooter for summary view', () => {
-  it('returns "[q] quit" for summary view', () => {
-    const footer = renderFooter('summary', false);
-    assert.ok(footer.includes('[q] quit'), 'summary footer should include [q] quit');
+describe('renderFooter for summary view — all stories passed', () => {
+  it('shows "All stories passed!" when hasFailedStories is false', () => {
+    const footer = renderFooter('summary', false, false);
+    assert.ok(footer.includes('All stories passed!'), 'should show all-passed message');
   });
 
-  it('does not include dashboard hints in summary view', () => {
-    const footer = renderFooter('summary', false);
-    assert.ok(!footer.includes('[d] logs'), 'summary footer should not include logs toggle');
-    assert.ok(!footer.includes('[e] epic detail'), 'summary footer should not include epic detail');
+  it('shows "[q] quit" when all stories passed', () => {
+    const footer = renderFooter('summary', false, false);
+    assert.ok(footer.includes('[q] quit'), 'should include [q] quit');
   });
 
-  it('awaitingEpicNumber overrides summary view', () => {
-    const footer = renderFooter('summary', true);
-    assert.ok(footer.includes('1-9'), 'awaiting number prompt should override summary footer');
+  it('does not show discuss or retry hints when no failures', () => {
+    const footer = renderFooter('summary', false, false);
+    assert.ok(!footer.includes('[d] discuss'), 'should not include discuss hint');
+    assert.ok(!footer.includes('[r] retry'), 'should not include retry hint');
+  });
+
+  it('defaults hasFailedStories to false (backward-compatible)', () => {
+    // Calling with 2 args: should behave as all-passed
+    const footer = renderFooter('summary', false);
+    assert.ok(footer.includes('All stories passed!'), 'default should be all-passed footer');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// renderFooter — summary mode (with failed stories — interactive menu)
+// ---------------------------------------------------------------------------
+
+describe('renderFooter for summary view — with failed stories', () => {
+  it('shows [d] discuss when there are failed stories', () => {
+    const footer = renderFooter('summary', false, true);
+    assert.ok(footer.includes('[d] discuss a story'), 'should include discuss hint');
+  });
+
+  it('shows [r] retry when there are failed stories', () => {
+    const footer = renderFooter('summary', false, true);
+    assert.ok(footer.includes('[r] retry all failed'), 'should include retry hint');
+  });
+
+  it('shows [q] quit when there are failed stories', () => {
+    const footer = renderFooter('summary', false, true);
+    assert.ok(footer.includes('[q] quit'), 'should include quit hint');
+  });
+
+  it('does not show "All stories passed!" when there are failures', () => {
+    const footer = renderFooter('summary', false, true);
+    assert.ok(!footer.includes('All stories passed!'), 'should not show all-passed message');
+  });
+
+  it('does not include dashboard-mode hints', () => {
+    const footer = renderFooter('summary', false, true);
+    assert.ok(!footer.includes('[d] logs'), 'should not include logs toggle hint');
+    assert.ok(!footer.includes('[e] epic detail'), 'should not include epic detail hint');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// renderFooter — awaitingEpicNumber overrides
+// ---------------------------------------------------------------------------
+
+describe('renderFooter awaitingEpicNumber override for summary', () => {
+  it('awaitingEpicNumber overrides summary/no-failures footer', () => {
+    const footer = renderFooter('summary', true, false);
+    assert.ok(footer.includes('1-9'), 'awaiting number prompt should override all-passed footer');
+  });
+
+  it('awaitingEpicNumber overrides summary/with-failures footer', () => {
+    const footer = renderFooter('summary', true, true);
+    assert.ok(footer.includes('1-9'), 'awaiting number prompt should override menu footer');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// renderFooter — discuss mode
+// ---------------------------------------------------------------------------
+
+describe('renderFooter for discuss view', () => {
+  it('shows back-to-summary hint in discuss mode', () => {
+    const footer = renderFooter('discuss', false);
+    assert.ok(footer.includes('back to summary'), 'discuss footer should indicate how to return');
+  });
+
+  it('does not show dashboard hints in discuss mode', () => {
+    const footer = renderFooter('discuss', false);
+    assert.ok(!footer.includes('[d] logs'), 'discuss footer should not include logs toggle');
   });
 });
