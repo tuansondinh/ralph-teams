@@ -10,6 +10,7 @@ import { resetCommand } from './commands/reset';
 import { addEpicCommand } from './commands/add-epic';
 import { validateCommand } from './commands/validate';
 import { summaryCommand } from './commands/summary';
+import { resumeCommand } from './commands/resume';
 
 const program = new Command();
 
@@ -77,5 +78,10 @@ program
   .action((prdPath: string = './prd.json') => {
     summaryCommand(prdPath);
   });
+
+program
+  .command('resume')
+  .description('Resume an interrupted run from saved state')
+  .action(() => resumeCommand());
 
 program.parse(process.argv);

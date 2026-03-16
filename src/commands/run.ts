@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import chalk from 'chalk';
+import { loadConfig, mergeCliOverrides } from '../config';
 
 interface RunDeps {
   existsSync: typeof fs.existsSync;
@@ -9,6 +10,8 @@ interface RunDeps {
   spawnSync: typeof spawnSync;
   exit: (code?: number) => never;
   cwd: () => string;
+  /** Override for config loading — used in tests to inject a mock loader. */
+  loadConfig?: typeof loadConfig;
 }
 
 const defaultDeps: RunDeps = {
@@ -17,6 +20,7 @@ const defaultDeps: RunDeps = {
   spawnSync,
   exit: (code?: number) => process.exit(code),
   cwd: () => process.cwd(),
+  loadConfig,
 };
 
 function findRalphSh(deps: RunDeps): string | null {
@@ -51,7 +55,6 @@ function parseParallel(parallel: string): number | null {
 
 export function runCommand(prdPath: string, options: { backend?: string; parallel?: string }, deps: RunDeps = defaultDeps): void {
   const resolved = path.resolve(prdPath);
-  const backend = options.backend || 'claude';
   const parallel = options.parallel;
 
   if (!deps.existsSync(resolved)) {
@@ -59,6 +62,26 @@ export function runCommand(prdPath: string, options: { backend?: string; paralle
     console.error(chalk.dim('Run `ralph-teams init` to create one.'));
     deps.exit(1);
   }
+
+  // Load ralph.config.yml (if present) and merge CLI overrides
+  const configLoader = deps.loadConfig ?? loadConfig;
+  let config;
+  try {
+    const baseConfig = configLoader(deps.cwd());
+    const parallelNum = parallel !== undefined ? parseParallel(parallel) : undefined;
+    config = mergeCliOverrides(baseConfig, {
+      ...(options.backend !== undefined ? { backend: options.backend } : {}),
+      ...(parallelNum !== null && parallelNum !== undefined ? { parallel: parallelNum } : {}),
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(chalk.red(`Error: ${msg}`));
+    deps.exit(1);
+  }
+
+  // config is always defined here (exit called on error), but TypeScript needs this assertion
+  const resolvedConfig = config!;
+  const backend = resolvedConfig.execution.backend;
 
   if (backend === 'claude' && !isCommandInstalled('claude', deps)) {
     console.error(chalk.red('Error: claude CLI is not installed or not in PATH.'));
@@ -88,6 +111,7 @@ export function runCommand(prdPath: string, options: { backend?: string; paralle
   console.log(chalk.dim(`Using PRD: ${resolved}`));
   console.log(chalk.dim(`Using backend: ${backend}`));
   console.log(chalk.dim(`Using ralph.sh: ${ralphSh}`));
+
   if (parallel !== undefined) {
     const parallelCount = parseParallel(parallel);
     if (parallelCount === null) {
@@ -114,9 +138,21 @@ export function runCommand(prdPath: string, options: { backend?: string; paralle
 
     args.push('--parallel', String(parallelCount));
   }
+
+  // Pass config values to ralph.sh via environment variables
+  const spawnEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    RALPH_EPIC_TIMEOUT: String(resolvedConfig.timeouts.epicTimeout),
+    RALPH_IDLE_TIMEOUT: String(resolvedConfig.timeouts.idleTimeout),
+    RALPH_VALIDATOR_MAX_PUSHBACKS: String(resolvedConfig.execution.validatorMaxPushbacks),
+    RALPH_PARALLEL: String(resolvedConfig.execution.parallel),
+    RALPH_BACKEND: resolvedConfig.execution.backend,
+  };
+
   const result = deps.spawnSync(ralphSh, args, {
     stdio: 'inherit',
     shell: false,
+    env: spawnEnv,
   });
 
   deps.exit(result.status ?? 1);

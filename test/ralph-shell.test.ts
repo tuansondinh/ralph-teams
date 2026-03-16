@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -685,4 +685,419 @@ test('US-003: --max-epics with --parallel both respected', () => {
   const passedCount = (result.stdout.match(/PASSED/g) ?? []).length;
   assert.ok(passedCount <= 3, `Expected at most 3 PASSEDs, got ${passedCount}\nstdout: ${result.stdout}`);
   assert.match(result.stdout, /Reached max epics limit/);
+});
+
+// ─── US-008 Tests (Graceful shutdown on ctrl+c) ───────────────────────────────
+
+/**
+ * Helper: run ralph.sh with spawn (non-blocking), wait until the process has
+ * written its worktree path to stdout (meaning it's past validation and into
+ * the wave loop), then send SIGINT. Returns a Promise that resolves to
+ * { stdout, stderr, code } when the process exits.
+ */
+function runRalphWithSigint(
+  tempDir: string,
+  env: Record<string, string>,
+  args: string[] = [],
+  timeoutMs = 10000,
+): Promise<{ stdout: string; stderr: string; code: number | null }> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('bash', [scriptPath, 'prd.json', ...args], {
+      cwd: tempDir,
+      env,
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let sigintSent = false;
+
+    const timer = setTimeout(() => {
+      proc.kill('SIGKILL');
+      reject(new Error(`ralph.sh timed out after ${timeoutMs}ms. stdout so far:\n${stdout}`));
+    }, timeoutMs);
+
+    proc.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+      // Send SIGINT once the process is past validation and into the wave loop
+      // (detected by "Spawning" appearing in output, meaning agents are active)
+      if (!sigintSent && stdout.includes('Spawning')) {
+        sigintSent = true;
+        // Small delay to let the agent process start
+        setTimeout(() => proc.kill('SIGINT'), 200);
+      }
+    });
+
+    proc.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      resolve({ stdout, stderr, code });
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
+test('US-008: SIGINT writes ralph-state.json with expected fields', { timeout: 15000 }, async () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    {},  // No result — so the mock hangs
+  );
+  // Make the mock agent hang so we can send SIGINT
+  env['MOCK_HANG_EPIC_001'] = '1';
+
+  await runRalphWithSigint(tempDir, env);
+
+  const stateFile = path.join(tempDir, 'ralph-state.json');
+  assert.ok(fs.existsSync(stateFile), 'ralph-state.json should exist after SIGINT');
+
+  const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as Record<string, unknown>;
+  assert.equal(state['version'], 1, 'state.version should be 1');
+  assert.ok(typeof state['prdFile'] === 'string', 'state.prdFile should be a string');
+  assert.ok(typeof state['currentWave'] === 'number', 'state.currentWave should be a number');
+  assert.ok(Array.isArray(state['activeEpics']), 'state.activeEpics should be an array');
+  assert.ok(typeof state['backend'] === 'string', 'state.backend should be a string');
+  assert.ok(typeof state['timestamp'] === 'string', 'state.timestamp should be a string');
+});
+
+test('US-008: SIGINT prints resume message', { timeout: 15000 }, async () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    {},
+  );
+  env['MOCK_HANG_EPIC_001'] = '1';
+
+  const { stdout } = await runRalphWithSigint(tempDir, env);
+  assert.match(stdout, /Run interrupted\. Resume with: ralph-teams resume/);
+});
+
+test('US-008: SIGINT exits with code 130', { timeout: 15000 }, async () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    {},
+  );
+  env['MOCK_HANG_EPIC_001'] = '1';
+
+  const { code } = await runRalphWithSigint(tempDir, env);
+  assert.equal(code, 130, 'should exit with code 130 on SIGINT');
+});
+
+test('US-008: worktrees are preserved after SIGINT (not cleaned up)', { timeout: 15000 }, async () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    {},
+  );
+  env['MOCK_HANG_EPIC_001'] = '1';
+
+  await runRalphWithSigint(tempDir, env);
+
+  // Worktree should still exist (not cleaned up so resume is possible)
+  const worktreeDir = path.join(tempDir, '.worktrees', 'EPIC-001');
+  assert.ok(fs.existsSync(worktreeDir), 'worktree should be preserved after SIGINT');
+});
+
+test('US-008: ralph-state.json includes the active epic ID', { timeout: 15000 }, async () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    {},
+  );
+  env['MOCK_HANG_EPIC_001'] = '1';
+
+  await runRalphWithSigint(tempDir, env);
+
+  const stateFile = path.join(tempDir, 'ralph-state.json');
+  const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as Record<string, unknown>;
+  const activeEpics = state['activeEpics'] as string[];
+  assert.ok(activeEpics.includes('EPIC-001'), `activeEpics should include EPIC-001, got: ${JSON.stringify(activeEpics)}`);
+});
+
+test('US-008: ralph-state.json includes storyProgress field', { timeout: 15000 }, async () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    {},
+  );
+  env['MOCK_HANG_EPIC_001'] = '1';
+
+  await runRalphWithSigint(tempDir, env);
+
+  const stateFile = path.join(tempDir, 'ralph-state.json');
+  const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as Record<string, unknown>;
+
+  assert.ok('storyProgress' in state, 'state should have storyProgress field');
+  assert.ok(typeof state['storyProgress'] === 'object' && state['storyProgress'] !== null,
+    `storyProgress should be an object, got: ${JSON.stringify(state['storyProgress'])}`);
+
+  // The PRD has EPIC-001 with US-001 — verify it appears in storyProgress
+  const storyProgress = state['storyProgress'] as Record<string, unknown>;
+  assert.ok('EPIC-001' in storyProgress, `storyProgress should contain EPIC-001, got keys: ${Object.keys(storyProgress).join(', ')}`);
+  const epicStories = storyProgress['EPIC-001'] as Record<string, unknown>;
+  assert.ok('US-001' in epicStories, `EPIC-001 stories should contain US-001, got keys: ${Object.keys(epicStories).join(', ')}`);
+});
+
+test('US-008: ralph-state.json includes interruptedStoryId field', { timeout: 15000 }, async () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    {},
+  );
+  env['MOCK_HANG_EPIC_001'] = '1';
+
+  await runRalphWithSigint(tempDir, env);
+
+  const stateFile = path.join(tempDir, 'ralph-state.json');
+  const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as Record<string, unknown>;
+
+  // interruptedStoryId must exist as a key (value may be null since ralph.sh doesn't
+  // track individual story execution — the team-lead agent does that internally)
+  assert.ok('interruptedStoryId' in state,
+    `state should have interruptedStoryId field, got keys: ${Object.keys(state).join(', ')}`);
+});
+
+// ─── US-004 (Epic Timeout) Tests ──────────────────────────────────────────────
+
+test('US-004 (timeout): epic is killed and marked failed after RALPH_EPIC_TIMEOUT seconds', { timeout: 15000 }, () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    {},  // No result file — mock will hang
+  );
+  // Make mock agent hang (sleep 30) and set a very short timeout (2s)
+  env['MOCK_HANG_EPIC_001'] = '1';
+  env['RALPH_EPIC_TIMEOUT'] = '2';
+
+  const start = Date.now();
+  const result = spawnSync('bash', [scriptPath, 'prd.json'], {
+    cwd: tempDir,
+    encoding: 'utf-8',
+    env,
+    timeout: 12000,
+  });
+  const elapsed = Date.now() - start;
+
+  // Should finish well before the 30s mock hang (killed by timeout after ~2s)
+  assert.ok(elapsed < 10000, `Expected to finish quickly after timeout, took ${elapsed}ms`);
+
+  // Epic should be marked as failed in PRD
+  const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
+  assert.equal(prd.epics[0].status, 'failed', `Expected failed status, got: ${prd.epics[0].status}`);
+
+  // TIMED OUT message should appear in stdout
+  assert.match(result.stdout, /\[EPIC-001\] TIMED OUT after 2s/);
+});
+
+test('US-004 (timeout): timeout event is logged to progress.txt', { timeout: 15000 }, () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    {},
+  );
+  env['MOCK_HANG_EPIC_001'] = '1';
+  env['RALPH_EPIC_TIMEOUT'] = '2';
+
+  spawnSync('bash', [scriptPath, 'prd.json'], {
+    cwd: tempDir,
+    encoding: 'utf-8',
+    env,
+    timeout: 12000,
+  });
+
+  const progress = fs.readFileSync(path.join(tempDir, 'progress.txt'), 'utf-8');
+  assert.match(progress, /\[EPIC-001\] FAILED \(epic timeout after 2s\)/);
+});
+
+test('US-004 (timeout): timed-out epic log file contains timeout message', { timeout: 15000 }, () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    {},
+  );
+  env['MOCK_HANG_EPIC_001'] = '1';
+  env['RALPH_EPIC_TIMEOUT'] = '2';
+
+  spawnSync('bash', [scriptPath, 'prd.json'], {
+    cwd: tempDir,
+    encoding: 'utf-8',
+    env,
+    timeout: 12000,
+  });
+
+  const logsDir = path.join(tempDir, 'logs');
+  assert.ok(fs.existsSync(logsDir), 'logs/ directory should exist');
+  const logFiles = fs.readdirSync(logsDir).filter((f) => f.includes('EPIC-001'));
+  assert.ok(logFiles.length > 0, 'should have a log file for EPIC-001');
+
+  const logContent = fs.readFileSync(path.join(logsDir, logFiles[0]), 'utf-8');
+  assert.match(logContent, /TIMEOUT: Epic exceeded 2s limit/);
+});
+
+test('US-004 (timeout): with two independent epics, one times out and the other completes', { timeout: 15000 }, () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [
+      { id: 'EPIC-001', title: 'Alpha' },
+      { id: 'EPIC-002', title: 'Beta' },
+    ],
+    { 'EPIC-002': 'PASS' },
+  );
+  // EPIC-001 hangs, EPIC-002 completes normally; short timeout
+  env['MOCK_HANG_EPIC_001'] = '1';
+  env['RALPH_EPIC_TIMEOUT'] = '2';
+
+  const result = spawnSync('bash', [scriptPath, 'prd.json', '--parallel', '2'], {
+    cwd: tempDir,
+    encoding: 'utf-8',
+    env,
+    timeout: 12000,
+  });
+
+  const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
+  const epic1Status = prd.epics.find((e: { id: string }) => e.id === 'EPIC-001').status;
+  const epic2Status = prd.epics.find((e: { id: string }) => e.id === 'EPIC-002').status;
+
+  assert.equal(epic1Status, 'failed', `EPIC-001 should be failed (timed out), got: ${epic1Status}`);
+  assert.equal(epic2Status, 'completed', `EPIC-002 should be completed, got: ${epic2Status}\nstdout: ${result.stdout}`);
+});
+
+// ─── US-005 (Idle Timeout) Tests ──────────────────────────────────────────────
+
+/**
+ * Helper: sets up a repo where the mock claude agent sleeps without writing
+ * any output to the log file. This simulates an agent that is stuck/idle.
+ * Use MOCK_SILENT_<EPIC_ID> env var to make the mock sleep silently.
+ */
+function setupIdleTimeoutRepo(
+  epics: Array<{ id: string; title: string }>,
+  resultMap: Record<string, string> = {},
+) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-idle-'));
+  const binDir = path.join(tempDir, 'bin');
+  fs.mkdirSync(binDir);
+
+  // Mock claude: if MOCK_SILENT_<EPIC_ID> is set, sleep 30 without writing any output.
+  // Otherwise, if MOCK_RESULT_<EPIC_ID> is set, write the result file.
+  // The key difference from setupMultiEpicRepo: silent mode writes nothing to stdout,
+  // so the log file has no output (simulating an idle/stuck agent).
+  const mockClaude = [
+    '#!/bin/sh',
+    'STDIN=$(cat)',
+    'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
+    'if [ -n "$EPIC_ID" ]; then',
+    '  SILENT_KEY="MOCK_SILENT_$(printf "%s" "$EPIC_ID" | tr - _)"',
+    '  SILENT_VAL=$(printenv "$SILENT_KEY" 2>/dev/null || true)',
+    '  RESULT_KEY="MOCK_RESULT_$(printf "%s" "$EPIC_ID" | tr - _)"',
+    '  RESULT_VAL=$(printenv "$RESULT_KEY" 2>/dev/null || true)',
+    '  if [ "$SILENT_VAL" = "1" ]; then',
+    '    # Sleep without writing any output — simulates idle/stuck agent',
+    '    sleep 30',
+    '  elif [ -n "$RESULT_VAL" ]; then',
+    '    mkdir -p results',
+    '    printf "%s\\n" "$RESULT_VAL" > "results/result-${EPIC_ID}.txt"',
+    '  fi',
+    'fi',
+    'exit 0',
+  ].join('\n');
+  fs.writeFileSync(path.join(binDir, 'claude'), mockClaude);
+  fs.chmodSync(path.join(binDir, 'claude'), 0o755);
+
+  execFileSync('git', ['init', '-b', 'main'], { cwd: tempDir });
+  execFileSync('git', ['config', 'user.name', 'Ralph Test'], { cwd: tempDir });
+  execFileSync('git', ['config', 'user.email', 'ralph@example.com'], { cwd: tempDir });
+
+  const prd = {
+    project: 'Idle Timeout Test',
+    epics: epics.map((e) => ({
+      id: e.id,
+      title: e.title,
+      status: 'pending',
+      userStories: [{ id: 'US-001', title: 'Story', passes: false }],
+    })),
+  };
+  fs.writeFileSync(path.join(tempDir, 'prd.json'), JSON.stringify(prd, null, 2));
+  fs.writeFileSync(path.join(tempDir, 'README.md'), 'initial\n');
+  execFileSync('git', ['add', '.'], { cwd: tempDir });
+  execFileSync('git', ['commit', '-m', 'chore: initial'], { cwd: tempDir });
+
+  const env: Record<string, string> = {
+    ...process.env as Record<string, string>,
+    PATH: `${binDir}:${process.env.PATH ?? ''}`,
+  };
+  for (const [epicId, result] of Object.entries(resultMap)) {
+    const envKey = `MOCK_RESULT_${epicId.replace(/-/g, '_')}`;
+    env[envKey] = result;
+  }
+
+  return { tempDir, binDir, env };
+}
+
+test('US-005 (idle timeout): idle epic is killed and marked failed after RALPH_IDLE_TIMEOUT seconds', { timeout: 15000 }, () => {
+  const { tempDir, env } = setupIdleTimeoutRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+  );
+  // Make mock agent sleep silently (no output) — triggers idle timeout
+  env['MOCK_SILENT_EPIC_001'] = '1';
+  env['RALPH_IDLE_TIMEOUT'] = '2';
+
+  const start = Date.now();
+  const result = spawnSync('bash', [scriptPath, 'prd.json'], {
+    cwd: tempDir,
+    encoding: 'utf-8',
+    env,
+    timeout: 12000,
+  });
+  const elapsed = Date.now() - start;
+
+  // Should finish well before the 30s mock hang (killed by idle timeout after ~2s)
+  assert.ok(elapsed < 10000, `Expected to finish quickly after idle timeout, took ${elapsed}ms`);
+
+  // Epic should be marked as failed in PRD
+  const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
+  assert.equal(prd.epics[0].status, 'failed', `Expected failed status, got: ${prd.epics[0].status}`);
+
+  // IDLE TIMEOUT message should appear in stdout
+  assert.match(result.stdout, /\[EPIC-001\] IDLE TIMEOUT — no output for 2s/);
+});
+
+test('US-005 (idle timeout): idle timeout event is logged to progress.txt', { timeout: 15000 }, () => {
+  const { tempDir, env } = setupIdleTimeoutRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+  );
+  env['MOCK_SILENT_EPIC_001'] = '1';
+  env['RALPH_IDLE_TIMEOUT'] = '2';
+
+  spawnSync('bash', [scriptPath, 'prd.json'], {
+    cwd: tempDir,
+    encoding: 'utf-8',
+    env,
+    timeout: 12000,
+  });
+
+  const progress = fs.readFileSync(path.join(tempDir, 'progress.txt'), 'utf-8');
+  assert.match(progress, /\[EPIC-001\] FAILED \(idle timeout — no output for 2s\)/);
+});
+
+test('US-005 (idle timeout): with two epics, only idle one is killed while active one completes', { timeout: 15000 }, () => {
+  const { tempDir, env } = setupIdleTimeoutRepo(
+    [
+      { id: 'EPIC-001', title: 'Alpha' },
+      { id: 'EPIC-002', title: 'Beta' },
+    ],
+    { 'EPIC-002': 'PASS' },
+  );
+  // EPIC-001 is silent (idle), EPIC-002 writes output and completes
+  env['MOCK_SILENT_EPIC_001'] = '1';
+  env['RALPH_IDLE_TIMEOUT'] = '2';
+
+  const result = spawnSync('bash', [scriptPath, 'prd.json', '--parallel', '2'], {
+    cwd: tempDir,
+    encoding: 'utf-8',
+    env,
+    timeout: 12000,
+  });
+
+  const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
+  const epic1Status = prd.epics.find((e: { id: string }) => e.id === 'EPIC-001').status;
+  const epic2Status = prd.epics.find((e: { id: string }) => e.id === 'EPIC-002').status;
+
+  assert.equal(epic1Status, 'failed', `EPIC-001 should be failed (idle timeout), got: ${epic1Status}`);
+  assert.equal(epic2Status, 'completed', `EPIC-002 should be completed, got: ${epic2Status}\nstdout: ${result.stdout}`);
 });

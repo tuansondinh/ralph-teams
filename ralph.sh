@@ -32,6 +32,16 @@ if [ -n "$PARALLEL" ] && ! [[ "$PARALLEL" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
+# Read env vars as fallbacks (set by ralph-teams CLI from ralph.config.yml).
+# CLI flags passed directly to ralph.sh take precedence over these env vars.
+EPIC_TIMEOUT="${RALPH_EPIC_TIMEOUT:-3600}"
+IDLE_TIMEOUT="${RALPH_IDLE_TIMEOUT:-300}"
+VALIDATOR_MAX_PUSHBACKS="${RALPH_VALIDATOR_MAX_PUSHBACKS:-1}"
+# Only apply RALPH_PARALLEL env var if --parallel flag was not provided
+if [ -z "$PARALLEL" ] && [ -n "${RALPH_PARALLEL:-}" ] && [ "${RALPH_PARALLEL}" != "0" ]; then
+  PARALLEL="$RALPH_PARALLEL"
+fi
+
 # --- Backend configuration ---
 case "$BACKEND" in
   claude)
@@ -244,11 +254,18 @@ fi
 
 # --- Worktree Management ---
 # Creates a git worktree at .worktrees/<epic_id> on branch ralph/<epic_id>.
-# Deletes any stale branch/worktree from a prior run first.
+# If the worktree already exists and is valid (e.g. from an interrupted run),
+# it is reused as-is. Otherwise, any stale entries are cleaned up first.
 create_epic_worktree() {
   local epic_id="$1"
   local branch_name="ralph/${epic_id}"
   local worktree_path=".worktrees/${epic_id}"
+
+  # Reuse existing worktree if it is already registered and present on disk
+  if [ -d "$worktree_path" ] && git worktree list | grep -q "$worktree_path"; then
+    echo "$worktree_path"
+    return
+  fi
 
   # Remove stale worktree entry if it exists
   git worktree remove "$worktree_path" --force 2>/dev/null || true
@@ -270,6 +287,19 @@ cleanup_all_worktrees() {
   for dir in .worktrees/*/; do
     [ -d "$dir" ] && git worktree remove "$dir" --force 2>/dev/null || true
   done
+}
+
+get_file_mtime() {
+  local file="$1"
+  if [ ! -f "$file" ]; then
+    echo "0"
+    return
+  fi
+  # macOS: stat -f %m, Linux: stat -c %Y
+  if stat -f %m "$file" 2>/dev/null; then
+    return
+  fi
+  stat -c %Y "$file" 2>/dev/null || echo "0"
 }
 
 terminate_process_tree() {
@@ -321,6 +351,16 @@ emit_new_log_output() {
 COMPLETED=0
 FAILED=0
 PROCESSED=0
+CURRENT_WAVE=0
+INTERRUPTED=false
+
+# Script-level arrays so the SIGINT handler can access them
+active_pids=()
+active_indices=()
+active_start_times=()
+
+# Track the currently-processing story ID so SIGINT can capture it
+CURRENT_STORY_ID=""
 
 # Resolve absolute path to PRD file so team lead always has the correct path
 PRD_ABS_PATH="$(cd "$(dirname "$PRD_FILE")" && pwd)/$(basename "$PRD_FILE")"
@@ -361,13 +401,115 @@ initialize_counters() {
   FAILED=$(rjq count-where "$PRD_FILE" .epics "status=failed|merge-failed" --default pending)
 }
 
+# Writes current run state to ralph-state.json atomically (temp file + rename).
+# Captures CURRENT_WAVE, active epic indices, backend, parallel settings,
+# story progress from the PRD, and the currently-interrupted story ID.
+save_run_state() {
+  local prd_dir
+  prd_dir="$(cd "$(dirname "$PRD_FILE")" && pwd)"
+  local tmp_file
+  tmp_file=$(mktemp "${prd_dir}/.ralph-state.json.XXXXXX")
+
+  # Build JSON array of active epic IDs
+  local active_epic_ids="["
+  local first=true
+  for idx in "${active_indices[@]+"${active_indices[@]}"}"; do
+    local epic_id
+    epic_id=$(rjq read "$PRD_FILE" ".epics[$idx].id" 2>/dev/null || true)
+    if [ -n "$epic_id" ]; then
+      [ "$first" = true ] && first=false || active_epic_ids="${active_epic_ids},"
+      active_epic_ids="${active_epic_ids}\"${epic_id}\""
+    fi
+  done
+  active_epic_ids="${active_epic_ids}]"
+
+  # Build storyProgress object from PRD: { "epicId": { "storyId": true/false, ... }, ... }
+  local story_progress="{"
+  local epic_first=true
+  local total_epics_count
+  total_epics_count=$(rjq length "$PRD_FILE" .epics 2>/dev/null || echo 0)
+  for ep_idx in $(seq 0 $((total_epics_count - 1))); do
+    local ep_id
+    ep_id=$(rjq read "$PRD_FILE" ".epics[$ep_idx].id" 2>/dev/null || true)
+    [ -z "$ep_id" ] && continue
+
+    local story_count
+    story_count=$(rjq length "$PRD_FILE" ".epics[$ep_idx].userStories" 2>/dev/null || echo 0)
+    [ "$story_count" -eq 0 ] && continue
+
+    [ "$epic_first" = true ] && epic_first=false || story_progress="${story_progress},"
+    story_progress="${story_progress}\"${ep_id}\": {"
+
+    local story_first=true
+    for st_idx in $(seq 0 $((story_count - 1))); do
+      local st_id
+      st_id=$(rjq read "$PRD_FILE" ".epics[$ep_idx].userStories[$st_idx].id" 2>/dev/null || true)
+      local st_passes
+      st_passes=$(rjq read "$PRD_FILE" ".epics[$ep_idx].userStories[$st_idx].passes" "false" 2>/dev/null || echo "false")
+      [ -z "$st_id" ] && continue
+
+      # Normalize passes to JSON boolean
+      [ "$st_passes" = "true" ] && st_passes="true" || st_passes="false"
+
+      [ "$story_first" = true ] && story_first=false || story_progress="${story_progress},"
+      story_progress="${story_progress}\"${st_id}\": ${st_passes}"
+    done
+    story_progress="${story_progress}}"
+  done
+  story_progress="${story_progress}}"
+
+  # interruptedStoryId: the story being processed when interrupt occurred (empty = null)
+  local interrupted_story_json
+  if [ -n "$CURRENT_STORY_ID" ]; then
+    interrupted_story_json="\"${CURRENT_STORY_ID}\""
+  else
+    interrupted_story_json="null"
+  fi
+
+  cat > "$tmp_file" << STATEEOF
+{
+  "version": 1,
+  "prdFile": "${PRD_ABS_PATH}",
+  "currentWave": ${CURRENT_WAVE},
+  "activeEpics": ${active_epic_ids},
+  "backend": "${BACKEND}",
+  "parallel": "${PARALLEL}",
+  "storyProgress": ${story_progress},
+  "interruptedStoryId": ${interrupted_story_json},
+  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+STATEEOF
+
+  mv "$tmp_file" "${prd_dir}/ralph-state.json"
+}
+
+# SIGINT handler — kills active agents, saves state, then exits 130.
+handle_sigint() {
+  INTERRUPTED=true
+  echo ""
+  echo "Interrupt received — saving state..."
+
+  # Kill all active agent processes
+  for pid in "${active_pids[@]+"${active_pids[@]}"}"; do
+    terminate_process_tree "$pid"
+  done
+
+  # Save run state atomically
+  save_run_state
+
+  echo "Run interrupted. Resume with: ralph-teams resume"
+  exit 130
+}
+
+trap handle_sigint INT
+
 # Detect circular dependencies before starting
 detect_circular_deps "$PRD_FILE" "$TOTAL_EPICS"
 normalize_epic_statuses
 initialize_counters
 
-# Cleanup worktrees on exit (Ctrl+C, error, or normal finish)
-trap 'cleanup_all_worktrees; kill $(jobs -p) 2>/dev/null || true' EXIT
+# Cleanup worktrees on exit only when NOT interrupted (on interrupt, worktrees are preserved for resume)
+trap 'if [ "$INTERRUPTED" = false ]; then cleanup_all_worktrees; fi; kill $(jobs -p) 2>/dev/null || true' EXIT
 
 # process_epic_result: parse result file and update PRD status for a given epic index
 process_epic_result() {
@@ -635,6 +777,7 @@ while true; do
   [ ${#WAVE_EPICS[@]} -eq 0 ] && break
 
   WAVE_NUM=$((WAVE_NUM + 1))
+  CURRENT_WAVE=$WAVE_NUM
   echo ""
   echo "========================================================"
   echo "  Wave $WAVE_NUM — ${#WAVE_EPICS[@]} epic(s)"
@@ -658,9 +801,11 @@ while true; do
     local_max_slots=1
   fi
 
-  # active_pids[i] and active_indices[i] track running background processes
-  declare -a active_pids=()
-  declare -a active_indices=()
+  # Reset script-level active tracking arrays for this wave
+  # (active_pids, active_indices, and active_start_times are script-level so SIGINT handler can access them)
+  active_pids=()
+  active_indices=()
+  active_start_times=()
   declare -a active_logs=()
   declare -a active_log_lines=()
   # wave_completed_ids collects epic IDs that completed successfully (for merge_wave)
@@ -671,6 +816,8 @@ while true; do
   # processes its result, and removes it from the arrays.
   wait_for_one_slot() {
     while true; do
+      local now
+      now=$(date +%s)
       for slot in "${!active_pids[@]}"; do
         local finished_epic_id
         finished_epic_id=$(rjq read "$PRD_FILE" ".epics[${active_indices[$slot]}].id")
@@ -679,6 +826,66 @@ while true; do
 
         emit_new_log_output "$finished_epic_id" "${active_logs[$slot]}" "${active_log_lines[$slot]:-0}"
         active_log_lines[$slot]="$LAST_LOG_LINE_COUNT"
+
+        # Check epic timeout
+        local elapsed=$(( now - ${active_start_times[$slot]:-$now} ))
+        if [ "$elapsed" -ge "$EPIC_TIMEOUT" ]; then
+          echo ""
+          echo "  [$finished_epic_id] TIMED OUT after ${EPIC_TIMEOUT}s"
+          terminate_process_tree "${active_pids[$slot]}"
+          wait "${active_pids[$slot]}" 2>/dev/null || true
+          cleanup_epic_worktree "$finished_epic_id"
+          # Mark epic as failed in PRD
+          rjq set "$PRD_FILE" ".epics[${active_indices[$slot]}].status" '"failed"'
+          FAILED=$((FAILED + 1))
+          # Log timeout to progress.txt and epic log
+          echo "[$finished_epic_id] FAILED (epic timeout after ${EPIC_TIMEOUT}s) — $(date)" >> "$PROGRESS_FILE"
+          echo "TIMEOUT: Epic exceeded ${EPIC_TIMEOUT}s limit" >> "${active_logs[$slot]}"
+          # Clean up tracking arrays
+          unset 'active_pids[$slot]'
+          unset 'active_indices[$slot]'
+          unset 'active_start_times[$slot]'
+          unset 'active_logs[$slot]'
+          unset 'active_log_lines[$slot]'
+          active_pids=("${active_pids[@]+"${active_pids[@]}"}")
+          active_indices=("${active_indices[@]+"${active_indices[@]}"}")
+          active_start_times=("${active_start_times[@]+"${active_start_times[@]}"}")
+          return
+        fi
+
+        # Check idle timeout — kill if log file has had no new output for IDLE_TIMEOUT seconds
+        local log_mtime
+        log_mtime=$(get_file_mtime "${active_logs[$slot]}")
+        local idle_seconds
+        if [ "$log_mtime" -eq 0 ]; then
+          # Log file doesn't exist yet — use start time as baseline
+          idle_seconds=$(( now - ${active_start_times[$slot]:-$now} ))
+        else
+          idle_seconds=$(( now - log_mtime ))
+        fi
+
+        if [ "$idle_seconds" -ge "$IDLE_TIMEOUT" ]; then
+          echo ""
+          echo "  [$finished_epic_id] IDLE TIMEOUT — no output for ${IDLE_TIMEOUT}s"
+          terminate_process_tree "${active_pids[$slot]}"
+          wait "${active_pids[$slot]}" 2>/dev/null || true
+          cleanup_epic_worktree "$finished_epic_id"
+          # Mark epic as failed in PRD
+          rjq set "$PRD_FILE" ".epics[${active_indices[$slot]}].status" '"failed"'
+          FAILED=$((FAILED + 1))
+          # Log idle timeout to progress.txt
+          echo "[$finished_epic_id] FAILED (idle timeout — no output for ${IDLE_TIMEOUT}s) — $(date)" >> "$PROGRESS_FILE"
+          # Clean up tracking arrays
+          unset 'active_pids[$slot]'
+          unset 'active_indices[$slot]'
+          unset 'active_start_times[$slot]'
+          unset 'active_logs[$slot]'
+          unset 'active_log_lines[$slot]'
+          active_pids=("${active_pids[@]+"${active_pids[@]}"}")
+          active_indices=("${active_indices[@]+"${active_indices[@]}"}")
+          active_start_times=("${active_start_times[@]+"${active_start_times[@]}"}")
+          return
+        fi
 
         if ! kill -0 "${active_pids[$slot]}" 2>/dev/null; then
           process_finished=true
@@ -702,8 +909,12 @@ while true; do
           fi
           unset 'active_pids[$slot]'
           unset 'active_indices[$slot]'
+          unset 'active_start_times[$slot]'
+          unset 'active_logs[$slot]'
+          unset 'active_log_lines[$slot]'
           active_pids=("${active_pids[@]+"${active_pids[@]}"}")
           active_indices=("${active_indices[@]+"${active_indices[@]}"}")
+          active_start_times=("${active_start_times[@]+"${active_start_times[@]}"}")
           return
         fi
 
@@ -740,6 +951,7 @@ while true; do
     spawn_epic_bg "$EPIC_INDEX"
     active_pids+=("$LAST_SPAWN_PID")
     active_indices+=("$EPIC_INDEX")
+    active_start_times+=("$(date +%s)")
     active_logs+=("$LAST_SPAWN_LOG")
     active_log_lines+=("0")
   done
