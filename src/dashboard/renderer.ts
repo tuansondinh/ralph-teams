@@ -205,7 +205,7 @@ export function renderFooter(
         ? '[d] discuss a story  [r] retry all failed  [q] quit'
         : 'All stories passed! [q] quit';
     case 'discuss':
-      return '[q/Esc] back to summary';
+      return 'Type guidance, press Enter to send. Type "done" or press Esc to finish.';
     default:
       return '[d] logs  [e] epic detail  [q] quit  arrows:scroll';
   }

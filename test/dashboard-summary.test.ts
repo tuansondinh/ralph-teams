@@ -461,9 +461,14 @@ describe('renderFooter awaitingEpicNumber override for summary', () => {
 // ---------------------------------------------------------------------------
 
 describe('renderFooter for discuss view', () => {
-  it('shows back-to-summary hint in discuss mode', () => {
+  it('shows guidance instructions in discuss mode', () => {
     const footer = renderFooter('discuss', false);
-    assert.ok(footer.includes('back to summary'), 'discuss footer should indicate how to return');
+    assert.ok(footer.includes('Enter') || footer.includes('send'), 'discuss footer should show input instructions');
+  });
+
+  it('mentions how to finish in discuss mode (done or Esc)', () => {
+    const footer = renderFooter('discuss', false);
+    assert.ok(footer.includes('done') || footer.includes('Esc'), 'discuss footer should mention how to finish');
   });
 
   it('does not show dashboard hints in discuss mode', () => {

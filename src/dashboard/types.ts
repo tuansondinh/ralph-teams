@@ -108,3 +108,12 @@ export interface MergeEvent {
   status: 'merging' | 'merged-clean' | 'merged-ai' | 'merge-failed';
   detail: string;
 }
+
+/**
+ * A single message in the discuss conversation thread.
+ *   - 'context': auto-generated system message shown at the top (failure summary)
+ *   - 'user': guidance typed by the user
+ *
+ * Re-exported from views/discuss-view for convenience.
+ */
+export type { DiscussMessage } from './views/discuss-view';
