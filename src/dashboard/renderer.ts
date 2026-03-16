@@ -48,32 +48,89 @@ export function epicStatusSymbol(status: string): string {
 /**
  * Formats the header content for the dashboard.
  * Returns an array of lines to display in the header box.
+ *
+ * When estimates are available, a second cost line shows actual vs. estimated total.
  */
 export function renderHeader(state: DashboardState): string[] {
   const project = state.projectName || '(no project)';
   const wave = state.currentWave > 0 ? `Wave ${state.currentWave}` : 'Wave --';
   const elapsed = state.totalElapsed || '--';
 
-  const costStr = state.totalCostUsd !== null
+  const costActual = state.totalCostUsd !== null
     ? `$${state.totalCostUsd.toFixed(2)}`
     : '--';
 
-  return [
+  const costEstimate = state.totalCostEstimate ?? null;
+  const timeEstimate = state.totalTimeEstimate ?? null;
+
+  const lines: string[] = [
     `Ralph Teams — ${project}`,
-    `${wave}  |  Elapsed: ${elapsed}  |  Cost: ${costStr}`,
+    `${wave}  |  Elapsed: ${elapsed}  |  Cost: ${costActual}`,
   ];
+
+  // Show estimates line when at least one estimate is available
+  if (costEstimate !== null || timeEstimate !== null) {
+    const costPart = costEstimate ? `Est. total: ${costEstimate}` : null;
+    const timePart = timeEstimate ? `Est. time: ${timeEstimate}` : null;
+    const parts = [costPart, timePart].filter((p): p is string => p !== null);
+    lines.push(parts.join('  |  '));
+  }
+
+  return lines;
 }
 
 /**
  * Formats a single epic row for the epic list box.
+ * Shows actual cost/time when available, with estimate in parens for incomplete epics.
  * Returns the formatted string representation.
  */
 export function renderEpicRow(epic: EpicDisplayData): string {
   const bar = formatProgressBar(epic.storiesPassed, epic.storiesTotal);
   const status = epicStatusSymbol(epic.status);
-  const cost = epic.costActual !== null ? formatCost(epic.costActual) : (epic.costEstimate ?? '--');
-  const time = epic.timeActual ?? (epic.timeEstimate ?? '--');
-  return `${status} ${epic.id}: ${epic.title.substring(0, 28).padEnd(28)} ${bar}  cost:${cost}  time:${time}`;
+
+  // Cost: show actual, or estimate if no actual yet
+  let costStr: string;
+  if (epic.costActual !== null) {
+    costStr = formatCost(epic.costActual);
+    if (epic.costEstimate !== null) {
+      costStr += ` (est:${epic.costEstimate})`;
+    }
+  } else {
+    costStr = epic.costEstimate ?? '--';
+  }
+
+  // Time: show actual, or estimate if no actual yet
+  const timeStr = epic.timeActual ?? (epic.timeEstimate ?? '--');
+
+  // Merge status suffix
+  const mergeSuffix = epic.mergeStatus ? `  [merge:${epic.mergeStatus}]` : '';
+
+  return `${status} ${epic.id}: ${epic.title.substring(0, 28).padEnd(28)} ${bar}  cost:${costStr}  time:${timeStr}${mergeSuffix}`;
+}
+
+/**
+ * Renders a merge status line for an epic that has a merge event.
+ * Returns null if there is no merge event for this epic.
+ *
+ * Format: `    merge: done (clean)` or `    merge: FAILED — src/api.ts src/utils.ts`
+ *
+ * @param epic - EpicDisplayData with optional mergeStatus
+ * @param mergeEvents - All merge events from progress.txt
+ */
+export function renderMergeStatusLine(
+  epic: EpicDisplayData,
+  mergeEvents: Array<{ epicId: string; status: string; detail: string }>,
+): string | null {
+  const event = mergeEvents.find(e => e.epicId === epic.id);
+  if (!event) return null;
+
+  switch (event.status) {
+    case 'merging':      return `    merge: resolving conflicts...`;
+    case 'merged-clean': return `    merge: done (clean)`;
+    case 'merged-ai':    return `    merge: done (AI-resolved)`;
+    case 'merge-failed': return `    merge: FAILED — ${event.detail}`;
+    default:             return `    merge: ${event.status}`;
+  }
 }
 
 /**
@@ -145,7 +202,8 @@ export function renderActivityLine(epic: EpicDisplayData): string | null {
 
 /**
  * Builds the full epic list content string for the blessed box.
- * Renders each epic row, then an optional activity line, then story rows.
+ * Renders each epic row, then an optional merge status line, then an optional
+ * activity line, then story rows.
  */
 export function renderEpicList(state: DashboardState): string {
   if (state.epics.length === 0) {
@@ -154,6 +212,10 @@ export function renderEpicList(state: DashboardState): string {
 
   return state.epics.map(epic => {
     const parts: string[] = [renderEpicRow(epic)];
+
+    // Merge status line for epics that have a merge event
+    const mergeLine = renderMergeStatusLine(epic, state.mergeEvents ?? []);
+    if (mergeLine) parts.push(mergeLine);
 
     // Activity line for active epics
     const activityLine = renderActivityLine(epic);

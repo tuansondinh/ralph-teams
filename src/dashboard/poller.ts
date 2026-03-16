@@ -8,7 +8,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { DashboardOptions, DashboardState, EpicDisplayData, StoryDisplayData } from './types';
+import { DashboardOptions, DashboardState, EpicDisplayData, StoryDisplayData, MergeEvent } from './types';
 import { Prd, Epic } from '../prd-utils';
 import { RunStats, StoryStats } from '../run-stats';
 import { formatDuration } from '../time-utils';
@@ -22,6 +22,7 @@ import {
   readLogTail,
   parseLatestActivity,
 } from './activity-parser';
+import { parseMergeEvents } from './merge-parser';
 
 /** mtime cache to avoid re-parsing unchanged files */
 interface MtimeCache {
@@ -68,12 +69,16 @@ const defaultPollerDeps: PollerDeps = {
  * @param statsEpics - Parsed epic stats from ralph-run-stats.json
  * @param progressContent - Raw progress.txt content (or null if unavailable)
  * @param activityMap - Map from epicId to current activity string (from log polling)
+ * @param avgCostPerStory - Average cost per story from run estimates (for per-epic estimates)
+ * @param avgTimePerStoryMs - Average time per story in ms from run estimates
  */
 export function parseEpicsFromPrd(
   content: string,
   statsEpics: RunStats['epics'],
   progressContent: string | null = null,
   activityMap: Map<string, string> = new Map(),
+  avgCostPerStory: number | null = null,
+  avgTimePerStoryMs: number | null = null,
 ): EpicDisplayData[] {
   let prd: Prd;
   try {
@@ -90,21 +95,62 @@ export function parseEpicsFromPrd(
     // Use log-derived activity if available, otherwise infer from epic status
     const currentActivity = activityMap.get(epic.id) ?? inferCurrentActivity(epic);
 
+    // Per-epic cost estimate: actual so far + avg * remaining stories
+    const storiesPassed = epic.userStories.filter(s => s.passes).length;
+    const storiesTotal = epic.userStories.length;
+    const storiesRemaining = storiesTotal - storiesPassed;
+    const actualCost = statsEpic?.totalCostUsd ?? null;
+    const actualTime = statsEpic?.durationFormatted ?? null;
+
+    const costEstimate = computeEpicCostEstimate(actualCost, storiesRemaining, avgCostPerStory);
+    const timeEstimate = computeEpicTimeEstimate(actualTime, storiesRemaining, avgTimePerStoryMs);
+
     return {
       id: epic.id,
       title: epic.title,
       status: epic.status,
-      storiesPassed: epic.userStories.filter(s => s.passes).length,
-      storiesTotal: epic.userStories.length,
+      storiesPassed,
+      storiesTotal,
       stories,
       currentActivity,
-      costActual: statsEpic?.totalCostUsd ?? null,
-      costEstimate: null,
-      timeActual: statsEpic?.durationFormatted ?? null,
-      timeEstimate: null,
+      costActual: actualCost,
+      costEstimate,
+      timeActual: actualTime,
+      timeEstimate,
       mergeStatus: epic.status === 'merge-failed' ? 'failed' : null,
     };
   });
+}
+
+/**
+ * Computes a per-epic estimated total cost string.
+ * Returns null when no avg is available or the epic is already complete.
+ */
+export function computeEpicCostEstimate(
+  actualCost: number | null,
+  storiesRemaining: number,
+  avgCostPerStory: number | null,
+): string | null {
+  if (avgCostPerStory === null) return null;
+  if (storiesRemaining <= 0) return null; // done, no estimate needed
+  const estimated = (actualCost ?? 0) + avgCostPerStory * storiesRemaining;
+  return `~$${estimated.toFixed(2)}`;
+}
+
+/**
+ * Computes a per-epic estimated total time string.
+ * Returns null when no avg is available or the epic is already complete.
+ */
+export function computeEpicTimeEstimate(
+  actualTime: string | null,
+  storiesRemaining: number,
+  avgTimePerStoryMs: number | null,
+): string | null {
+  if (avgTimePerStoryMs === null) return null;
+  if (storiesRemaining <= 0) return null;
+  // We don't have actual time in ms per epic here, so just show remaining estimate
+  const remainingMs = avgTimePerStoryMs * storiesRemaining;
+  return `~${formatDuration(remainingMs)} remaining`;
 }
 
 /**
@@ -226,9 +272,20 @@ export function buildStateFromFiles(
     }
   }
 
+  // Extract per-story averages from estimates for per-epic projections
+  const avgCostPerStory = statsData?.estimates?.averageCostPerStory ?? null;
+  const avgTimePerStoryMs = statsData?.estimates?.averageTimePerStoryMs ?? null;
+
   const statsEpics = statsData?.epics ?? [];
   const epics = prdContent
-    ? parseEpicsFromPrd(prdContent, statsEpics, progressContent, activityMap)
+    ? parseEpicsFromPrd(
+        prdContent,
+        statsEpics,
+        progressContent,
+        activityMap,
+        avgCostPerStory,
+        avgTimePerStoryMs,
+      )
     : [];
 
   // Extract project name from prd if available
@@ -247,16 +304,26 @@ export function buildStateFromFiles(
   const totalCostUsd = statsData?.totals?.costUsd ?? null;
   const totalElapsed = computeElapsed(statsData?.totals?.startedAt ?? null);
 
+  // Estimate fields from run stats
+  const totalCostEstimate = statsData?.estimates?.estimatedTotalCostUsd ?? null;
+  const totalTimeEstimate = statsData?.estimates?.estimatedTotalTimeFormatted ?? null;
+
+  // Merge events parsed from progress.txt
+  const mergeEvents = progressContent ? parseMergeEvents(progressContent) : [];
+
   return {
     projectName: resolvedProjectName,
     currentWave,
     startedAt,
     epics,
     totalCostUsd,
+    totalCostEstimate,
     totalElapsed,
+    totalTimeEstimate,
     viewMode: 'dashboard',
     selectedEpicId: null,
     rawLogLines: [],
+    mergeEvents,
   };
 }
 
