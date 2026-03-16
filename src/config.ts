@@ -261,6 +261,7 @@ export function mergeCliOverrides(
       ...(overrides.backend !== undefined ? { backend: overrides.backend } : {}),
       ...(overrides.parallel !== undefined ? { parallel: overrides.parallel } : {}),
     },
+    agents: { ...config.agents },
     pricing: { ...config.pricing },
   };
 }

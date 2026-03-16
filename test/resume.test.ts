@@ -66,13 +66,13 @@ test('resumeCommand with valid state invokes ralph.sh with correct PRD path and 
   const tempRalphSh = path.join(tempDir, 'ralph.sh');
   fs.writeFileSync(tempRalphSh, '#!/bin/sh\n');
 
-  const calls: Array<{ command: string; args?: readonly string[] }> = [];
+  const calls: Array<{ command: string; args?: readonly string[]; env?: NodeJS.ProcessEnv }> = [];
   const deps = createResumeDeps({
     existsSync: (p: fs.PathLike) => fs.existsSync(p),
     readFileSync: (p: fs.PathOrFileDescriptor, opts?: BufferEncoding | (fs.ObjectEncodingOptions & { flag?: string }) | null) =>
       fs.readFileSync(p, opts as BufferEncoding),
-    spawnSync: ((command: string, args?: readonly string[]) => {
-      calls.push({ command, args });
+    spawnSync: ((command: string, args?: readonly string[], options?: { env?: NodeJS.ProcessEnv }) => {
+      calls.push({ command, args, env: options?.env });
       return { status: 0 } as ReturnType<ResumeDeps['spawnSync']>;
     }) as ResumeDeps['spawnSync'],
     unlinkSync: fs.unlinkSync,
@@ -92,6 +92,7 @@ test('resumeCommand with valid state invokes ralph.sh with correct PRD path and 
   assert.ok(ralphCall!.args?.includes(prdPath), 'args should include the PRD path');
   assert.ok(ralphCall!.args?.includes('--backend'), 'args should include --backend');
   assert.ok(ralphCall!.args?.includes('claude'), 'args should include the backend value');
+  assert.equal(ralphCall!.env?.RALPH_RESUME, '1');
 });
 
 test('resumeCommand deletes ralph-state.json after successful run', () => {

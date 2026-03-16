@@ -227,12 +227,13 @@ LOOP_BRANCH_PREFIX="ralph/loop"
 CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
 SOURCE_BRANCH="$CURRENT_BRANCH"
 LOOP_BRANCH=""
+IS_RESUME="${RALPH_RESUME:-0}"
 
 generate_loop_branch_name() {
   echo "${LOOP_BRANCH_PREFIX}/$(date +%Y%m%d-%H%M%S)"
 }
 
-if [ -f "$STATE_FILE" ]; then
+if [ "$IS_RESUME" = "1" ] && [ -f "$STATE_FILE" ]; then
   LOOP_BRANCH=$(rjq read "$STATE_FILE" .loopBranch "" 2>/dev/null || echo "")
   STATE_SOURCE_BRANCH=$(rjq read "$STATE_FILE" .sourceBranch "" 2>/dev/null || echo "")
   if [ -n "$STATE_SOURCE_BRANCH" ]; then
@@ -968,7 +969,8 @@ while true; do
   if [ -n "$PARALLEL" ]; then
     echo "  Wave $WAVE_NUM — ${#WAVE_EPICS[@]} epic(s), $PARALLEL at a time"
   else
-    echo "  ${#WAVE_EPICS[@]} epic(s) queued"
+    REMAINING_EPICS=$(rjq count-where "$PRD_FILE" .epics "status=pending" --default pending)
+    echo "  ${REMAINING_EPICS} epic(s) remaining to run sequentially"
   fi
   echo "========================================================"
 

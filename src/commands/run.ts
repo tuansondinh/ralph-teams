@@ -11,6 +11,7 @@ import { resetFailedEpics } from '../retry-controller';
 interface RunDeps {
   existsSync: typeof fs.existsSync;
   chmodSync: typeof fs.chmodSync;
+  unlinkSync: typeof fs.unlinkSync;
   spawnSync: typeof spawnSync;
   spawn: typeof spawn;
   exit: (code?: number) => never;
@@ -22,6 +23,7 @@ interface RunDeps {
 const defaultDeps: RunDeps = {
   existsSync: fs.existsSync,
   chmodSync: fs.chmodSync,
+  unlinkSync: fs.unlinkSync,
   spawnSync,
   spawn,
   exit: (code?: number) => process.exit(code),
@@ -150,6 +152,7 @@ export async function runCommand(
   deps: RunDeps = defaultDeps,
 ): Promise<void> {
   const resolved = path.resolve(prdPath);
+  const stateFile = path.join(path.dirname(resolved), 'ralph-state.json');
   const parallel = options.parallel;
   const useDashboard = options.dashboard === true;
 
@@ -262,6 +265,17 @@ export async function runCommand(
     RALPH_MODEL_VALIDATOR: resolvedConfig.agents.validator,
     RALPH_MODEL_MERGER: resolvedConfig.agents.merger,
   };
+
+  if (deps.existsSync(stateFile)) {
+    try {
+      deps.unlinkSync(stateFile);
+      console.log(chalk.dim(`Removed stale resume state: ${stateFile}`));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(chalk.red(`Error: failed to remove stale ralph-state.json: ${msg}`));
+      deps.exit(1);
+    }
+  }
 
   if (useDashboard && currentBranch !== null && hasDirtyGitWorktree(deps)) {
     const confirmed = await promptForAutoCommit(`a new Ralph loop branch from '${currentBranch}'`, deps);
