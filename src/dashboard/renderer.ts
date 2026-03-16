@@ -5,7 +5,7 @@
  * unit-tested without a terminal.
  */
 
-import { DashboardState, EpicDisplayData } from './types';
+import { DashboardState, EpicDisplayData, StoryDisplayData } from './types';
 
 /**
  * Returns a progress bar string like `[####----] 3/5`.
@@ -77,19 +77,50 @@ export function renderEpicRow(epic: EpicDisplayData): string {
 }
 
 /**
- * Formats story rows for epic detail view.
+ * Returns the single-character icon for a story state.
+ * Icons: queued=-, building=>, validating=?, pass=+, fail=x
  */
-export function renderStoryRow(story: { id: string; title: string; state: string; duration: string | null }): string {
-  const stateMap: Record<string, string> = {
-    queued:     '[ wait ]',
-    building:   '[ build]',
-    validating: '[ valid]',
-    pass:       '[ PASS ]',
-    fail:       '[ FAIL ]',
-  };
-  const stateStr = stateMap[story.state] ?? '[     ]';
-  const dur = story.duration ? `  ${story.duration}` : '';
-  return `  ${stateStr} ${story.id}: ${story.title.substring(0, 40)}${dur}`;
+export function storyStateIcon(state: string): string {
+  switch (state) {
+    case 'queued':     return '-';
+    case 'building':   return '>';
+    case 'validating': return '?';
+    case 'pass':       return '+';
+    case 'fail':       return 'x';
+    default:           return ' ';
+  }
+}
+
+/**
+ * Formats a single story row for display beneath its parent epic.
+ *
+ * Format examples:
+ *   - queued:     "  - US-001  My Story Title"
+ *   - building:   "  > US-002  My Story Title"
+ *   - pass:       "  + US-001  My Story Title  PASS  2m 12s"
+ *   - fail:       "  x US-003  My Story Title  FAIL: typecheck passes not met  3m 10s"
+ *
+ * @param story - Full StoryDisplayData including state, failureReason, duration
+ */
+export function renderStoryRow(story: StoryDisplayData): string {
+  const icon = storyStateIcon(story.state);
+  const titlePart = story.title.substring(0, 40).padEnd(40);
+
+  let suffix = '';
+  if (story.state === 'pass') {
+    const dur = story.duration ? `  ${story.duration}` : '';
+    suffix = `  PASS${dur}`;
+  } else if (story.state === 'fail') {
+    const reason = story.failureReason ? `: ${story.failureReason}` : '';
+    const dur = story.duration ? `  ${story.duration}` : '';
+    suffix = `  FAIL${reason}${dur}`;
+  } else if (story.state === 'building') {
+    suffix = '  building...';
+  } else if (story.state === 'validating') {
+    suffix = '  validating...';
+  }
+
+  return `  ${icon} ${story.id}  ${titlePart}${suffix}`;
 }
 
 /**
@@ -101,11 +132,19 @@ export function renderFooter(): string {
 
 /**
  * Builds the full epic list content string for the blessed box.
+ * Renders each epic row followed by indented story rows.
  */
 export function renderEpicList(state: DashboardState): string {
   if (state.epics.length === 0) {
     return '  (no epics found — waiting for prd.json)';
   }
 
-  return state.epics.map(epic => renderEpicRow(epic)).join('\n');
+  return state.epics.map(epic => {
+    const epicRow = renderEpicRow(epic);
+    if (epic.stories.length === 0) {
+      return epicRow;
+    }
+    const storyRows = epic.stories.map(story => renderStoryRow(story)).join('\n');
+    return `${epicRow}\n${storyRows}`;
+  }).join('\n');
 }

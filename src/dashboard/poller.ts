@@ -10,8 +10,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { DashboardOptions, DashboardState, EpicDisplayData, StoryDisplayData } from './types';
 import { Prd, Epic } from '../prd-utils';
-import { RunStats } from '../run-stats';
+import { RunStats, StoryStats } from '../run-stats';
 import { formatDuration } from '../time-utils';
+import {
+  determineStoryState,
+  filterProgressLinesForStory,
+  StoryStateInput,
+} from './story-state-parser';
 
 /** mtime cache to avoid re-parsing unchanged files */
 interface MtimeCache {
@@ -44,8 +49,16 @@ const defaultPollerDeps: PollerDeps = {
 /**
  * Parses prd.json and returns epic display data.
  * Returns an empty array if file is missing or invalid.
+ *
+ * @param content - Raw prd.json file content
+ * @param statsEpics - Parsed epic stats from ralph-run-stats.json
+ * @param progressContent - Raw progress.txt content (or null if unavailable)
  */
-export function parseEpicsFromPrd(content: string, statsEpics: RunStats['epics']): EpicDisplayData[] {
+export function parseEpicsFromPrd(
+  content: string,
+  statsEpics: RunStats['epics'],
+  progressContent: string | null = null,
+): EpicDisplayData[] {
   let prd: Prd;
   try {
     prd = JSON.parse(content) as Prd;
@@ -55,7 +68,8 @@ export function parseEpicsFromPrd(content: string, statsEpics: RunStats['epics']
 
   return (prd.epics ?? []).map(epic => {
     const statsEpic = statsEpics.find(e => e.epicId === epic.id);
-    const stories = buildStoryDisplayData(epic);
+    const storyStatsMap = buildStoryStatsMap(statsEpic?.stories ?? []);
+    const stories = buildStoryDisplayData(epic, storyStatsMap, progressContent);
 
     return {
       id: epic.id,
@@ -75,6 +89,17 @@ export function parseEpicsFromPrd(content: string, statsEpics: RunStats['epics']
 }
 
 /**
+ * Builds a map from storyId → StoryStats for quick lookup.
+ */
+function buildStoryStatsMap(stories: StoryStats[]): Map<string, StoryStats> {
+  const map = new Map<string, StoryStats>();
+  for (const s of stories) {
+    map.set(s.storyId, s);
+  }
+  return map;
+}
+
+/**
  * Infers a human-readable current activity label for an epic.
  */
 function inferCurrentActivity(epic: Epic): string {
@@ -88,16 +113,44 @@ function inferCurrentActivity(epic: Epic): string {
 }
 
 /**
- * Builds StoryDisplayData from an epic's user stories.
+ * Builds StoryDisplayData from an epic's user stories, incorporating stats and progress data.
+ *
+ * @param epic - Parsed epic from prd.json
+ * @param storyStatsMap - Map from storyId to StoryStats
+ * @param progressContent - Raw progress.txt content (or null)
  */
-function buildStoryDisplayData(epic: Epic): StoryDisplayData[] {
-  return epic.userStories.map(story => ({
-    id: story.id,
-    title: story.title,
-    state: story.passes ? 'pass' : (epic.status === 'pending' ? 'queued' : 'fail'),
-    failureReason: null,
-    duration: null,
-  }));
+function buildStoryDisplayData(
+  epic: Epic,
+  storyStatsMap: Map<string, StoryStats>,
+  progressContent: string | null,
+): StoryDisplayData[] {
+  return epic.userStories.map(story => {
+    const statsEntry = storyStatsMap.get(story.id);
+    const progressLines = progressContent
+      ? filterProgressLinesForStory(progressContent, story.id, epic.id)
+      : [];
+
+    const input: StoryStateInput = {
+      storyId: story.id,
+      epicId: epic.id,
+      passes: story.passes,
+      hasStatsEntry: statsEntry !== undefined,
+      statsCompleted: statsEntry?.completedAt !== null && statsEntry?.completedAt !== undefined,
+      statsPassed: statsEntry?.passed ?? false,
+      statsDuration: statsEntry?.durationFormatted ?? null,
+      progressLines,
+    };
+
+    const result = determineStoryState(input);
+
+    return {
+      id: story.id,
+      title: story.title,
+      state: result.state,
+      failureReason: result.failureReason,
+      duration: result.duration,
+    };
+  });
 }
 
 /**
@@ -148,7 +201,7 @@ export function buildStateFromFiles(
   }
 
   const statsEpics = statsData?.epics ?? [];
-  const epics = prdContent ? parseEpicsFromPrd(prdContent, statsEpics) : [];
+  const epics = prdContent ? parseEpicsFromPrd(prdContent, statsEpics, progressContent) : [];
 
   // Extract project name from prd if available
   let resolvedProjectName = projectName;

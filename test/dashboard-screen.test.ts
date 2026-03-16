@@ -16,7 +16,9 @@ import {
   renderFooter,
   renderEpicList,
   renderStoryRow,
+  storyStateIcon,
 } from '../src/dashboard/renderer';
+import type { StoryDisplayData } from '../src/dashboard/types';
 import type { DashboardState, EpicDisplayData } from '../src/dashboard/types';
 
 // ---------------------------------------------------------------------------
@@ -214,29 +216,106 @@ test('renderEpicRow truncates long titles at 28 characters', () => {
 });
 
 // ---------------------------------------------------------------------------
+// storyStateIcon
+// ---------------------------------------------------------------------------
+
+test('storyStateIcon returns - for queued', () => {
+  assert.equal(storyStateIcon('queued'), '-');
+});
+
+test('storyStateIcon returns > for building', () => {
+  assert.equal(storyStateIcon('building'), '>');
+});
+
+test('storyStateIcon returns ? for validating', () => {
+  assert.equal(storyStateIcon('validating'), '?');
+});
+
+test('storyStateIcon returns + for pass', () => {
+  assert.equal(storyStateIcon('pass'), '+');
+});
+
+test('storyStateIcon returns x for fail', () => {
+  assert.equal(storyStateIcon('fail'), 'x');
+});
+
+// ---------------------------------------------------------------------------
 // renderStoryRow
 // ---------------------------------------------------------------------------
 
+function makeStory(overrides: Partial<StoryDisplayData> = {}): StoryDisplayData {
+  return {
+    id: 'US-001',
+    title: 'My Story',
+    state: 'queued',
+    failureReason: null,
+    duration: null,
+    ...overrides,
+  };
+}
+
 test('renderStoryRow includes story id and title', () => {
-  const story = { id: 'US-001', title: 'My Story', state: 'pass', duration: null };
+  const story = makeStory({ id: 'US-001', title: 'My Story', state: 'pass' });
   const row = renderStoryRow(story);
   assert.ok(row.includes('US-001'), 'story row should include id');
   assert.ok(row.includes('My Story'), 'story row should include title');
 });
 
-test('renderStoryRow shows [ PASS ] for pass state', () => {
-  const story = { id: 'US-001', title: 'Story', state: 'pass', duration: null };
-  assert.ok(renderStoryRow(story).includes('[ PASS ]'));
+test('renderStoryRow uses + icon and PASS label for pass state', () => {
+  const story = makeStory({ state: 'pass' });
+  const row = renderStoryRow(story);
+  assert.ok(row.includes('+ '), 'pass row should include + icon');
+  assert.ok(row.includes('PASS'), 'pass row should include PASS label');
 });
 
-test('renderStoryRow shows [ FAIL ] for fail state', () => {
-  const story = { id: 'US-001', title: 'Story', state: 'fail', duration: null };
-  assert.ok(renderStoryRow(story).includes('[ FAIL ]'));
+test('renderStoryRow uses x icon and FAIL label for fail state', () => {
+  const story = makeStory({ state: 'fail' });
+  const row = renderStoryRow(story);
+  assert.ok(row.includes('x '), 'fail row should include x icon');
+  assert.ok(row.includes('FAIL'), 'fail row should include FAIL label');
 });
 
-test('renderStoryRow shows duration when available', () => {
-  const story = { id: 'US-001', title: 'Story', state: 'pass', duration: '3m 15s' };
+test('renderStoryRow uses - icon for queued state', () => {
+  const story = makeStory({ state: 'queued' });
+  assert.ok(renderStoryRow(story).includes('- '));
+});
+
+test('renderStoryRow uses > icon for building state', () => {
+  const story = makeStory({ state: 'building' });
+  assert.ok(renderStoryRow(story).includes('> '));
+});
+
+test('renderStoryRow uses ? icon for validating state', () => {
+  const story = makeStory({ state: 'validating' });
+  assert.ok(renderStoryRow(story).includes('? '));
+});
+
+test('renderStoryRow shows duration for pass state', () => {
+  const story = makeStory({ state: 'pass', duration: '3m 15s' });
   assert.ok(renderStoryRow(story).includes('3m 15s'));
+});
+
+test('renderStoryRow shows failure reason for fail state', () => {
+  const story = makeStory({ state: 'fail', failureReason: 'typecheck passes not met' });
+  const row = renderStoryRow(story);
+  assert.ok(row.includes('FAIL: typecheck passes not met'));
+});
+
+test('renderStoryRow shows failure reason and duration together', () => {
+  const story = makeStory({ state: 'fail', failureReason: 'tests failed', duration: '3m 10s' });
+  const row = renderStoryRow(story);
+  assert.ok(row.includes('FAIL: tests failed'), 'should include reason');
+  assert.ok(row.includes('3m 10s'), 'should include duration');
+});
+
+test('renderStoryRow shows building... label for building state', () => {
+  const story = makeStory({ state: 'building' });
+  assert.ok(renderStoryRow(story).includes('building...'));
+});
+
+test('renderStoryRow shows validating... label for validating state', () => {
+  const story = makeStory({ state: 'validating' });
+  assert.ok(renderStoryRow(story).includes('validating...'));
 });
 
 // ---------------------------------------------------------------------------
@@ -275,4 +354,39 @@ test('renderEpicList renders one row per epic', () => {
   const content = renderEpicList(state);
   assert.ok(content.includes('EPIC-001'), 'should render EPIC-001');
   assert.ok(content.includes('EPIC-002'), 'should render EPIC-002');
+});
+
+test('renderEpicList includes story rows under each epic when stories present', () => {
+  const state = makeState({
+    epics: [
+      makeEpic({
+        id: 'EPIC-001',
+        title: 'First',
+        stories: [
+          makeStory({ id: 'US-001', title: 'Story One', state: 'pass' }),
+          makeStory({ id: 'US-002', title: 'Story Two', state: 'fail', failureReason: 'error' }),
+        ],
+      }),
+    ],
+  });
+  const content = renderEpicList(state);
+  assert.ok(content.includes('EPIC-001'), 'should include epic row');
+  assert.ok(content.includes('US-001'), 'should include US-001 story row');
+  assert.ok(content.includes('US-002'), 'should include US-002 story row');
+  assert.ok(content.includes('FAIL: error'), 'should include failure reason');
+});
+
+test('renderEpicList story rows appear after epic row', () => {
+  const state = makeState({
+    epics: [
+      makeEpic({
+        id: 'EPIC-001',
+        stories: [makeStory({ id: 'US-001', state: 'queued' })],
+      }),
+    ],
+  });
+  const content = renderEpicList(state);
+  const epicIdx = content.indexOf('EPIC-001');
+  const storyIdx = content.indexOf('US-001');
+  assert.ok(epicIdx < storyIdx, 'epic row should appear before story row');
 });
