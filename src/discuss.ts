@@ -2,14 +2,22 @@
  * discuss.ts — Discuss agent for failed user stories.
  *
  * Gathers context (failure report, code diff, plan section) for a failed story
- * and runs an interactive readline session so the user can provide guidance
- * for the next implementation attempt.
+ * and runs an interactive agent session so the user can have a back-and-forth
+ * conversation about the failure and provide guidance for the next attempt.
+ *
+ * The discuss session spawns the configured AI CLI (claude by default) as a
+ * subprocess, passing the failure context as the initial system prompt and
+ * piping stdin/stdout so the user can interact directly with the agent.
+ *
+ * The session ends when:
+ *   - The user types 'done' or 'exit' in the conversation
+ *   - The user presses Escape (raw mode keypress detection)
+ *   - The agent subprocess exits
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as readline from 'readline';
-import { spawnSync } from 'child_process';
+import { spawnSync, spawn, ChildProcess } from 'child_process';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,6 +41,23 @@ export interface DiscussResult {
   storyId: string;
   /** Concatenated user guidance from the session */
   guidance: string;
+}
+
+/**
+ * A function that spawns a discuss agent for the given context prompt and
+ * returns a Promise that resolves with any captured guidance when the session ends.
+ *
+ * Injectable for testing — the default implementation spawns `claude` in
+ * interactive mode so the user can converse directly with the AI.
+ */
+export type AgentSpawner = (contextPrompt: string) => Promise<string>;
+
+export interface DiscussSessionOptions {
+  /**
+   * Injectable agent spawner function. When omitted, the default spawner
+   * runs `claude` in interactive mode with the context as the initial prompt.
+   */
+  spawnAgent?: AgentSpawner;
 }
 
 // ---------------------------------------------------------------------------
@@ -251,98 +276,196 @@ export function gatherDiscussContext(
 }
 
 // ---------------------------------------------------------------------------
+// Context prompt builder
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds the initial system prompt string that is passed to the AI agent.
+ * Contains the failure report, code diff, and plan section for the story.
+ *
+ * @param context - The discuss context for the failed story
+ */
+export function buildContextPrompt(context: DiscussContext): string {
+  const sep = '─'.repeat(72);
+  return [
+    `You are a senior engineer reviewing a failed implementation of user story ${context.storyId} (${context.epicId}).`,
+    `Help the user understand what went wrong and guide them toward a working solution.`,
+    '',
+    sep,
+    '[Failure Report]',
+    sep,
+    context.failureReport,
+    '',
+    sep,
+    '[Code Changes (git diff --stat)]',
+    sep,
+    context.codeDiff,
+    '',
+    sep,
+    '[Plan Section]',
+    sep,
+    context.planSection,
+    '',
+    sep,
+    'Please analyze the failure and ask the user what aspects they would like to explore.',
+    'When the user is ready to finish, they can type "done" or press Escape.',
+    sep,
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Default agent spawner
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates the default agent spawner that invokes `claude` (or the configured
+ * backend) as an interactive child process.
+ *
+ * The context prompt is piped to the agent's stdin as the first message.
+ * stdin/stdout are inherited so the user can interact directly in the terminal.
+ *
+ * Escape key is detected via raw mode on process.stdin. When Escape (\x1b)
+ * is pressed, the agent subprocess is killed and the session ends.
+ *
+ * @param agentCommand - The CLI command to run (default: 'claude')
+ * @param agentArgs - Additional args to pass to the agent (default: [])
+ */
+export function createDefaultSpawner(
+  agentCommand: string = 'claude',
+  agentArgs: string[] = [],
+): AgentSpawner {
+  return (contextPrompt: string): Promise<string> => {
+    return new Promise((resolve) => {
+      // Print context header before starting the agent
+      const sep = '─'.repeat(72);
+      process.stdout.write('\n');
+      process.stdout.write(`${sep}\n`);
+      process.stdout.write(`Discuss session starting — type your questions, type "done" or press Escape to finish.\n`);
+      process.stdout.write(`${sep}\n\n`);
+
+      // Spawn the agent with inherited stdio so user can interact directly
+      let agentProcess: ChildProcess;
+      try {
+        agentProcess = spawn(agentCommand, agentArgs, {
+          stdio: ['pipe', 'inherit', 'inherit'],
+          env: { ...process.env },
+        });
+      } catch {
+        process.stdout.write('(agent spawn failed — falling back to no-op session)\n');
+        resolve('');
+        return;
+      }
+
+      // Send the context prompt as the initial message to the agent
+      if (agentProcess.stdin) {
+        agentProcess.stdin.write(contextPrompt + '\n');
+      }
+
+      // Enable raw mode to detect Escape keypress (\x1b)
+      let rawModeEnabled = false;
+      const handleKeypress = (data: Buffer): void => {
+        // ESC character is \x1b (byte 27)
+        if (data[0] === 0x1b) {
+          cleanup();
+          agentProcess.kill('SIGTERM');
+          resolve('');
+        }
+      };
+
+      const enableRawMode = (): void => {
+        if (process.stdin.isTTY && !rawModeEnabled) {
+          try {
+            process.stdin.setRawMode(true);
+            process.stdin.resume();
+            process.stdin.on('data', handleKeypress);
+            rawModeEnabled = true;
+          } catch {
+            // raw mode not available in this environment — ignore
+          }
+        }
+      };
+
+      const cleanup = (): void => {
+        if (rawModeEnabled) {
+          try {
+            process.stdin.removeListener('data', handleKeypress);
+            process.stdin.setRawMode(false);
+            process.stdin.pause();
+          } catch {
+            // ignore cleanup errors
+          }
+          rawModeEnabled = false;
+        }
+        // Reconnect stdin to the agent process after cleanup
+        if (agentProcess.stdin) {
+          agentProcess.stdin.end();
+        }
+      };
+
+      enableRawMode();
+
+      agentProcess.on('close', (_code: number | null) => {
+        cleanup();
+        resolve('');
+      });
+
+      agentProcess.on('error', (_err: Error) => {
+        cleanup();
+        resolve('');
+      });
+    });
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Interactive discuss session
 // ---------------------------------------------------------------------------
 
 /**
- * Runs an interactive readline session for discussing a failed story.
+ * Runs an interactive discuss session for a failed story by spawning an AI
+ * agent subprocess (default: `claude` CLI).
  *
- * Prints the gathered context (failure report, diff, plan section) and
- * collects user messages as guidance. The session ends when the user types
- * 'done', 'exit', or an empty line.
+ * The agent receives the full failure context (failure report, code diff,
+ * plan section) as its initial prompt and the user can interact directly.
+ * The session ends when:
+ *   - The user types 'done' or 'exit'
+ *   - The user presses Escape (detected via raw mode)
+ *   - The agent subprocess exits
  *
- * @param context - The discuss context to present
- * @param rl - Optional readline interface (injectable for testing)
+ * For testing, inject a mock `spawnAgent` via options.spawnAgent. The mock
+ * receives the context prompt string and returns a Promise<string> (guidance).
+ *
+ * @param context - The discuss context to present to the agent
+ * @param options - Optional configuration (injectable spawnAgent for testing)
  * @returns The collected guidance from the session
  */
 export async function runDiscussSession(
   context: DiscussContext,
-  rl?: readline.Interface,
+  options?: DiscussSessionOptions,
 ): Promise<DiscussResult> {
-  const sep = '─'.repeat(72);
+  const contextPrompt = buildContextPrompt(context);
 
-  // Print context to stdout
-  process.stdout.write('\n');
-  process.stdout.write(`${sep}\n`);
-  process.stdout.write(`Discussing: ${context.storyId} (${context.epicId})\n`);
-  process.stdout.write(`${sep}\n`);
+  // Use the injected spawner if provided, otherwise use the default claude spawner
+  const spawner: AgentSpawner = options?.spawnAgent ?? createDefaultSpawner();
 
-  process.stdout.write('\n[Failure Report]\n');
-  process.stdout.write(`${sep}\n`);
-  process.stdout.write(`${context.failureReport}\n`);
-
-  process.stdout.write(`\n[Code Changes (stat)]\n`);
-  process.stdout.write(`${sep}\n`);
-  process.stdout.write(`${context.codeDiff}\n`);
-
-  process.stdout.write(`\n[Plan Section]\n`);
-  process.stdout.write(`${sep}\n`);
-  process.stdout.write(`${context.planSection}\n`);
-
-  process.stdout.write(`\n${sep}\n`);
-  process.stdout.write('Discuss what went wrong and provide guidance for the next attempt.\n');
-  process.stdout.write("Type 'done' or press Enter on an empty line to finish.\n");
-  process.stdout.write(`${sep}\n\n`);
-
-  // Set up readline if not provided
-  const ownRl = rl === undefined;
-  const readlineInterface = rl ?? readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    terminal: true,
-  });
-
-  const guidanceLines: string[] = [];
-
+  let guidance = '';
   try {
-    await new Promise<void>((resolve) => {
-      const askNext = (): void => {
-        readlineInterface.question('> ', (answer: string) => {
-          const trimmed = answer.trim();
-
-          if (trimmed === '' || trimmed === 'done' || trimmed === 'exit') {
-            resolve();
-            return;
-          }
-
-          guidanceLines.push(trimmed);
-          askNext();
-        });
-      };
-
-      askNext();
-
-      // Also handle close event (Ctrl-D / Escape in terminal)
-      readlineInterface.once('close', () => {
-        resolve();
-      });
-    });
-  } finally {
-    if (ownRl) {
-      readlineInterface.close();
-    }
+    guidance = await spawner(contextPrompt);
+  } catch {
+    // Spawner errors are non-fatal — session ends with empty guidance
+    guidance = '';
   }
 
-  const guidance = guidanceLines.join('\n');
+  const trimmedGuidance = guidance.trim();
 
   process.stdout.write('\n');
-  if (guidance) {
+  if (trimmedGuidance) {
     process.stdout.write('[Guidance recorded]\n');
-    process.stdout.write(`${guidance}\n`);
+    process.stdout.write(`${trimmedGuidance}\n`);
   } else {
-    process.stdout.write('[No guidance provided — session ended]\n');
+    process.stdout.write('[Discuss session ended]\n');
   }
   process.stdout.write('\n');
 
-  return { storyId: context.storyId, guidance };
+  return { storyId: context.storyId, guidance: trimmedGuidance };
 }

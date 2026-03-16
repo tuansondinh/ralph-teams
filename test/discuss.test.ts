@@ -14,14 +14,15 @@ import assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import * as readline from 'readline';
 import {
   parseFailureReport,
   extractPlanSection,
   findEpicForStory,
   gatherDiscussContext,
   runDiscussSession,
+  buildContextPrompt,
   type DiscussContext,
+  type AgentSpawner,
 } from '../src/discuss';
 
 // ---------------------------------------------------------------------------
@@ -361,25 +362,71 @@ describe('gatherDiscussContext', () => {
 });
 
 // ---------------------------------------------------------------------------
+// buildContextPrompt
+// ---------------------------------------------------------------------------
+
+describe('buildContextPrompt', () => {
+  const baseContext: DiscussContext = {
+    storyId: 'US-018',
+    epicId: 'EPIC-004',
+    failureReport: 'typecheck failed',
+    codeDiff: 'src/discuss.ts | 1 +',
+    planSection: 'Implement the discuss module.',
+  };
+
+  it('includes the story ID in the prompt', () => {
+    const prompt = buildContextPrompt(baseContext);
+    assert.ok(prompt.includes('US-018'), 'prompt should include storyId');
+  });
+
+  it('includes the epic ID in the prompt', () => {
+    const prompt = buildContextPrompt(baseContext);
+    assert.ok(prompt.includes('EPIC-004'), 'prompt should include epicId');
+  });
+
+  it('includes the failure report in the prompt', () => {
+    const prompt = buildContextPrompt(baseContext);
+    assert.ok(prompt.includes('typecheck failed'), 'prompt should include failureReport');
+  });
+
+  it('includes the code diff in the prompt', () => {
+    const prompt = buildContextPrompt(baseContext);
+    assert.ok(prompt.includes('src/discuss.ts | 1 +'), 'prompt should include codeDiff');
+  });
+
+  it('includes the plan section in the prompt', () => {
+    const prompt = buildContextPrompt(baseContext);
+    assert.ok(prompt.includes('Implement the discuss module'), 'prompt should include planSection');
+  });
+
+  it('mentions how to end the session in the prompt', () => {
+    const prompt = buildContextPrompt(baseContext);
+    assert.ok(
+      prompt.includes('done') || prompt.includes('Escape'),
+      'prompt should mention how to end the session',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // runDiscussSession
 // ---------------------------------------------------------------------------
 
 describe('runDiscussSession', () => {
-  /** Creates a mock readline interface that emits canned answers. */
-  function makeMockReadline(answers: string[]): readline.Interface {
-    const answerQueue = [...answers];
-
-    const mockRl = {
-      question: (_prompt: string, callback: (answer: string) => void) => {
-        const answer = answerQueue.shift() ?? '';
-        // Use setImmediate to simulate async behavior without blocking
-        setImmediate(() => callback(answer));
-      },
-      close: () => { /* no-op */ },
-      once: (_event: string, _cb: () => void) => { /* no-op for 'close' */ },
-    } as unknown as readline.Interface;
-
-    return mockRl;
+  /**
+   * Creates a mock AgentSpawner that resolves immediately with the given guidance string.
+   * Captures the context prompt passed to it for assertions.
+   */
+  function makeMockSpawner(guidance: string = ''): {
+    spawner: AgentSpawner;
+    capturedPrompts: string[];
+  } {
+    const capturedPrompts: string[] = [];
+    const spawner: AgentSpawner = async (contextPrompt: string): Promise<string> => {
+      capturedPrompts.push(contextPrompt);
+      return guidance;
+    };
+    return { spawner, capturedPrompts };
   }
 
   const baseContext: DiscussContext = {
@@ -391,48 +438,63 @@ describe('runDiscussSession', () => {
   };
 
   it('returns storyId in the result', async () => {
-    const rl = makeMockReadline(['done']);
-    const result = await runDiscussSession(baseContext, rl);
+    const { spawner } = makeMockSpawner('');
+    const result = await runDiscussSession(baseContext, { spawnAgent: spawner });
     assert.equal(result.storyId, 'US-018');
   });
 
-  it('returns empty guidance when user types "done" immediately', async () => {
-    const rl = makeMockReadline(['done']);
-    const result = await runDiscussSession(baseContext, rl);
+  it('returns empty guidance when spawner returns empty string', async () => {
+    const { spawner } = makeMockSpawner('');
+    const result = await runDiscussSession(baseContext, { spawnAgent: spawner });
     assert.equal(result.guidance, '');
   });
 
-  it('returns empty guidance when user types empty line', async () => {
-    const rl = makeMockReadline(['']);
-    const result = await runDiscussSession(baseContext, rl);
-    assert.equal(result.guidance, '');
-  });
-
-  it('collects a single message as guidance', async () => {
-    const rl = makeMockReadline(['Focus on fixing the type error', 'done']);
-    const result = await runDiscussSession(baseContext, rl);
+  it('returns guidance from spawner output', async () => {
+    const { spawner } = makeMockSpawner('Focus on fixing the type error');
+    const result = await runDiscussSession(baseContext, { spawnAgent: spawner });
     assert.equal(result.guidance, 'Focus on fixing the type error');
   });
 
-  it('collects multiple messages joined with newlines', async () => {
-    const rl = makeMockReadline([
-      'First piece of guidance',
-      'Second piece of guidance',
-      'done',
-    ]);
-    const result = await runDiscussSession(baseContext, rl);
-    assert.equal(result.guidance, 'First piece of guidance\nSecond piece of guidance');
-  });
-
-  it('exits when user types "exit"', async () => {
-    const rl = makeMockReadline(['Some guidance', 'exit']);
-    const result = await runDiscussSession(baseContext, rl);
-    assert.equal(result.guidance, 'Some guidance');
-  });
-
-  it('trims whitespace from user input', async () => {
-    const rl = makeMockReadline(['  fix the bug  ', 'done']);
-    const result = await runDiscussSession(baseContext, rl);
+  it('trims whitespace from spawner guidance', async () => {
+    const { spawner } = makeMockSpawner('  fix the bug  ');
+    const result = await runDiscussSession(baseContext, { spawnAgent: spawner });
     assert.equal(result.guidance, 'fix the bug');
+  });
+
+  it('passes the full context prompt to the spawner', async () => {
+    const { spawner, capturedPrompts } = makeMockSpawner('');
+    await runDiscussSession(baseContext, { spawnAgent: spawner });
+    assert.equal(capturedPrompts.length, 1, 'spawner should be called once');
+    const prompt = capturedPrompts[0];
+    assert.ok(prompt.includes('US-018'), 'context prompt should include storyId');
+    assert.ok(prompt.includes('typecheck failed'), 'context prompt should include failureReport');
+    assert.ok(prompt.includes('Implement the discuss module'), 'context prompt should include planSection');
+  });
+
+  it('spawner receives context prompt as a non-empty string', async () => {
+    const { spawner, capturedPrompts } = makeMockSpawner('');
+    await runDiscussSession(baseContext, { spawnAgent: spawner });
+    assert.ok(capturedPrompts[0].length > 0, 'context prompt should be non-empty');
+  });
+
+  it('handles spawner rejection gracefully — returns empty guidance', async () => {
+    const failingSpawner: AgentSpawner = async (_prompt: string): Promise<string> => {
+      throw new Error('agent not found');
+    };
+    const result = await runDiscussSession(baseContext, { spawnAgent: failingSpawner });
+    assert.equal(result.storyId, 'US-018', 'storyId should still be returned on error');
+    assert.equal(result.guidance, '', 'guidance should be empty on spawner error');
+  });
+
+  it('spawner is called with back-and-forth conversation context', async () => {
+    // Verify the prompt contains the AI's role instructions for back-and-forth conversation
+    const { spawner, capturedPrompts } = makeMockSpawner('');
+    await runDiscussSession(baseContext, { spawnAgent: spawner });
+    const prompt = capturedPrompts[0];
+    // The prompt should instruct the AI to analyze and converse with the user
+    assert.ok(
+      prompt.toLowerCase().includes('analyze') || prompt.toLowerCase().includes('engineer') || prompt.toLowerCase().includes('help'),
+      'prompt should instruct AI to converse about the failure',
+    );
   });
 });
