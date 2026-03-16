@@ -48,6 +48,119 @@ test('validateCommand accepts a valid PRD', () => {
   assert.match(logs[0] ?? '', /prd\.json is valid/i);
 });
 
+test('validateCommand accepts failureReason as string or null', () => {
+  const prdPath = writeTempPrd(JSON.stringify({
+    project: 'Demo',
+    epics: [
+      {
+        id: 'EPIC-001',
+        title: 'Auth',
+        status: 'partial',
+        userStories: [
+          { id: 'US-001', title: 'Sign in', passes: false, failureReason: 'typecheck error' },
+          { id: 'US-002', title: 'Sign out', passes: true, failureReason: null },
+        ],
+      },
+    ],
+  }));
+
+  const exit = mockProcessExit();
+
+  assert.throws(() => validateCommand(prdPath), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 0);
+    return true;
+  });
+
+  assert.equal(exit.mock.callCount(), 1);
+});
+
+test('validateCommand rejects invalid failureReason types', () => {
+  const prdPath = writeTempPrd(JSON.stringify({
+    project: 'Demo',
+    epics: [
+      {
+        id: 'EPIC-001',
+        title: 'Auth',
+        status: 'failed',
+        userStories: [
+          { id: 'US-001', title: 'Sign in', passes: false, failureReason: 42 },
+        ],
+      },
+    ],
+  }));
+
+  const exit = mockProcessExit();
+  const errors: string[] = [];
+  mock.method(console, 'error', (...args: unknown[]) => {
+    errors.push(args.join(' '));
+  });
+
+  assert.throws(() => validateCommand(prdPath), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 1);
+    return true;
+  });
+
+  assert.equal(exit.mock.callCount(), 1);
+  assert.match(errors.join('\n'), /failureReason must be a string or null/);
+});
+
+test('validateCommand accepts planned as a boolean and rejects invalid values', () => {
+  const validPath = writeTempPrd(JSON.stringify({
+    project: 'Demo',
+    epics: [
+      {
+        id: 'EPIC-001',
+        title: 'Auth',
+        status: 'pending',
+        planned: true,
+        userStories: [
+          { id: 'US-001', title: 'Sign in', passes: false, failureReason: null },
+        ],
+      },
+    ],
+  }));
+
+  const validExit = mockProcessExit();
+  assert.throws(() => validateCommand(validPath), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 0);
+    return true;
+  });
+  assert.equal(validExit.mock.callCount(), 1);
+
+  const invalidPath = writeTempPrd(JSON.stringify({
+    project: 'Demo',
+    epics: [
+      {
+        id: 'EPIC-001',
+        title: 'Auth',
+        status: 'pending',
+        planned: 'yes',
+        userStories: [
+          { id: 'US-001', title: 'Sign in', passes: false, failureReason: null },
+        ],
+      },
+    ],
+  }));
+
+  const exit = mockProcessExit();
+  const errors: string[] = [];
+  mock.method(console, 'error', (...args: unknown[]) => {
+    errors.push(args.join(' '));
+  });
+
+  assert.throws(() => validateCommand(invalidPath), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 1);
+    return true;
+  });
+
+  assert.equal(exit.mock.callCount(), 1);
+  assert.match(errors.join('\n'), /planned must be a boolean/);
+});
+
 test('validateCommand accepts merge-failed as a valid epic status', () => {
   const prdPath = writeTempPrd(JSON.stringify({
     project: 'Demo',

@@ -62,3 +62,16 @@ test('buildInitPrompt enforces dependsOn on every epic including parallel ones',
     'prompt must address parallel epics and their dependsOn handling',
   );
 });
+
+test('buildInitPrompt asks whether to move into planning or skip', () => {
+  const prompt = getPrompt();
+  assert.ok(prompt.includes('plan the implementation now or skip for later'));
+  assert.ok(prompt.includes('continue in the same session'));
+  assert.ok(prompt.includes('Planning must be collaborative'));
+  assert.ok(prompt.includes('ask follow-up questions whenever scope, architecture, sequencing, ownership, or verification is ambiguous'));
+  assert.ok(prompt.includes('Resolve ambiguity through discussion first'));
+  assert.ok(prompt.includes('write plans/plan-EPIC-xxx.md'));
+  assert.ok(prompt.includes('planned=true'));
+  assert.ok(prompt.includes('Do NOT tell the user to run `ralph-teams plan`'));
+  assert.ok(prompt.includes('Do NOT ask for permission to "kick off" planning as a separate command'));
+});

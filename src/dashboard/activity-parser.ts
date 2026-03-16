@@ -281,6 +281,7 @@ export function parseCopilotLine(line: string): string | null {
  * How many seconds of inactivity before we report 'idle'.
  */
 const IDLE_THRESHOLD_SECONDS = 30;
+const IDLE_THRESHOLD_MS = IDLE_THRESHOLD_SECONDS * 1000;
 
 /**
  * Parses the last N lines of a log file (already read as a string) and
@@ -321,6 +322,9 @@ export function parseLatestActivity(
     for (let i = lines.length - 1; i >= 0; i--) {
       const result = parseStreamJsonLine(lines[i]);
       if (result) {
+        if (result.timestampMs !== null && nowMs - result.timestampMs > IDLE_THRESHOLD_MS) {
+          return `idle ${nextSpinnerChar()}`;
+        }
         return result.activity;
       }
     }

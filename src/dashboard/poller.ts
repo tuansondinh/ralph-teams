@@ -49,7 +49,7 @@ export interface PollerDeps {
   readLogTail?: typeof readLogTail;
   /** Finds the latest log file for an epic. Defaults to findLatestEpicLog. */
   findLatestEpicLog?: typeof findLatestEpicLog;
-  /** Backend name for activity parsing ('claude' | 'copilot'). Defaults to 'claude'. */
+  /** Explicit backend override for tests. Defaults to options.backend. */
   backend?: string;
 }
 
@@ -59,7 +59,6 @@ const defaultPollerDeps: PollerDeps = {
   statSync: fs.statSync,
   readLogTail,
   findLatestEpicLog,
-  backend: 'claude',
 };
 
 /**
@@ -382,7 +381,7 @@ export function createPoller(
   // Resolve injectable helpers with fallbacks
   const doReadLogTail = deps.readLogTail ?? readLogTail;
   const doFindLatestEpicLog = deps.findLatestEpicLog ?? findLatestEpicLog;
-  const backend = deps.backend ?? 'claude';
+  const backend = deps.backend ?? options.backend ?? 'claude';
 
   function getMtime(filePath: string): number {
     try {

@@ -120,6 +120,7 @@ export function summaryCommand(prdPath: string): void {
     const depAnnotation = deps.length > 0
       ? chalk.dim(` ← ${deps.join(', ')}`)
       : '';
+    const planningAnnotation = epic.planned ? chalk.green('planned') : chalk.yellow('unplanned');
 
     // Blocked label
     const blockedLabel = isBlocked ? `  ${chalk.red.bold('⚠ BLOCKED')}` : '';
@@ -128,7 +129,7 @@ export function summaryCommand(prdPath: string): void {
     const epicLabel = `${chalk.bold(epic.id)}: ${epic.title}${depAnnotation}`;
     const statusPadded = `[${statusStr}]`;
 
-    console.log(`  ${epicLabel}  ${statusPadded}  ${passRateStr}${blockedLabel}`);
+    console.log(`  ${epicLabel}  ${statusPadded}  ${planningAnnotation}  ${passRateStr}${blockedLabel}`);
   }
 
   // Wave History — parsed from progress.txt if present

@@ -13,6 +13,8 @@ import { summaryCommand } from './commands/summary';
 import { resumeCommand } from './commands/resume';
 import { updateStatsCommand } from './commands/update-stats';
 import { statsCommand } from './commands/stats';
+import { discussCommand } from './commands/discuss';
+import { planCommand } from './commands/plan';
 
 const program = new Command();
 
@@ -83,9 +85,26 @@ program
   });
 
 program
+  .command('discuss [path]')
+  .description('Start a guided discussion for failed user stories')
+  .option('--backend <backend>', 'AI backend to use (claude, copilot, or codex)')
+  .action(async (prdPath: string = './prd.json', options: { backend?: string }) => {
+    await discussCommand(prdPath, options);
+  });
+
+program
+  .command('plan [path]')
+  .description('Discuss and create implementation plans for unplanned epics')
+  .option('--backend <backend>', 'AI backend to use (claude, copilot, or codex)')
+  .action(async (prdPath: string = './prd.json', options: { backend?: string }) => {
+    await planCommand(prdPath, options);
+  });
+
+program
   .command('resume')
   .description('Resume an interrupted run from saved state')
-  .action(() => resumeCommand());
+  .option('--backend <backend>', 'Override the backend from saved state (claude | copilot | codex)')
+  .action((opts: { backend?: string }) => resumeCommand(undefined, opts.backend));
 
 program
   .command('update-stats')

@@ -194,6 +194,53 @@ function runRalph(tempDir: string, env: Record<string, string>, args: string[] =
   });
 }
 
+test('codex backend suppresses bare file-path chatter in stdout while keeping outcome lines', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-codex-'));
+  const binDir = path.join(tempDir, 'bin');
+  fs.mkdirSync(binDir);
+
+  const mockCodex = [
+    '#!/bin/sh',
+    'printf "./src/config.ts\\n"',
+    'printf "./src/index.ts\\n"',
+    'mkdir -p results',
+    'printf "PASS\\n" > "results/result-EPIC-001.txt"',
+    'printf "PASS\\n"',
+  ].join('\n');
+  fs.writeFileSync(path.join(binDir, 'codex'), mockCodex);
+  fs.chmodSync(path.join(binDir, 'codex'), 0o755);
+
+  execFileSync('git', ['init', '-b', 'main'], { cwd: tempDir });
+  execFileSync('git', ['config', 'user.name', 'Ralph Test'], { cwd: tempDir });
+  execFileSync('git', ['config', 'user.email', 'ralph@example.com'], { cwd: tempDir });
+
+  fs.writeFileSync(path.join(tempDir, 'prd.json'), JSON.stringify({
+    project: 'Codex Noise Test',
+    epics: [
+      {
+        id: 'EPIC-001',
+        title: 'Alpha',
+        status: 'pending',
+        userStories: [{ id: 'US-001', title: 'Story', passes: false }],
+      },
+    ],
+  }, null, 2));
+  fs.writeFileSync(path.join(tempDir, 'README.md'), 'initial\n');
+  execFileSync('git', ['add', '.'], { cwd: tempDir });
+  execFileSync('git', ['commit', '-m', 'chore: initial'], { cwd: tempDir });
+
+  const env: Record<string, string> = {
+    ...process.env as Record<string, string>,
+    PATH: `${binDir}:${process.env.PATH ?? ''}`,
+  };
+
+  const result = runRalph(tempDir, env, ['--backend', 'codex']);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.doesNotMatch(result.stdout, /\[EPIC-001\]\s+\.\/*src\/config\.ts/);
+  assert.doesNotMatch(result.stdout, /\[EPIC-001\]\s+\.\/*src\/index\.ts/);
+  assert.match(result.stdout, /\[EPIC-001\] PASSED/);
+});
+
 // ─── US-001 Tests ─────────────────────────────────────────────────────────────
 
 test('US-001: two independent epics run in the same wave', () => {

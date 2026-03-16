@@ -376,6 +376,16 @@ test('parseLatestActivity still falls back to fresh tool activity', () => {
   });
 });
 
+test('parseLatestActivity ages stale Claude tool activity back to idle', () => {
+  withResetSpinner(() => {
+    const nowMs = Date.now();
+    const staleTs = new Date(nowMs - 60_000).toISOString();
+    const log = toolUseLine('Edit', { file_path: 'stale.ts' }, staleTs);
+    const result = parseLatestActivity(log, 'claude', nowMs);
+    assert.ok(result.startsWith('idle '), `expected idle spinner, got "${result}"`);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // parseLatestActivity — copilot backend
 // ---------------------------------------------------------------------------

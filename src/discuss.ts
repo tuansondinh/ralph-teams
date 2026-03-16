@@ -18,7 +18,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync, spawn, ChildProcess } from 'child_process';
-import { saveGuidance } from './guidance';
+import { getGuidancePath, loadGuidance, saveGuidance } from './guidance';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,6 +35,13 @@ export interface DiscussContext {
   codeDiff: string;
   /** The section of the plan file that describes this story */
   planSection: string;
+}
+
+export interface FailedStoryContext extends DiscussContext {
+  storyTitle: string;
+  epicTitle: string;
+  failureReason: string | null;
+  guidancePath: string;
 }
 
 export interface DiscussResult {
@@ -59,12 +66,19 @@ export interface DiscussSessionOptions {
    * runs `claude` in interactive mode with the context as the initial prompt.
    */
   spawnAgent?: AgentSpawner;
+  /** Backend to launch for the guided session. Defaults to 'claude'. */
+  backend?: 'claude' | 'copilot' | 'codex';
   /**
    * Directory in which to persist the guidance file after the session ends.
    * When provided, the guidance is saved to `<guidanceDir>/guidance-<storyId>.md`.
    * Defaults to 'guidance' if not specified.
    */
   guidanceDir?: string;
+}
+
+export interface FailedStoriesDiscussOptions {
+  spawnAgent?: AgentSpawner;
+  backend?: 'claude' | 'copilot' | 'codex';
 }
 
 // ---------------------------------------------------------------------------
@@ -320,6 +334,77 @@ export function buildContextPrompt(context: DiscussContext): string {
   ].join('\n');
 }
 
+function buildGuidedDiscussPrompt(context: DiscussContext, guidancePath: string): string {
+  return [
+    buildContextPrompt(context),
+    '',
+    'You are running a guided retry discussion with the user.',
+    'Behave like an interactive product/engineering interview session.',
+    'Ask focused follow-up questions, help the user reason about the failure, and converge on concrete retry guidance.',
+    '',
+    'Before ending the session, you MUST write the final guidance file yourself.',
+    `Write it to this exact path: ${guidancePath}`,
+    '',
+    'The guidance file must be Markdown and include these sections:',
+    '# Story Guidance',
+    '## Failure Context',
+    '## User Instructions',
+    '## Agreed Approach',
+    '',
+    'Rules:',
+    '- Create the parent directory if it does not exist.',
+    '- Summarize the final guidance in the file, not just in chat.',
+    '- Do not ask the user to create or save the file manually.',
+    '- After writing the file, tell the user where you saved it and exit.',
+  ].join('\n');
+}
+
+export function buildFailedStoriesDiscussPrompt(contexts: FailedStoryContext[]): string {
+  const sep = '─'.repeat(72);
+  const storyBlocks = contexts.map((context) => [
+    sep,
+    `${context.storyId} — ${context.storyTitle}`,
+    `Epic: ${context.epicId} — ${context.epicTitle}`,
+    `Failure reason: ${context.failureReason ?? '(not recorded)'}`,
+    `Guidance file: ${context.guidancePath}`,
+    '',
+    '[Failure Report]',
+    context.failureReport,
+    '',
+    '[Code Changes (git diff --stat)]',
+    context.codeDiff,
+    '',
+    '[Plan Section]',
+    context.planSection,
+  ].join('\n'));
+
+  return [
+    'You are running a guided retry discussion for Ralph Teams.',
+    'The user has one or more failed stories that need triage and retry guidance.',
+    '',
+    'Start by summarizing the failed stories and asking the user which one to discuss first.',
+    'Guide the conversation story by story. Ask focused follow-up questions and converge on concrete retry instructions.',
+    '',
+    'When the user finishes discussing a story, you MUST write that story guidance file yourself to the exact path listed for that story.',
+    'You may write multiple guidance files in this session if the user discusses multiple failed stories.',
+    '',
+    'Each guidance file must be Markdown and include exactly these sections:',
+    '# Story Guidance',
+    '## Failure Context',
+    '## User Instructions',
+    '## Agreed Approach',
+    '',
+    'Rules:',
+    '- Create parent directories if they do not exist.',
+    '- Do not ask the user to create or save files manually.',
+    '- Keep guidance scoped to the story being discussed.',
+    '- When the user says they are done, summarize which guidance files were written and exit.',
+    '',
+    ...storyBlocks,
+    sep,
+  ].join('\n');
+}
+
 // ---------------------------------------------------------------------------
 // Default agent spawner
 // ---------------------------------------------------------------------------
@@ -338,88 +423,49 @@ export function buildContextPrompt(context: DiscussContext): string {
  * @param agentArgs - Additional args to pass to the agent (default: [])
  */
 export function createDefaultSpawner(
-  agentCommand: string = 'claude',
-  agentArgs: string[] = [],
+  backend: 'claude' | 'copilot' | 'codex' = 'claude',
 ): AgentSpawner {
   return (contextPrompt: string): Promise<string> => {
-    return new Promise((resolve) => {
-      // Print context header before starting the agent
+    return new Promise((resolve, reject) => {
       const sep = '─'.repeat(72);
       process.stdout.write('\n');
       process.stdout.write(`${sep}\n`);
-      process.stdout.write(`Discuss session starting — type your questions, type "done" or press Escape to finish.\n`);
+      process.stdout.write('Discuss session starting — the agent will guide the conversation and save the final guidance file.\n');
       process.stdout.write(`${sep}\n\n`);
 
-      // Spawn the agent with inherited stdio so user can interact directly
+      let command: string;
+      let args: string[];
+      if (backend === 'claude') {
+        command = 'claude';
+        args = ['--dangerously-skip-permissions', contextPrompt];
+      } else if (backend === 'copilot') {
+        command = 'gh';
+        args = ['copilot', '--', '--allow-all', '-i', contextPrompt];
+      } else {
+        command = 'codex';
+        args = ['-a', 'never', '-s', 'workspace-write', contextPrompt];
+      }
+
       let agentProcess: ChildProcess;
       try {
-        agentProcess = spawn(agentCommand, agentArgs, {
-          stdio: ['pipe', 'inherit', 'inherit'],
+        agentProcess = spawn(command, args, {
+          stdio: 'inherit',
           env: { ...process.env },
         });
-      } catch {
-        process.stdout.write('(agent spawn failed — falling back to no-op session)\n');
-        resolve('');
+      } catch (err) {
+        reject(err);
         return;
       }
 
-      // Send the context prompt as the initial message to the agent
-      if (agentProcess.stdin) {
-        agentProcess.stdin.write(contextPrompt + '\n');
-      }
-
-      // Enable raw mode to detect Escape keypress (\x1b)
-      let rawModeEnabled = false;
-      const handleKeypress = (data: Buffer): void => {
-        // ESC character is \x1b (byte 27)
-        if (data[0] === 0x1b) {
-          cleanup();
-          agentProcess.kill('SIGTERM');
+      agentProcess.on('close', (code: number | null) => {
+        if (code === 0) {
           resolve('');
+          return;
         }
-      };
-
-      const enableRawMode = (): void => {
-        if (process.stdin.isTTY && !rawModeEnabled) {
-          try {
-            process.stdin.setRawMode(true);
-            process.stdin.resume();
-            process.stdin.on('data', handleKeypress);
-            rawModeEnabled = true;
-          } catch {
-            // raw mode not available in this environment — ignore
-          }
-        }
-      };
-
-      const cleanup = (): void => {
-        if (rawModeEnabled) {
-          try {
-            process.stdin.removeListener('data', handleKeypress);
-            process.stdin.setRawMode(false);
-            process.stdin.pause();
-          } catch {
-            // ignore cleanup errors
-          }
-          rawModeEnabled = false;
-        }
-        // Reconnect stdin to the agent process after cleanup
-        if (agentProcess.stdin) {
-          agentProcess.stdin.end();
-        }
-      };
-
-      enableRawMode();
-
-      agentProcess.on('close', (_code: number | null) => {
-        cleanup();
-        resolve('');
+        reject(new Error(`${backend} exited with code ${code}`));
       });
 
-      agentProcess.on('error', (_err: Error) => {
-        cleanup();
-        resolve('');
-      });
+      agentProcess.on('error', reject);
     });
   };
 }
@@ -450,10 +496,15 @@ export async function runDiscussSession(
   context: DiscussContext,
   options?: DiscussSessionOptions,
 ): Promise<DiscussResult> {
-  const contextPrompt = buildContextPrompt(context);
+  const shouldPersistGuidance = options?.spawnAgent === undefined || options?.guidanceDir !== undefined;
+  const guidanceDir = options?.guidanceDir ?? 'guidance';
+  const guidancePath = path.resolve(getGuidancePath(context.storyId, guidanceDir));
+  if (shouldPersistGuidance) {
+    fs.mkdirSync(path.dirname(guidancePath), { recursive: true });
+  }
+  const contextPrompt = buildGuidedDiscussPrompt(context, guidancePath);
 
-  // Use the injected spawner if provided, otherwise use the default claude spawner
-  const spawner: AgentSpawner = options?.spawnAgent ?? createDefaultSpawner();
+  const spawner: AgentSpawner = options?.spawnAgent ?? createDefaultSpawner(options?.backend ?? 'claude');
 
   let guidance = '';
   try {
@@ -464,28 +515,76 @@ export async function runDiscussSession(
   }
 
   const trimmedGuidance = guidance.trim();
+  let finalGuidance = trimmedGuidance;
+
+  if (!finalGuidance && options?.spawnAgent === undefined) {
+    const savedGuidance = loadGuidance(context.storyId, guidanceDir);
+    if (savedGuidance !== null) {
+      finalGuidance = savedGuidance.trim();
+    }
+  }
 
   process.stdout.write('\n');
-  if (trimmedGuidance) {
+  if (finalGuidance) {
     process.stdout.write('[Guidance recorded]\n');
-    process.stdout.write(`${trimmedGuidance}\n`);
+    process.stdout.write(`${finalGuidance}\n`);
   } else {
     process.stdout.write('[Discuss session ended]\n');
   }
   process.stdout.write('\n');
 
-  // Persist guidance to disk so the Builder can incorporate it on the next run.
-  // Saved to guidance/guidance-<storyId>.md (or <guidanceDir>/guidance-<storyId>.md if overridden).
-  const guidancePath = saveGuidance(
-    context.storyId,
-    {
-      failureContext: context.failureReport,
-      userInstructions: trimmedGuidance,
-      approach: '',
-    },
-    options?.guidanceDir ?? 'guidance',
-  );
-  process.stdout.write(`[Guidance saved to ${guidancePath}]\n`);
+  if (trimmedGuidance && shouldPersistGuidance) {
+    saveGuidance(
+      context.storyId,
+      {
+        failureContext: context.failureReport,
+        userInstructions: trimmedGuidance,
+        approach: '',
+      },
+      guidanceDir,
+    );
+  }
 
-  return { storyId: context.storyId, guidance: trimmedGuidance };
+  if (shouldPersistGuidance && fs.existsSync(guidancePath)) {
+    process.stdout.write(`[Guidance saved to ${guidancePath}]\n`);
+  }
+
+  return { storyId: context.storyId, guidance: finalGuidance };
+}
+
+export async function runFailedStoriesDiscussSession(
+  contexts: FailedStoryContext[],
+  options?: FailedStoriesDiscussOptions,
+): Promise<void> {
+  if (contexts.length === 0) {
+    return;
+  }
+
+  for (const context of contexts) {
+    fs.mkdirSync(path.dirname(context.guidancePath), { recursive: true });
+  }
+
+  const contextPrompt = buildFailedStoriesDiscussPrompt(contexts);
+  const spawner: AgentSpawner = options?.spawnAgent ?? createDefaultSpawner(options?.backend ?? 'claude');
+
+  try {
+    await spawner(contextPrompt);
+  } catch {
+    // Non-fatal: the user may have exited the interactive backend early.
+  }
+
+  process.stdout.write('\n');
+  const savedPaths = contexts
+    .map(context => context.guidancePath)
+    .filter(filePath => fs.existsSync(filePath));
+
+  if (savedPaths.length > 0) {
+    process.stdout.write('[Guidance saved]\n');
+    for (const filePath of savedPaths) {
+      process.stdout.write(`${filePath}\n`);
+    }
+  } else {
+    process.stdout.write('[Discuss session ended]\n');
+  }
+  process.stdout.write('\n');
 }

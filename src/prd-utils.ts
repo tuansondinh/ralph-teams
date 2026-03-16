@@ -10,6 +10,7 @@ export interface UserStory {
   acceptanceCriteria?: string[];
   priority?: number;
   passes: boolean;
+  failureReason?: string | null;
 }
 
 export interface Epic {
@@ -17,6 +18,7 @@ export interface Epic {
   title: string;
   description?: string;
   status: 'pending' | 'completed' | 'partial' | 'failed' | 'merge-failed';
+  planned?: boolean;
   dependsOn?: string[];
   userStories: UserStory[];
 }
@@ -37,6 +39,16 @@ export function loadPrd(prdPath: string): { prd: Prd; resolved: string } {
   }
   try {
     const prd = JSON.parse(fs.readFileSync(resolved, 'utf-8')) as Prd;
+    for (const epic of prd.epics ?? []) {
+      if (epic.planned === undefined) {
+        epic.planned = false;
+      }
+      for (const story of epic.userStories ?? []) {
+        if (story.failureReason === undefined) {
+          story.failureReason = null;
+        }
+      }
+    }
     return { prd, resolved };
   } catch {
     console.error(chalk.red(`Error: failed to parse ${resolved}`));

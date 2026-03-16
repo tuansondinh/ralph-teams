@@ -57,7 +57,7 @@ function findRalphSh(deps: ResumeDeps): string | null {
   return null;
 }
 
-export function resumeCommand(deps: ResumeDeps = defaultDeps): void {
+export function resumeCommand(deps: ResumeDeps = defaultDeps, backendOverride?: string): void {
   const cwd = deps.cwd();
   const stateFile = path.join(cwd, 'ralph-state.json');
 
@@ -121,13 +121,13 @@ export function resumeCommand(deps: ResumeDeps = defaultDeps): void {
     // ignore chmod errors
   }
 
-  const backend = state!.backend;
+  const backend = backendOverride ?? state!.backend;
   const parallel = state!.parallel;
 
   console.log(chalk.bold('Resuming interrupted run...'));
   console.log(chalk.dim(`State: ${stateFile}`));
   console.log(chalk.dim(`Using PRD: ${resolvedPrd}`));
-  console.log(chalk.dim(`Using backend: ${backend}`));
+  console.log(chalk.dim(`Using backend: ${backend}${backendOverride ? ' (overridden)' : ''}`));
   console.log(chalk.dim(`Using ralph.sh: ${ralphSh}`));
   if (parallel !== undefined && parallel > 0) {
     console.log(chalk.dim(`Parallel: ${parallel} epics per wave\n`));

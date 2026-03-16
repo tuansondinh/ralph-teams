@@ -180,6 +180,12 @@ export async function runCommand(
   const backend = resolvedConfig.execution.backend;
   const currentBranch = getCurrentGitBranch(deps);
 
+  if (useDashboard) {
+    console.error(chalk.red('Error: --dashboard is temporarily disabled.'));
+    console.error(chalk.dim('Run without --dashboard for now.'));
+    deps.exit(1);
+  }
+
   if (backend === 'claude' && !isCommandInstalled('claude', deps)) {
     console.error(chalk.red('Error: claude CLI is not installed or not in PATH.'));
     console.error(chalk.dim('Install Claude Code: https://claude.ai/code'));
@@ -250,6 +256,11 @@ export async function runCommand(
     RALPH_VALIDATOR_MAX_PUSHBACKS: String(resolvedConfig.execution.validatorMaxPushbacks),
     RALPH_PARALLEL: String(resolvedConfig.execution.parallel),
     RALPH_BACKEND: resolvedConfig.execution.backend,
+    RALPH_MODEL_TEAM_LEAD: resolvedConfig.agents.teamLead,
+    RALPH_MODEL_PLANNER: resolvedConfig.agents.planner,
+    RALPH_MODEL_BUILDER: resolvedConfig.agents.builder,
+    RALPH_MODEL_VALIDATOR: resolvedConfig.agents.validator,
+    RALPH_MODEL_MERGER: resolvedConfig.agents.merger,
   };
 
   if (useDashboard && currentBranch !== null && hasDirtyGitWorktree(deps)) {
@@ -319,7 +330,7 @@ export async function runCommand(
         // Run the interactive discuss session (async, but we fire-and-forget here)
         // The dashboard was already stopped above so readline can use the terminal
         const guidanceDir = path.join(cwd, 'guidance');
-        runDiscussSession(context, { guidanceDir }).then(() => {
+        runDiscussSession(context, { guidanceDir, backend: backend as 'claude' | 'copilot' | 'codex' }).then(() => {
           // After the session, exit cleanly — user can restart the dashboard if needed
           deps.exit(0);
         }).catch((err: Error) => {

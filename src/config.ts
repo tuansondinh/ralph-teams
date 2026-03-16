@@ -18,6 +18,18 @@ export interface RalphConfig {
     /** AI backend to use: 'claude', 'copilot', or 'codex'. Default: 'claude'. */
     backend: string;
   };
+  agents: {
+    /** Model for the team-lead agent. Default: 'opus'. */
+    teamLead: string;
+    /** Model for the planner agent. Default: 'opus'. */
+    planner: string;
+    /** Model for the builder agent. Default: 'sonnet'. */
+    builder: string;
+    /** Model for the validator agent. Default: 'sonnet'. */
+    validator: string;
+    /** Model for the merger agent. Default: 'sonnet'. */
+    merger: string;
+  };
   pricing: {
     /** USD cost per 1k input tokens. Default: 0.015 (Claude Sonnet). */
     inputTokenCostPer1k: number;
@@ -30,6 +42,8 @@ export interface RalphConfig {
   };
 }
 
+const VALID_MODELS = ['opus', 'sonnet', 'haiku'] as const;
+
 /** Default configuration values used when no ralph.config.yml is present. */
 export const DEFAULT_CONFIG: RalphConfig = {
   timeouts: {
@@ -40,6 +54,13 @@ export const DEFAULT_CONFIG: RalphConfig = {
     validatorMaxPushbacks: 1,
     parallel: 0,
     backend: 'claude',
+  },
+  agents: {
+    teamLead: 'opus',
+    planner: 'opus',
+    builder: 'sonnet',
+    validator: 'sonnet',
+    merger: 'sonnet',
   },
   pricing: {
     inputTokenCostPer1k: 0.015,
@@ -61,6 +82,7 @@ export function validateConfig(raw: unknown): { config: RalphConfig; errors: str
   const config: RalphConfig = {
     timeouts: { ...DEFAULT_CONFIG.timeouts },
     execution: { ...DEFAULT_CONFIG.execution },
+    agents: { ...DEFAULT_CONFIG.agents },
     pricing: { ...DEFAULT_CONFIG.pricing },
   };
 
@@ -136,6 +158,27 @@ export function validateConfig(raw: unknown): { config: RalphConfig; errors: str
     }
   }
 
+  // --- agents ---
+  if ('agents' in obj) {
+    const agents = obj['agents'];
+    if (agents === null || typeof agents !== 'object' || Array.isArray(agents)) {
+      errors.push('agents must be an object');
+    } else {
+      const a = agents as Record<string, unknown>;
+      const agentFields = ['teamLead', 'planner', 'builder', 'validator', 'merger'] as const;
+      for (const field of agentFields) {
+        if (field in a) {
+          const v = a[field];
+          if (!VALID_MODELS.includes(v as typeof VALID_MODELS[number])) {
+            errors.push(`agents.${field} must be 'opus', 'sonnet', or 'haiku', got '${v}'`);
+          } else {
+            config.agents[field] = v as string;
+          }
+        }
+      }
+    }
+  }
+
   // --- pricing ---
   if ('pricing' in obj) {
     const pricing = obj['pricing'];
@@ -179,7 +222,7 @@ export function loadConfig(projectRoot: string): RalphConfig {
   const configPath = path.join(projectRoot, 'ralph.config.yml');
 
   if (!fs.existsSync(configPath)) {
-    return { ...DEFAULT_CONFIG, timeouts: { ...DEFAULT_CONFIG.timeouts }, execution: { ...DEFAULT_CONFIG.execution }, pricing: { ...DEFAULT_CONFIG.pricing } };
+    return { ...DEFAULT_CONFIG, timeouts: { ...DEFAULT_CONFIG.timeouts }, execution: { ...DEFAULT_CONFIG.execution }, agents: { ...DEFAULT_CONFIG.agents }, pricing: { ...DEFAULT_CONFIG.pricing } };
   }
 
   let raw: unknown;

@@ -2,6 +2,9 @@
 
 `ralph-teams` is a CLI for running Ralph Teams: a shell-based orchestrator that reads a `prd.json`, loops through epics, and spawns AI coding agent teams to implement work story by story.
 
+For a deeper codebase walkthrough, see [architecture.md](./architecture.md).
+Deferred review notes are tracked in [docs/review-findings-2026-03-16.md](./docs/review-findings-2026-03-16.md).
+
 ## What It Does
 
 The system has two layers:
@@ -21,11 +24,25 @@ Current backends:
 - `copilot` via `gh copilot` and `.github/agents/*.agent.md`
 - `codex` via the `codex` CLI, repo-local `.codex/agents/*.toml`, and Codex multi-agent mode
 
+The runtime is file-based. During a run, Ralph treats these files as the working state of the system:
+
+- `prd.json`: source of truth for epic and story status
+- `plans/`: implementation plans for epics that were explicitly planned
+- `progress.txt`: narrative progress log
+- `logs/`: raw backend logs
+- `results/`: per-epic final result markers
+- `ralph-state.json`: interrupt/resume state
+- `ralph-run-stats.json`: cost, token, and duration telemetry
+
 ## Flow
 
 ```mermaid
 flowchart TB
-    U[User runs CLI] --> C[run command]
+    U[User runs CLI] --> I[init command]
+    I --> P0{Plan now?}
+    P0 -->|Yes| PC[plan command]
+    P0 -->|No| C[run command]
+    PC --> C
     C --> S[ralph.sh]
     S --> V[Validate PRD, backend, and rjq]
     V --> PF{Parallel flag set?}
@@ -42,6 +59,7 @@ flowchart TB
     subgraph CS[Agent session: team agents for one epic]
         direction TB
         TL[Team lead]
+        PP{Epic planned?}
         P[Planner creates plan]
         Q{Story already passed}
         BU[Builder implements]
@@ -52,7 +70,9 @@ flowchart TB
         M{More stories}
         RF[Write result file]
 
-        TL --> P
+        TL --> PP
+        PP -->|Yes| Q
+        PP -->|No| P
         P --> Q
         Q -->|Yes| M
         Q -->|No| BU
@@ -178,6 +198,7 @@ Flow:
 3. the agent asks follow-up questions until the requirements are clear
 4. the agent generates the full `prd.json` with project metadata, epics, and user stories
 5. the agent writes `./prd.json`
+6. after writing the PRD, the init agent can either continue into implementation planning with you or stop there if you want to skip planning for now
 
 Notes:
 
@@ -211,6 +232,73 @@ Notes:
 - `--backend` is forwarded to `ralph.sh`
 - runs sequentially by default
 - `--parallel <n>` enables the experimental parallel wave runner
+- `--dashboard` is temporarily disabled
+
+Planning behavior:
+
+- if an epic has `planned: true`, the Team Lead is expected to read `plans/plan-EPIC-xxx.md` and follow it
+- if an epic is still unplanned, the Team Lead may still decide to spawn a planner during execution
+
+### `ralph-teams plan [path]`
+
+Starts a guided planning discussion for epics that are not yet marked as planned. Default path is `./prd.json`.
+
+```bash
+ralph-teams plan
+ralph-teams plan ./my-prd.json
+ralph-teams plan --backend claude
+```
+
+Behavior:
+
+- loads epics with `planned !== true`
+- starts an interactive agent discussion about implementation approach and sequencing
+- asks the agent to write `plans/plan-EPIC-xxx.md`
+- asks the agent to mark each agreed epic as `planned: true` in `prd.json`
+
+Notes:
+
+- this command is intended after `ralph-teams init`
+- if you skip an epic during planning, it remains `planned: false`
+- planned epics should not require the Team Lead to spawn another planner later
+
+### `ralph-teams discuss [path]`
+
+Starts a guided retry discussion for the currently failed user stories in a PRD. Default path is `./prd.json`.
+
+```bash
+ralph-teams discuss
+ralph-teams discuss ./my-prd.json
+ralph-teams discuss --backend codex
+```
+
+Behavior:
+
+- loads failed stories from `prd.json`
+- gathers failure context from `progress.txt`, `plans/`, and `.worktrees/`
+- starts an interactive agent session that helps the user choose which failed story to discuss first
+- asks the agent to write `guidance/guidance-US-xxx.md` files directly for the stories discussed
+
+Notes:
+
+- you do not need to pass a story ID
+- the agent is expected to guide the conversation across failed stories
+- `--backend` controls whether the session uses `claude`, `copilot`, or `codex`
+
+### `ralph-teams resume`
+
+Resumes an interrupted run from `./ralph-state.json`.
+
+```bash
+ralph-teams resume
+```
+
+Behavior:
+
+- reloads the saved PRD path, backend, and parallel settings
+- reuses the current project config for timeouts and pricing
+- restarts `ralph.sh`
+- removes `ralph-state.json` after a successful resume
 
 ### `ralph-teams status [path]`
 
@@ -287,6 +375,17 @@ Shows:
 - story pass counts
 - blocked epics
 
+### `ralph-teams stats [path]`
+
+Shows the current stats feature status.
+
+```bash
+ralph-teams stats
+ralph-teams stats ./ralph-run-stats.json
+```
+
+This command is temporarily disabled while the telemetry model is being corrected.
+
 ## Backends
 
 ### Claude Backend
@@ -356,6 +455,7 @@ Example:
       "title": "Authentication",
       "description": "Add login and session handling",
       "status": "pending",
+      "planned": false,
       "dependsOn": [],
       "userStories": [
         {
@@ -367,7 +467,8 @@ Example:
             "Validation errors are shown clearly"
           ],
           "priority": 1,
-          "passes": false
+          "passes": false,
+          "failureReason": null
         }
       ]
     }
@@ -378,8 +479,10 @@ Example:
 Important fields:
 
 - `epics[].status`: `pending` | `completed` | `partial` | `failed` | `merge-failed`
+- `epics[].planned`: whether the implementation plan for this epic has already been created and agreed
 - `epics[].dependsOn`: epic IDs that must be completed first
 - `userStories[].passes`: whether the story is currently marked as passing
+- `userStories[].failureReason`: short reason for the latest failed attempt, or `null`
 
 Authoring guideline:
 
@@ -394,8 +497,12 @@ During a run, Ralph writes:
 
 - `progress.txt`: high-level run log
 - `plans/plan-EPIC-xxx.md`: planner output for an epic
+- planned epics are expected to use these files as their implementation contract
 - `results/result-EPIC-xxx.txt`: final pass/partial/fail result per epic
-- `logs/epic-EPIC-xxx-<timestamp>.log`: raw Claude session log
+- `logs/epic-EPIC-xxx-<timestamp>.log`: raw backend session log
+- `ralph-state.json`: saved interrupt/resume state
+- `ralph-run-stats.json`: token, cost, duration, and estimate data
+- `guidance/guidance-US-xxx.md`: retry guidance captured from discuss flows
 
 Ralph also updates the original `prd.json` in place as story and epic state changes.
 
@@ -419,6 +526,7 @@ The current execution contract is:
 - each story gets at most two build/validate cycles
 - the validator checks output independently from the builder's reasoning
 - after writing `results/result-EPIC-xxx.txt`, the team lead must print the same result and exit the session immediately
+- pressing `Ctrl-C` writes `ralph-state.json` so the run can be resumed later with `ralph-teams resume`
 
 ## Troubleshooting
 
@@ -480,9 +588,9 @@ Install or relink the package so the bundled JSON CLI is on your `PATH`:
 npm install -g ralph-teams
 ```
 
-### Ralph cannot switch branches
+### Ralph needs to switch branches but the worktree is dirty
 
-`ralph.sh` refuses to switch branches if the worktree is dirty. Commit or stash your changes first.
+Ralph may prompt to auto-commit current changes before creating or switching to the loop branch. If you do not want that commit, clean up the worktree yourself before starting the run.
 
 ## Development
 
