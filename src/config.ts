@@ -1,0 +1,177 @@
+import * as fs from 'fs';
+import * as path from 'path';
+import * as yaml from 'js-yaml';
+
+/** Runtime configuration for ralph-teams. */
+export interface RalphConfig {
+  timeouts: {
+    /** Max seconds before an epic run is forcibly stopped. Default: 3600. */
+    epicTimeout: number;
+    /** Max idle seconds before an epic agent is considered hung. Default: 300. */
+    idleTimeout: number;
+  };
+  execution: {
+    /** Maximum validator pushback cycles per story. Default: 1. */
+    validatorMaxPushbacks: number;
+    /** Max epics to run in parallel (0 = unlimited). Default: 0. */
+    parallel: number;
+    /** AI backend to use: 'claude' or 'copilot'. Default: 'claude'. */
+    backend: string;
+  };
+}
+
+/** Default configuration values used when no ralph.config.yml is present. */
+export const DEFAULT_CONFIG: RalphConfig = {
+  timeouts: {
+    epicTimeout: 3600,
+    idleTimeout: 300,
+  },
+  execution: {
+    validatorMaxPushbacks: 1,
+    parallel: 0,
+    backend: 'claude',
+  },
+};
+
+/**
+ * Validates a raw parsed YAML object against the RalphConfig schema.
+ * Returns the validated config (with defaults for missing fields) and a list
+ * of descriptive error strings for any invalid or out-of-range fields.
+ */
+export function validateConfig(raw: unknown): { config: RalphConfig; errors: string[] } {
+  const errors: string[] = [];
+
+  // Start from defaults so partial configs inherit missing values
+  const config: RalphConfig = {
+    timeouts: { ...DEFAULT_CONFIG.timeouts },
+    execution: { ...DEFAULT_CONFIG.execution },
+  };
+
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    errors.push('Config file must be a YAML object, got ' + (Array.isArray(raw) ? 'array' : String(raw)));
+    return { config, errors };
+  }
+
+  const obj = raw as Record<string, unknown>;
+
+  // --- timeouts ---
+  if ('timeouts' in obj) {
+    const timeouts = obj['timeouts'];
+    if (timeouts === null || typeof timeouts !== 'object' || Array.isArray(timeouts)) {
+      errors.push('timeouts must be an object');
+    } else {
+      const t = timeouts as Record<string, unknown>;
+
+      if ('epicTimeout' in t) {
+        const v = t['epicTimeout'];
+        if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) {
+          errors.push(`timeouts.epicTimeout must be a positive number, got '${v}'`);
+        } else {
+          config.timeouts.epicTimeout = v;
+        }
+      }
+
+      if ('idleTimeout' in t) {
+        const v = t['idleTimeout'];
+        if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) {
+          errors.push(`timeouts.idleTimeout must be a positive number, got '${v}'`);
+        } else {
+          config.timeouts.idleTimeout = v;
+        }
+      }
+    }
+  }
+
+  // --- execution ---
+  if ('execution' in obj) {
+    const execution = obj['execution'];
+    if (execution === null || typeof execution !== 'object' || Array.isArray(execution)) {
+      errors.push('execution must be an object');
+    } else {
+      const e = execution as Record<string, unknown>;
+
+      if ('validatorMaxPushbacks' in e) {
+        const v = e['validatorMaxPushbacks'];
+        if (typeof v !== 'number' || !Number.isInteger(v) || v < 0) {
+          errors.push(`execution.validatorMaxPushbacks must be a non-negative integer, got '${v}'`);
+        } else {
+          config.execution.validatorMaxPushbacks = v;
+        }
+      }
+
+      if ('parallel' in e) {
+        const v = e['parallel'];
+        if (typeof v !== 'number' || !Number.isInteger(v) || v < 0) {
+          errors.push(`execution.parallel must be a non-negative integer, got '${v}'`);
+        } else {
+          config.execution.parallel = v;
+        }
+      }
+
+      if ('backend' in e) {
+        const v = e['backend'];
+        if (v !== 'claude' && v !== 'copilot') {
+          errors.push(`execution.backend must be 'claude' or 'copilot', got '${v}'`);
+        } else {
+          config.execution.backend = v;
+        }
+      }
+    }
+  }
+
+  return { config, errors };
+}
+
+/**
+ * Loads ralph.config.yml from the given project root directory.
+ * If no config file is found, returns DEFAULT_CONFIG.
+ * If the file is found but contains invalid YAML or invalid field values,
+ * throws an Error with a descriptive message.
+ *
+ * @param projectRoot - Absolute path to the directory containing ralph.config.yml
+ */
+export function loadConfig(projectRoot: string): RalphConfig {
+  const configPath = path.join(projectRoot, 'ralph.config.yml');
+
+  if (!fs.existsSync(configPath)) {
+    return { ...DEFAULT_CONFIG, timeouts: { ...DEFAULT_CONFIG.timeouts }, execution: { ...DEFAULT_CONFIG.execution } };
+  }
+
+  let raw: unknown;
+  try {
+    const contents = fs.readFileSync(configPath, 'utf-8');
+    raw = yaml.load(contents);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Invalid YAML in ralph.config.yml: ${msg}`);
+  }
+
+  const { config, errors } = validateConfig(raw);
+
+  if (errors.length > 0) {
+    throw new Error(`Invalid ralph.config.yml:\n${errors.map(e => `  - ${e}`).join('\n')}`);
+  }
+
+  return config;
+}
+
+/**
+ * Merges CLI flag overrides on top of a loaded config.
+ * CLI flags always take precedence. Only defined (non-undefined) overrides are applied.
+ *
+ * @param config - Base config (from loadConfig)
+ * @param overrides - Partial overrides from CLI flags
+ */
+export function mergeCliOverrides(
+  config: RalphConfig,
+  overrides: Partial<{ backend: string; parallel: number }>,
+): RalphConfig {
+  return {
+    timeouts: { ...config.timeouts },
+    execution: {
+      ...config.execution,
+      ...(overrides.backend !== undefined ? { backend: overrides.backend } : {}),
+      ...(overrides.parallel !== undefined ? { parallel: overrides.parallel } : {}),
+    },
+  };
+}

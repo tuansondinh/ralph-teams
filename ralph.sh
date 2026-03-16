@@ -32,6 +32,16 @@ if [ -n "$PARALLEL" ] && ! [[ "$PARALLEL" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
+# Read env vars as fallbacks (set by ralph-teams CLI from ralph.config.yml).
+# CLI flags passed directly to ralph.sh take precedence over these env vars.
+EPIC_TIMEOUT="${RALPH_EPIC_TIMEOUT:-3600}"
+IDLE_TIMEOUT="${RALPH_IDLE_TIMEOUT:-300}"
+VALIDATOR_MAX_PUSHBACKS="${RALPH_VALIDATOR_MAX_PUSHBACKS:-1}"
+# Only apply RALPH_PARALLEL env var if --parallel flag was not provided
+if [ -z "$PARALLEL" ] && [ -n "${RALPH_PARALLEL:-}" ] && [ "${RALPH_PARALLEL}" != "0" ]; then
+  PARALLEL="$RALPH_PARALLEL"
+fi
+
 # --- Backend configuration ---
 case "$BACKEND" in
   claude)
