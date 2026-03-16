@@ -10,6 +10,8 @@ results/
 progress.txt
 result.txt
 prd.json
+ralph-run-stats.json
+ralph-state.json
 
 # Generated diagram exports
 flow.png

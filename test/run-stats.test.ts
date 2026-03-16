@@ -647,3 +647,150 @@ test('calculateEstimates is refreshed on every updateStoryStats call', () => {
   // Estimates should differ as more data comes in
   assert.notEqual(firstEstimate, secondEstimate);
 });
+
+// ---------------------------------------------------------------------------
+// US-010: schema round-trip, atomic write, file absence
+// ---------------------------------------------------------------------------
+
+test('saveRunStats writes 2-space indented JSON', () => {
+  const tmpDir = makeTempDir();
+  const statsPath = path.join(tmpDir, 'ralph-run-stats.json');
+
+  saveRunStats(statsPath, createEmptyRunStats());
+
+  const content = fs.readFileSync(statsPath, 'utf-8');
+  // 2-space indent produces lines like '  "version": 1'
+  assert.ok(content.includes('  "version": 1'), 'Expected 2-space indented "version" key');
+  assert.ok(content.includes('  "epics": []'), 'Expected 2-space indented "epics" array');
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+test('saveRunStats round-trip: saved file is loadable and fields match', () => {
+  const tmpDir = makeTempDir();
+  const statsPath = path.join(tmpDir, 'ralph-run-stats.json');
+
+  let stats = createEmptyRunStats();
+  stats = updateStoryStats(stats, makeStory({
+    storyId: 'US-001',
+    epicId: 'EPIC-001',
+    costUsd: 1.23,
+    passed: true,
+    startedAt: '2024-01-01T00:00:00.000Z',
+    completedAt: '2024-01-01T00:05:00.000Z',
+    durationMs: 300_000,
+    durationFormatted: '5m 0s',
+  }), 3);
+
+  saveRunStats(statsPath, stats);
+  const loaded = loadRunStats(statsPath);
+
+  assert.equal(loaded.version, 1);
+  assert.equal(loaded.epics.length, 1);
+  assert.equal(loaded.epics[0].epicId, 'EPIC-001');
+  assert.equal(loaded.epics[0].stories[0].storyId, 'US-001');
+  assert.ok(Math.abs((loaded.epics[0].totalCostUsd ?? 0) - 1.23) < 0.0001);
+  assert.equal(loaded.totals.storiesPassed, 1);
+  assert.equal(loaded.totals.storiesTotal, 1);
+  assert.ok(loaded.estimates.storiesRemaining === 2);
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+test('saveRunStats atomic write: no temp file left behind after success', () => {
+  const tmpDir = makeTempDir();
+  const statsPath = path.join(tmpDir, 'ralph-run-stats.json');
+
+  saveRunStats(statsPath, createEmptyRunStats());
+
+  // Temp file should be gone (renamed to final path)
+  const files = fs.readdirSync(tmpDir);
+  const tmpFiles = files.filter(f => f.includes('.tmp'));
+  assert.equal(tmpFiles.length, 0, `Expected no temp files, found: ${tmpFiles.join(', ')}`);
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+test('full schema round-trip: all fields populated, save and reload preserves every field', () => {
+  const tmpDir = makeTempDir();
+  const statsPath = path.join(tmpDir, 'ralph-run-stats.json');
+
+  // Build a stats object with all fields populated via updateStoryStats
+  let stats = createEmptyRunStats();
+  stats = updateStoryStats(stats, makeStory({
+    storyId: 'US-001',
+    epicId: 'EPIC-001',
+    inputTokens: 1000,
+    outputTokens: 500,
+    cacheCreationInputTokens: 200,
+    cacheReadInputTokens: 50,
+    costUsd: 0.05,
+    startedAt: '2024-06-01T10:00:00.000Z',
+    completedAt: '2024-06-01T10:05:00.000Z',
+    durationMs: 300_000,
+    durationFormatted: '5m 0s',
+    passed: true,
+  }), 2);
+  stats = updateStoryStats(stats, makeStory({
+    storyId: 'US-002',
+    epicId: 'EPIC-001',
+    inputTokens: 2000,
+    outputTokens: 800,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: 100,
+    costUsd: 0.10,
+    startedAt: '2024-06-01T10:06:00.000Z',
+    completedAt: '2024-06-01T10:09:00.000Z',
+    durationMs: 180_000,
+    durationFormatted: '3m 0s',
+    passed: false,
+  }), 2);
+
+  saveRunStats(statsPath, stats);
+  const loaded = loadRunStats(statsPath);
+
+  // version
+  assert.equal(loaded.version, 1);
+  // epics
+  assert.equal(loaded.epics.length, 1);
+  const epic = loaded.epics[0];
+  assert.equal(epic.epicId, 'EPIC-001');
+  assert.equal(epic.stories.length, 2);
+  assert.equal(epic.storiesPassed, 1);
+  assert.equal(epic.storiesTotal, 2);
+  assert.equal(epic.totalInputTokens, 3000);
+  assert.equal(epic.totalOutputTokens, 1300);
+  assert.ok(Math.abs((epic.totalCostUsd ?? 0) - 0.15) < 0.0001);
+  assert.equal(epic.startedAt, '2024-06-01T10:00:00.000Z');
+  assert.equal(epic.completedAt, '2024-06-01T10:09:00.000Z');
+  assert.equal(epic.durationMs, 540_000);   // 9 minutes end-to-end
+  assert.equal(epic.durationFormatted, '9m 0s');
+  // totals
+  assert.equal(loaded.totals.storiesPassed, 1);
+  assert.equal(loaded.totals.storiesTotal, 2);
+  assert.ok(Math.abs((loaded.totals.costUsd ?? 0) - 0.15) < 0.0001);
+  assert.equal(loaded.totals.startedAt, '2024-06-01T10:00:00.000Z');
+  // estimates (2 stories, totalStoriesInRun=2, so 0 remaining)
+  assert.equal(loaded.estimates.storiesRemaining, 0);
+  assert.ok(loaded.estimates.estimatedTotalCostUsd !== null);
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+test('loadRunStats returns empty default structure when file does not exist', () => {
+  const tmpDir = makeTempDir();
+  const statsPath = path.join(tmpDir, 'nonexistent.json');
+
+  const stats = loadRunStats(statsPath);
+
+  assert.equal(stats.version, 1);
+  assert.deepEqual(stats.epics, []);
+  assert.equal(stats.totals.storiesPassed, 0);
+  assert.equal(stats.totals.storiesTotal, 0);
+  assert.equal(stats.totals.costUsd, null);
+  assert.equal(stats.totals.durationMs, null);
+  assert.equal(stats.estimates.storiesRemaining, 0);
+  assert.equal(stats.estimates.estimatedTotalCostUsd, null);
+
+  fs.rmSync(tmpDir, { recursive: true });
+});

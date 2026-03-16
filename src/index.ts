@@ -12,6 +12,7 @@ import { validateCommand } from './commands/validate';
 import { summaryCommand } from './commands/summary';
 import { resumeCommand } from './commands/resume';
 import { updateStatsCommand } from './commands/update-stats';
+import { statsCommand } from './commands/stats';
 
 const program = new Command();
 
@@ -107,6 +108,13 @@ program
     storiesTotal?: string;
   }) => {
     updateStatsCommand(options);
+  });
+
+program
+  .command('stats [path]')
+  .description('Show cost, token, and time stats from the current run')
+  .action((statsPath: string = './ralph-run-stats.json') => {
+    statsCommand(statsPath);
   });
 
 program.parse(process.argv);
