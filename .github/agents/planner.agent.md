@@ -28,10 +28,12 @@ A single implementation plan Markdown file written to the exact path the Team Le
 1. **Read the PRD** — Understand the full project context
 2. **Explore the codebase** — Understand the project structure, tech stack, existing patterns, conventions
 3. **Identify dependencies between stories** — Which stories build on others? What order makes sense?
-4. **For each story, design the approach:**
+4. **For each story, design the approach and tests:**
    - Which files to create or modify
    - What functions/components to add
    - How it connects to existing code
+   - Which automated tests should be added or updated for that story
+   - Which commands should pass to verify the story
    - Any gotchas or risks
 5. **Write the plan file** — Structured, specific, actionable, and persisted to disk in `plans/`
 
@@ -52,6 +54,10 @@ A single implementation plan Markdown file written to the exact path the Team Le
 ### Approach
 [1-3 sentences on the overall approach]
 
+### Tests to Add / Update
+- `path/to/test-file.test.ts` — [specific cases that must cover the acceptance criteria]
+- Test level: [unit/integration/e2e]
+
 ### Files to Modify
 - `path/to/file.ts` — [what changes]
 
@@ -62,6 +68,9 @@ A single implementation plan Markdown file written to the exact path the Team Le
 - [Specific function signatures, component props, etc.]
 - [How it connects to existing code]
 - [Database/API changes if any]
+
+### Verification Commands
+- [Exact commands the Builder should run, with the story-specific tests included]
 
 ### Risks / Gotchas
 - [Anything the Builder should watch out for]
@@ -75,6 +84,7 @@ A single implementation plan Markdown file written to the exact path the Team Le
 - NEVER write implementation code — only describe what to build
 - ALWAYS write the plan to disk for the epic; do not leave it only in the chat response
 - Be specific — "add a function" is bad, "add `filterByPriority(tasks: Task[], level: Priority): Task[]` to `src/utils.ts`" is good
+- Design the test strategy per story, not just the code changes. Each story needs concrete automated test cases tied to its acceptance criteria.
 - Reference existing patterns — if the codebase uses a specific pattern, tell the Builder to follow it
 - Consider the full epic — later stories may affect how earlier ones should be implemented
 - Keep it practical — don't over-architect, the Builder needs clear instructions not abstract theory

@@ -39,7 +39,7 @@ fi
 # Read env vars as fallbacks (set by ralph-teams CLI from ralph.config.yml).
 # CLI flags passed directly to ralph.sh take precedence over these env vars.
 EPIC_TIMEOUT="${RALPH_EPIC_TIMEOUT:-3600}"
-IDLE_TIMEOUT="${RALPH_IDLE_TIMEOUT:-300}"
+IDLE_TIMEOUT="${RALPH_IDLE_TIMEOUT:-600}"
 MAX_CRASH_RETRIES="${RALPH_MAX_CRASH_RETRIES:-2}"
 VALIDATOR_MAX_PUSHBACKS="${RALPH_VALIDATOR_MAX_PUSHBACKS:-1}"
 MODEL_TEAM_LEAD="${RALPH_MODEL_TEAM_LEAD:-opus}"

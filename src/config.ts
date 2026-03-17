@@ -7,7 +7,7 @@ export interface RalphConfig {
   timeouts: {
     /** Max seconds before an epic run is forcibly stopped. Default: 3600. */
     epicTimeout: number;
-    /** Max idle seconds before an epic agent is considered hung. Default: 300. */
+    /** Max idle seconds before an epic agent is considered hung. Default: 600. */
     idleTimeout: number;
   };
   execution: {
@@ -50,7 +50,7 @@ const VALID_MODELS = ['opus', 'sonnet', 'haiku'] as const;
 export const DEFAULT_CONFIG: RalphConfig = {
   timeouts: {
     epicTimeout: 3600,
-    idleTimeout: 300,
+    idleTimeout: 600,
   },
   execution: {
     validatorMaxPushbacks: 1,

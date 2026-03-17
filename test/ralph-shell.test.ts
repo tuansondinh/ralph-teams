@@ -63,6 +63,24 @@ test('planner prompt assets require writing the epic plan markdown file', () => 
   }
 });
 
+test('planner prompt assets require designing story-level tests', () => {
+  const promptFiles = [
+    '.codex/agents/planner.toml',
+    '.github/agents/planner.agent.md',
+    '.claude/agents/planner.md',
+    'prompts/team-lead-policy.md',
+  ];
+
+  for (const relativePath of promptFiles) {
+    const content = fs.readFileSync(path.join(repoRoot, relativePath), 'utf-8');
+    assert.match(
+      content,
+      /design.*test|tests to add \/ update|verification commands/i,
+      `${relativePath} should require story-level test design`,
+    );
+  }
+});
+
 test('builder prompt assets require reading the epic plan markdown file', () => {
   const promptFiles = [
     '.codex/agents/builder.toml',
@@ -81,6 +99,29 @@ test('builder prompt assets require reading the epic plan markdown file', () => 
       content,
       /plans\/plan-\{?epic-id\}?\.md|plans\/plan-<epic-id>\.md/i,
       `${relativePath} should reference the epic markdown plan path`,
+    );
+  }
+});
+
+test('builder prompt assets require test creation and TDD fallback when planning is skipped', () => {
+  const promptFiles = [
+    '.codex/agents/builder.toml',
+    '.github/agents/builder.agent.md',
+    '.claude/agents/builder.md',
+    'prompts/team-lead-policy.md',
+  ];
+
+  for (const relativePath of promptFiles) {
+    const content = fs.readFileSync(path.join(repoRoot, relativePath), 'utf-8');
+    assert.match(
+      content,
+      /create or update.*test|add or update.*test|tests changed|zero new or updated tests/i,
+      `${relativePath} should require test creation or updates`,
+    );
+    assert.match(
+      content,
+      /TDD|define.*tests first|make them fail/i,
+      `${relativePath} should require TDD fallback when no planner is used`,
     );
   }
 });
@@ -110,7 +151,9 @@ test('canonical Team Lead policy covers planner and validator heuristics', () =>
 
   assert.match(content, /spawn the Planner for any medium- or high-complexity epic/i);
   assert.match(content, /explicitly tell the Planner the exact output path/i);
+  assert.match(content, /Planner must design the automated tests for each story/i);
   assert.match(content, /Guidance file for this story: ralph-teams\/guidance\/guidance-\{story-id\}\.md/);
+  assert.match(content, /If no Planner is spawned.*TDD order/i);
   assert.match(content, /Default to spawning the Validator for any medium- or high-complexity story/i);
   assert.match(content, /If you are unsure, spawn the Validator/i);
   assert.match(content, /Print `DONE: X\/Y stories passed` and exit immediately/i);

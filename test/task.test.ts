@@ -21,6 +21,8 @@ test('buildTaskExecutionPrompt keeps work on the current branch', () => {
   assert.match(prompt, /stay on the current branch/i);
   assert.match(prompt, /Do not create or switch branches/i);
   assert.match(prompt, /planner_easy\/planner_medium\/planner_difficult/);
+  assert.match(prompt, /planner.*design the automated tests/i);
+  assert.match(prompt, /builder must do TDD/i);
 });
 
 test('taskCommand starts planning session when user chooses planning', async () => {

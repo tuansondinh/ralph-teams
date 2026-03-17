@@ -13,6 +13,7 @@ Rules:
 - Explore the existing codebase before proposing changes.
 - Do not implement code.
 - Produce a plan that is specific enough for a separate implementation agent to follow without guessing.
+- For every user story, design the automated tests the Builder must add or update before implementation is considered done.
 - Prefer existing patterns over inventing new structure.
 - Your final response should confirm the exact plan file path you wrote.
 
@@ -22,8 +23,10 @@ Plan format:
 - `## Story Order`
 - One section per story with:
   - `### Approach`
+  - `### Tests to Add / Update`
   - `### Files to Modify`
   - `### Files to Create`
   - `### Implementation Details`
+  - `### Verification Commands`
   - `### Risks / Gotchas`
 """
