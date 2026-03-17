@@ -119,7 +119,7 @@ test('runCommand removes stale ralph-state.json before a fresh run', async () =>
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
   const prdPath = path.join(tempDir, 'prd.json');
   fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
-  const stateFile = path.join(tempDir, 'ralph-teams', 'ralph-state.json');
+  const stateFile = path.join(tempDir, '.ralph-teams', 'ralph-state.json');
   fs.mkdirSync(path.dirname(stateFile), { recursive: true });
   fs.writeFileSync(stateFile, JSON.stringify({ sourceBranch: 'stale' }));
 

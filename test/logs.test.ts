@@ -16,9 +16,9 @@ test('logsCommand prints only the requested tail entries', { concurrency: false 
   process.chdir(tempDir);
 
   try {
-    fs.mkdirSync(path.join(tempDir, 'ralph-teams'), { recursive: true });
+    fs.mkdirSync(path.join(tempDir, '.ralph-teams'), { recursive: true });
     fs.writeFileSync(
-      path.join(tempDir, 'ralph-teams', 'progress.txt'),
+      path.join(tempDir, '.ralph-teams', 'progress.txt'),
       ['## EPIC-001', 'PASS story one', '', '---', '## EPIC-002', 'FAIL story two'].join('\n'),
     );
 
@@ -44,8 +44,8 @@ test('logsCommand exits on an invalid tail value', { concurrency: false }, () =>
   process.chdir(tempDir);
 
   try {
-    fs.mkdirSync(path.join(tempDir, 'ralph-teams'), { recursive: true });
-    fs.writeFileSync(path.join(tempDir, 'ralph-teams', 'progress.txt'), 'PASS item');
+    fs.mkdirSync(path.join(tempDir, '.ralph-teams'), { recursive: true });
+    fs.writeFileSync(path.join(tempDir, '.ralph-teams', 'progress.txt'), 'PASS item');
 
     const exit = mockProcessExit();
     const errors: string[] = [];
@@ -72,9 +72,9 @@ test('logsCommand tails the last wave block from a real progress log', { concurr
   process.chdir(tempDir);
 
   try {
-    fs.mkdirSync(path.join(tempDir, 'ralph-teams'), { recursive: true });
+    fs.mkdirSync(path.join(tempDir, '.ralph-teams'), { recursive: true });
     fs.writeFileSync(
-      path.join(tempDir, 'ralph-teams', 'progress.txt'),
+      path.join(tempDir, '.ralph-teams', 'progress.txt'),
       [
         '# Ralph Progress Log',
         'Started: date',

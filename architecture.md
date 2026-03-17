@@ -6,7 +6,7 @@
 
 The architecture is intentionally split:
 
-- The Node CLI is the control plane for user-facing commands, config loading, validation, planning, discussion, and stats.
+- The Node CLI is the control plane for user-facing commands, config loading, validation, planning, and stats.
 - `ralph.sh` is the execution engine. It owns the run loop, git worktrees, backend process lifecycle, timeouts, merges, and resume state.
 - External agent CLIs (`claude`, `gh copilot`, `codex`) do the implementation work. This repo provides prompts, agent role definitions, and orchestration around them.
 
@@ -29,10 +29,10 @@ flowchart LR
     RUN --> SH[ralph.sh]
     SH --> WT[Git worktrees]
     SH --> AGENTS[Backend agent CLI]
-    AGENTS --> LOGS[ralph-teams/logs/*.log]
+    AGENTS --> LOGS[.ralph-teams/logs/*.log]
     SH --> PRD[prd.json]
-    SH --> PROGRESS[ralph-teams/progress.txt]
-    SH --> STATE[ralph-teams/ralph-state.json]
+    SH --> PROGRESS[.ralph-teams/progress.txt]
+    SH --> STATE[.ralph-teams/ralph-state.json]
 ```
 
 ## Main Layers
@@ -53,7 +53,6 @@ Important commands:
 - `resume`: `src/commands/resume.ts`
 - `init`: `src/commands/init.ts`
 - `plan`: `src/commands/plan.ts`
-- `discuss`: `src/commands/discuss.ts`
 - `validate`: `src/commands/validate.ts`
 - `status`, `summary`, `logs`, `reset`, `task`
 
@@ -90,9 +89,8 @@ Core shared modules:
 - `src/config.ts`: `ralph.config.yml` parsing, validation, defaults, CLI override merge
 - `src/token-parser.ts`: backend log token extraction
 - `src/commands/plan.ts`: guided epic planning entrypoint and prompt builder
-- `src/discuss.ts`: failed-story discussion and guidance persistence
+- `src/discuss.ts`: shared agent spawning and retry-guidance helpers
 - `src/guidance.ts`: persisted guidance file helpers
-- `src/commands/discuss.ts`: direct guided discuss entrypoint for failed stories
 
 These modules are mostly synchronous and file-oriented. That matches the rest of the codebase, which prefers simple filesystem contracts over in-memory services.
 
@@ -128,7 +126,7 @@ The shell runtime then:
 5. Repeatedly computes the next wave of runnable epics.
 6. Spawns each epic in its own worktree and backend process.
 7. Watches logs, timeout thresholds, and PRD progress.
-8. Updates `prd.json`, `ralph-teams/progress.txt`, and stats after completion.
+8. Updates `prd.json`, `.ralph-teams/progress.txt`, and stats after completion.
 9. Merges completed epic branches back into the loop branch.
 10. Repeats until no runnable epics remain.
 
@@ -138,7 +136,7 @@ Each epic is executed through a team-lead prompt assembled in `ralph.sh`.
 
 The team lead is instructed to:
 
-- follow `ralph-teams/plans/plan-EPIC-xxx.md` directly when the epic is already marked `planned: true`
+- follow `.ralph-teams/plans/plan-EPIC-xxx.md` directly when the epic is already marked `planned: true`
 - spawn a planner for unplanned medium- and high-complexity epics
 - skip planner only for clearly low-complexity unplanned epics
 - plan only the pending stories for that epic
@@ -160,18 +158,31 @@ The shell never tries to infer completion from agent intent alone. It trusts the
 
 ### `prd.json`
 
-Primary mutable state.
+Primary configuration and dependencies.
 
 Contains:
 
 - project metadata
 - epics and dependencies
-- epic `status`
-- story `passes`
+- epic `status` (derived from story states)
+- epic `planned` flag
 
-The scheduler reads dependencies and completion state directly from this file on each wave.
+The scheduler reads dependencies and completion state directly from this file on each wave. Story-level `passes` is stored in epic state files, not in the PRD itself.
 
-### `ralph-teams/progress.txt`
+### Epic State Files (`.ralph-teams/state/{epic-id}.json`)
+
+Per-epic story pass/fail state.
+
+Each epic has its own state file tracking:
+
+- `epicId`: The epic identifier
+- `stories`: Map of story ID to `{passes: boolean, failureReason: string | null}`
+
+The Team Lead reads and updates these files after each story attempt.
+
+ The shell watches for `DONE` markers in agent output.
+
+### `.ralph-teams/progress.txt`
 
 Narrative event log for humans and follow-up tooling.
 
@@ -180,9 +191,8 @@ Used for:
 - wave boundaries
 - pass/fail/skip/merge events
 - failure diagnostics
-- discuss context extraction
 
-### `ralph-teams/logs/`
+### `.ralph-teams/logs/`
 
 Raw backend output per epic and per merge attempt.
 
@@ -197,7 +207,7 @@ Log format depends on backend:
 - Claude: stream-json
 - Copilot/Codex: text
 
-### `ralph-teams/ralph-state.json`
+### `.ralph-teams/ralph-state.json`
 
 Resume artifact written on `SIGINT`.
 
@@ -209,7 +219,7 @@ Contains enough state to restart the run consistently:
 - active epics
 - current wave
 - loop/source branch info
-- story pass snapshot
+- story pass snapshot (from epic state files)
 
 `src/commands/resume.ts` reloads this file and simply restarts `ralph.sh` with the saved backend/parallel settings.
 
@@ -278,7 +288,7 @@ Key mechanisms:
 - process exit before PRD completion triggers crash handling
 - dependency failure blocks downstream epics
 - merge failure is tracked separately from implementation failure
-- `SIGINT` writes `ralph-teams/ralph-state.json` and preserves worktrees for resume
+- `SIGINT` writes `.ralph-teams/ralph-state.json` and preserves worktrees for resume
 
 This makes failure modes inspectable after the fact because evidence is left on disk.
 
@@ -298,10 +308,9 @@ This makes failure modes inspectable after the fact because evidence is left on 
 - `src/config.ts`
 - `prd.json.example`
 
-### Planning and discussion
+### Planning and retry guidance
 
 - `src/commands/plan.ts`
-- `src/commands/discuss.ts`
 - `src/discuss.ts`
 - `src/guidance.ts`
 

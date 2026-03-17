@@ -5,6 +5,7 @@ import chalk from 'chalk';
 import { loadConfig, mergeCliOverrides } from '../config';
 import { createDefaultSpawner, type AgentSpawner } from '../discuss';
 import { loadPrd, type Epic } from '../prd-utils';
+import { getRalphPlansDir } from '../runtime-paths';
 
 type SupportedBackend = 'claude' | 'copilot' | 'codex';
 
@@ -154,7 +155,7 @@ export async function planCommand(
 ): Promise<void> {
   const { prd, resolved } = loadPrd(prdPath);
   const projectRoot = path.dirname(resolved);
-  const plansDir = path.join(projectRoot, 'plans');
+  const plansDir = getRalphPlansDir(projectRoot);
 
   const configLoader = deps.loadConfig ?? loadConfig;
   const config = mergeCliOverrides(configLoader(projectRoot), {

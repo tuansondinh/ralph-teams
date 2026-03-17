@@ -12,7 +12,7 @@ TEAM_LEAD_POLICY_FILE="${SCRIPT_DIR}/prompts/team-lead-policy.md"
 # --- Config ---
 PRD_FILE="${1:-prd.json}"
 MAX_EPICS=10
-RALPH_RUNTIME_DIRNAME="ralph-teams"
+RALPH_RUNTIME_DIRNAME=".ralph-teams"
 PROGRESS_FILE=""
 BACKEND="claude"
 PARALLEL=""
@@ -385,7 +385,7 @@ echo "========================================================"
 ensure_runtime_gitignore_entries() {
   local gitignore_file=".gitignore"
   local changed=0
-  local entries=("ralph-teams/")
+  local entries=(".ralph-teams/")
 
   [ -f "$gitignore_file" ] || : > "$gitignore_file"
 

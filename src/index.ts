@@ -10,7 +10,6 @@ import { resetCommand } from './commands/reset';
 import { validateCommand } from './commands/validate';
 import { summaryCommand } from './commands/summary';
 import { resumeCommand } from './commands/resume';
-import { discussCommand } from './commands/discuss';
 import { planCommand } from './commands/plan';
 import { taskCommand } from './commands/task';
 import packageJson from '../package.json';
@@ -73,14 +72,6 @@ program
   .description('Show dependency tree and summary of all epics')
   .action((prdPath: string = './prd.json') => {
     summaryCommand(prdPath);
-  });
-
-program
-  .command('discuss [path]')
-  .description('Start a guided discussion for failed user stories')
-  .option('--backend <backend>', 'AI backend to use (claude, copilot, or codex)')
-  .action(async (prdPath: string = './prd.json', options: { backend?: string }) => {
-    await discussCommand(prdPath, options);
   });
 
 program

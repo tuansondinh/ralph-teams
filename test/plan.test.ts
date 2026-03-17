@@ -8,6 +8,7 @@ import {
   collectUnplannedEpics,
   planCommand,
 } from '../src/commands/plan';
+import { getRalphPlansDir } from '../src/runtime-paths';
 import { ExitSignal } from './helpers';
 
 function makeProject(): string {
@@ -123,6 +124,14 @@ test('planCommand starts a planning session for unplanned epics', async () => {
   assert.match(capturedPrompt, /EPIC-001/);
   assert.doesNotMatch(capturedPrompt, /Already planned/);
   assert.match(capturedPrompt, /planned=true/);
+  assert.match(
+    capturedPrompt,
+    new RegExp(`Plans directory: ${getRalphPlansDir(projectDir).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
+  );
+  assert.match(
+    capturedPrompt,
+    new RegExp(`Write plan to: ${path.join(getRalphPlansDir(projectDir), 'plan-EPIC-001.md').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
+  );
 });
 
 test('planCommand exits cleanly when all epics are already planned', async () => {

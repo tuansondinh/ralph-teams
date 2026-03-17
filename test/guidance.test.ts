@@ -35,7 +35,7 @@ const sampleContext = {
 describe('getGuidancePath', () => {
   it('returns <guidanceDir>/guidance-<storyId>.md with default dir', () => {
     const result = getGuidancePath('US-003');
-    assert.equal(result, path.join('ralph-teams', 'guidance', 'guidance-US-003.md'));
+    assert.equal(result, path.join('.ralph-teams', 'guidance', 'guidance-US-003.md'));
   });
 
   it('returns <guidanceDir>/guidance-<storyId>.md with custom dir', () => {

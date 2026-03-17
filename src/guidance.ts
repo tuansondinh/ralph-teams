@@ -5,9 +5,9 @@
  * is saved to a file so the Builder agent can incorporate it on the next run.
  *
  * Guidance files are written to:
- *   <guidanceDir>/guidance-<storyId>.md   (default guidanceDir: 'ralph-teams/guidance')
+ *   <guidanceDir>/guidance-<storyId>.md   (default guidanceDir: '.ralph-teams/guidance')
  * e.g.
- *   ralph-teams/guidance/guidance-US-003.md
+ *   .ralph-teams/guidance/guidance-US-003.md
  *
  * Pure I/O module with no terminal UI dependencies.
  */
