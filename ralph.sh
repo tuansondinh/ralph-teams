@@ -218,8 +218,9 @@ PROGRESS_FILE="${RALPH_RUNTIME_DIR}/progress.txt"
 PLANS_DIR="${RALPH_RUNTIME_DIR}/plans"
 LOGS_DIR="${RALPH_RUNTIME_DIR}/logs"
 GUIDANCE_DIR="${RALPH_RUNTIME_DIR}/guidance"
+STATE_DIR="${RALPH_RUNTIME_DIR}/state"
 WORKTREES_DIR="${RALPH_RUNTIME_DIR}/.worktrees"
-mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$GUIDANCE_DIR" "$WORKTREES_DIR"
+mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$GUIDANCE_DIR" "$STATE_DIR" "$WORKTREES_DIR"
 
 # --- Validate PRD structure ---
 echo "Validating PRD structure..."
@@ -447,7 +448,7 @@ prompt_to_remove_stale_worktree_dir() {
 # --- Ensure loop branch exists and is checked out ---
 ensure_runtime_gitignore_entries
 
-mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$GUIDANCE_DIR" "$WORKTREES_DIR"
+mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$GUIDANCE_DIR" "$STATE_DIR" "$WORKTREES_DIR"
 
 if [ "$CURRENT_BRANCH" != "$LOOP_BRANCH" ]; then
   if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
@@ -600,7 +601,6 @@ INTERRUPTED=false
 active_pids=()
 active_indices=()
 active_start_times=()
-active_prd_files=()
 
 # Track the currently-processing story ID so SIGINT can capture it
 CURRENT_STORY_ID=""
@@ -762,6 +762,14 @@ initialize_counters() {
 # story progress from the PRD, and the currently-interrupted story ID.
 save_run_state() {
   mkdir -p "$RALPH_RUNTIME_DIR"
+
+  # Project latest state before saving
+  for idx in "${active_indices[@]+"${active_indices[@]}"}"; do
+    local _ep_id
+    _ep_id=$(rjq read "$PRD_FILE" ".epics[$idx].id" 2>/dev/null || true)
+    [ -n "$_ep_id" ] && project_state_to_prd "$_ep_id" 2>/dev/null || true
+  done
+
   local tmp_file
   tmp_file=$(mktemp "${RALPH_RUNTIME_DIR}/.ralph-state.json.XXXXXX")
 
@@ -900,63 +908,88 @@ process_epic_result() {
   fi
 }
 
-count_epic_passed_stories() {
-  local prd_path="$1"
+init_epic_state_file() {
+  local epic_id="$1"
   local epic_index="$2"
-  rjq count-where "$prd_path" ".epics[$epic_index].userStories" "passes=true"
+  local state_file="${STATE_DIR}/${epic_id}.json"
+
+  # Read current story states from PRD to seed the state file
+  # (handles resume case where some stories already passed)
+  local stories_json
+  stories_json=$(
+    node - "$PRD_FILE" "$epic_index" <<'NODE'
+const fs = require('fs');
+const [prdPath, epicIndex] = process.argv.slice(2);
+const prd = JSON.parse(fs.readFileSync(prdPath, 'utf8'));
+const epic = prd.epics[parseInt(epicIndex)];
+const stories = {};
+for (const s of epic.userStories) {
+  stories[s.id] = { passes: s.passes === true, failureReason: s.failureReason || null };
+}
+const result = { epicId: epic.id, stories };
+process.stdout.write(JSON.stringify(result, null, 2));
+NODE
+  ) || return 1
+
+  local tmp_file
+  tmp_file=$(mktemp "${STATE_DIR}/.${epic_id}.json.XXXXXX")
+  printf '%s\n' "$stories_json" > "$tmp_file"
+  mv "$tmp_file" "$state_file"
 }
 
-sync_prd_from_epic_worktree() {
+read_epic_state_passed() {
   local epic_id="$1"
-  local epic_prd_file="$2"
+  local state_file="${STATE_DIR}/${epic_id}.json"
+  [ -f "$state_file" ] || { echo "0"; return; }
 
-  [ -f "$epic_prd_file" ] || return 1
+  node - "$state_file" <<'NODE'
+const fs = require('fs');
+const state = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const passed = Object.values(state.stories).filter(s => s.passes === true).length;
+process.stdout.write(String(passed));
+NODE
+}
+
+project_state_to_prd() {
+  local epic_id="$1"
+  local state_file="${STATE_DIR}/${epic_id}.json"
+  [ -f "$state_file" ] || return 1
+
   local merge_status
   merge_status=$(
-    node - "$PRD_FILE" "$epic_prd_file" "$epic_id" <<'NODE'
+    node - "$PRD_FILE" "$state_file" "$epic_id" <<'NODE'
 const fs = require('fs');
+const [prdPath, statePath, epicId] = process.argv.slice(2);
+const prd = JSON.parse(fs.readFileSync(prdPath, 'utf8'));
+const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+const epicIndex = prd.epics.findIndex(e => e.id === epicId);
+if (epicIndex === -1) process.exit(2);
 
-const [rootPath, epicPath, epicId] = process.argv.slice(2);
-const rootPrd = JSON.parse(fs.readFileSync(rootPath, 'utf8'));
-const epicPrd = JSON.parse(fs.readFileSync(epicPath, 'utf8'));
-const rootIndex = rootPrd.epics.findIndex((epic) => epic.id === epicId);
-const epicState = epicPrd.epics.find((epic) => epic.id === epicId);
-
-if (rootIndex === -1 || !epicState) {
-  process.exit(2);
+let changed = false;
+for (const story of prd.epics[epicIndex].userStories) {
+  const s = state.stories[story.id];
+  if (!s) continue;
+  if (story.passes !== s.passes || story.failureReason !== s.failureReason) {
+    story.passes = s.passes;
+    story.failureReason = s.failureReason;
+    changed = true;
+  }
 }
 
-if (JSON.stringify(rootPrd.epics[rootIndex]) === JSON.stringify(epicState)) {
+if (!changed) {
   process.stdout.write('unchanged');
   process.exit(0);
 }
 
-rootPrd.epics[rootIndex] = epicState;
-const tmpPath = `${rootPath}.tmp.${process.pid}`;
-fs.writeFileSync(tmpPath, `${JSON.stringify(rootPrd, null, 2)}\n`);
-fs.renameSync(tmpPath, rootPath);
+const tmpPath = `${prdPath}.tmp.${process.pid}`;
+fs.writeFileSync(tmpPath, `${JSON.stringify(prd, null, 2)}\n`);
+fs.renameSync(tmpPath, prdPath);
 process.stdout.write('updated');
 NODE
   ) || return 1
 
   if [ "$merge_status" = "updated" ]; then
-    echo "  [$epic_id] Synced PRD progress from worktree"
-  fi
-}
-
-sync_root_prd_to_epic_worktree() {
-  local epic_id="$1"
-  local epic_prd_file="$2"
-
-  [ -f "$epic_prd_file" ] || return 1
-  cmp -s "$PRD_FILE" "$epic_prd_file" && return 0
-
-  local worktree_root="${epic_prd_file%/$PRD_REL_PATH}"
-  cp "$PRD_FILE" "$epic_prd_file"
-  git -C "$worktree_root" add -- "$PRD_REL_PATH"
-  if ! git -C "$worktree_root" diff --cached --quiet -- "$PRD_REL_PATH" 2>/dev/null; then
-    git -C "$worktree_root" commit -m "chore: sync PRD state for ${epic_id}" >/dev/null 2>&1 || true
-    echo "  [$epic_id] Synced canonical PRD back to epic branch"
+    echo "  [$epic_id] Projected state to PRD"
   fi
 }
 
@@ -984,6 +1017,8 @@ spawn_epic_bg() {
   WORKTREE_ABS_PATH="$(cd "${ROOT_DIR}/${WORKTREE_PATH}" && pwd)"
   local WORKTREE_PRD_PATH="${WORKTREE_ABS_PATH}/${PRD_REL_PATH}"
 
+  init_epic_state_file "$EPIC_ID" "$EPIC_INDEX"
+
   echo "  Spawning [$EPIC_ID] in worktree $WORKTREE_PATH"
 
   local TEAM_LEAD_POLICY
@@ -996,9 +1031,12 @@ $PROJECT
 
 ## Working Directory
 ALL work for this epic MUST happen in this directory: $WORKTREE_ABS_PATH
-Do NOT modify files outside this directory.
+Do NOT modify files outside this directory, except for the epic state file below.
 
-## PRD File Path
+## Epic State File
+${STATE_DIR}/${EPIC_ID}.json
+
+## PRD File Path (read-only context)
 $WORKTREE_PRD_PATH
 
 ## Epic
@@ -1034,7 +1072,7 @@ $TEAM_LEAD_POLICY
 ## Runtime-Specific Notes
 - Use the exact plan path shown above when the policy refers to the canonical epic plan file.
 - When the policy refers to guidance files, use this runtime path pattern: ${GUIDANCE_DIR}/guidance-{story-id}.md
-- Use the exact PRD path shown above for every story update.
+- Use the exact epic state file path shown above for every story update. The PRD path is read-only context.
 - If your runtime supports named sub-agents, use the dedicated planner, builder, and validator roles and choose their models using the policy above.
 - If a story fails validation and still has retries left, spawn a new Builder for the retry instead of reusing the previous Builder run.
 
@@ -1058,7 +1096,6 @@ Begin."
   fi
   LAST_SPAWN_PID=$!
   LAST_SPAWN_LOG="$EPIC_LOG"
-  LAST_SPAWN_PRD="$WORKTREE_PRD_PATH"
 }
 
 # merge_wave: merges completed epic branches back to the loop branch sequentially.
@@ -1292,7 +1329,6 @@ while true; do
   active_start_times=()
   active_logs=()
   active_log_lines=()
-  active_prd_files=()
   # wave_completed_ids collects epic IDs that completed successfully (for merge_wave)
   wave_completed_ids=()
   # Bash 3 on macOS does not support associative arrays, so keep retry counts
@@ -1351,24 +1387,23 @@ while true; do
           # Check progress and retry if possible
           local _to_total _to_passed
           _to_total=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories")
-          _to_passed=$(count_epic_passed_stories "${active_prd_files[$slot]:-$PRD_FILE}" "${active_indices[$slot]}")
+          _to_passed=$(read_epic_state_passed "$finished_epic_id")
           local _to_retry_count
           _to_retry_count="$(get_crash_retry_count "$finished_epic_id")"
           if [ "$_to_retry_count" -lt "$MAX_CRASH_RETRIES" ] && [ "$_to_passed" -lt "$_to_total" ]; then
             set_crash_retry_count "$finished_epic_id" "$((_to_retry_count + 1))"
             echo "  [$finished_epic_id] Timeout with $_to_passed/$_to_total passed — retry $((_to_retry_count + 1))/$MAX_CRASH_RETRIES"
             echo "[$finished_epic_id] TIMEOUT RETRY $((_to_retry_count + 1))/$MAX_CRASH_RETRIES ($_to_passed/$_to_total passed) — $(date)" >> "$PROGRESS_FILE"
-            sync_prd_from_epic_worktree "$finished_epic_id" "${active_prd_files[$slot]:-$PRD_FILE}" || true
+            project_state_to_prd "$finished_epic_id" || true
             cleanup_epic_worktree "$finished_epic_id"
             spawn_epic_bg "${active_indices[$slot]}"
             active_pids[$slot]="$LAST_SPAWN_PID"
             active_start_times[$slot]="$(date +%s)"
             active_logs[$slot]="$LAST_SPAWN_LOG"
             active_log_lines[$slot]="0"
-            active_prd_files[$slot]="$LAST_SPAWN_PRD"
             continue
           fi
-          sync_prd_from_epic_worktree "$finished_epic_id" "${active_prd_files[$slot]:-$PRD_FILE}" || true
+          project_state_to_prd "$finished_epic_id" || true
           cleanup_epic_worktree "$finished_epic_id"
           echo "TIMEOUT: Epic exceeded ${EPIC_TIMEOUT}s limit" >> "${active_logs[$slot]}"
           # Log timeout-specific message before generic result
@@ -1380,13 +1415,11 @@ while true; do
           unset 'active_start_times[$slot]'
           unset 'active_logs[$slot]'
           unset 'active_log_lines[$slot]'
-          unset 'active_prd_files[$slot]'
           active_pids=("${active_pids[@]+"${active_pids[@]}"}")
           active_indices=("${active_indices[@]+"${active_indices[@]}"}")
           active_start_times=("${active_start_times[@]+"${active_start_times[@]}"}")
           active_logs=("${active_logs[@]+"${active_logs[@]}"}")
           active_log_lines=("${active_log_lines[@]+"${active_log_lines[@]}"}")
-          active_prd_files=("${active_prd_files[@]+"${active_prd_files[@]}"}")
           return
         fi
 
@@ -1409,24 +1442,23 @@ while true; do
           # Check progress and retry if possible
           local _it_total _it_passed
           _it_total=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories")
-          _it_passed=$(count_epic_passed_stories "${active_prd_files[$slot]:-$PRD_FILE}" "${active_indices[$slot]}")
+          _it_passed=$(read_epic_state_passed "$finished_epic_id")
           local _it_retry_count
           _it_retry_count="$(get_crash_retry_count "$finished_epic_id")"
           if [ "$_it_retry_count" -lt "$MAX_CRASH_RETRIES" ] && [ "$_it_passed" -lt "$_it_total" ]; then
             set_crash_retry_count "$finished_epic_id" "$((_it_retry_count + 1))"
             echo "  [$finished_epic_id] Idle timeout with $_it_passed/$_it_total passed — retry $((_it_retry_count + 1))/$MAX_CRASH_RETRIES"
             echo "[$finished_epic_id] IDLE RETRY $((_it_retry_count + 1))/$MAX_CRASH_RETRIES ($_it_passed/$_it_total passed) — $(date)" >> "$PROGRESS_FILE"
-            sync_prd_from_epic_worktree "$finished_epic_id" "${active_prd_files[$slot]:-$PRD_FILE}" || true
+            project_state_to_prd "$finished_epic_id" || true
             cleanup_epic_worktree "$finished_epic_id"
             spawn_epic_bg "${active_indices[$slot]}"
             active_pids[$slot]="$LAST_SPAWN_PID"
             active_start_times[$slot]="$(date +%s)"
             active_logs[$slot]="$LAST_SPAWN_LOG"
             active_log_lines[$slot]="0"
-            active_prd_files[$slot]="$LAST_SPAWN_PRD"
             continue
           fi
-          sync_prd_from_epic_worktree "$finished_epic_id" "${active_prd_files[$slot]:-$PRD_FILE}" || true
+          project_state_to_prd "$finished_epic_id" || true
           cleanup_epic_worktree "$finished_epic_id"
           # Log idle-timeout-specific message before generic result
           echo "[$finished_epic_id] FAILED (idle timeout — no output for ${IDLE_TIMEOUT}s) — $(date)" >> "$PROGRESS_FILE"
@@ -1437,13 +1469,11 @@ while true; do
           unset 'active_start_times[$slot]'
           unset 'active_logs[$slot]'
           unset 'active_log_lines[$slot]'
-          unset 'active_prd_files[$slot]'
           active_pids=("${active_pids[@]+"${active_pids[@]}"}")
           active_indices=("${active_indices[@]+"${active_indices[@]}"}")
           active_start_times=("${active_start_times[@]+"${active_start_times[@]}"}")
           active_logs=("${active_logs[@]+"${active_logs[@]}"}")
           active_log_lines=("${active_log_lines[@]+"${active_log_lines[@]}"}")
-          active_prd_files=("${active_prd_files[@]+"${active_prd_files[@]}"}")
           return
         fi
 
@@ -1453,7 +1483,7 @@ while true; do
 
         local total_s passed_s
         total_s=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories")
-        passed_s=$(count_epic_passed_stories "${active_prd_files[$slot]:-$PRD_FILE}" "${active_indices[$slot]}")
+        passed_s=$(read_epic_state_passed "$finished_epic_id")
         local all_done=false
         [ "$passed_s" -eq "$total_s" ] && [ "$total_s" -gt 0 ] && all_done=true
 
@@ -1475,14 +1505,13 @@ while true; do
               echo ""
               echo "  [$finished_epic_id] CRASH DETECTED ($passed_s/$total_s passed) — retry $((retry_count + 1))/$MAX_CRASH_RETRIES"
               echo "[$finished_epic_id] CRASH RETRY $((retry_count + 1))/$MAX_CRASH_RETRIES ($passed_s/$total_s passed so far) — $(date)" >> "$PROGRESS_FILE"
-              sync_prd_from_epic_worktree "$finished_epic_id" "${active_prd_files[$slot]:-$PRD_FILE}" || true
+              project_state_to_prd "$finished_epic_id" || true
               cleanup_epic_worktree "$finished_epic_id"
               spawn_epic_bg "${active_indices[$slot]}"
               active_pids[$slot]="$LAST_SPAWN_PID"
               active_start_times[$slot]="$(date +%s)"
               active_logs[$slot]="$LAST_SPAWN_LOG"
               active_log_lines[$slot]="0"
-              active_prd_files[$slot]="$LAST_SPAWN_PRD"
               # Don't free slot — respawned epic reuses it. Continue polling.
               continue
             fi
@@ -1492,13 +1521,12 @@ while true; do
           fi
 
           echo "  [$finished_epic_id] finished — processing result"
-          sync_prd_from_epic_worktree "$finished_epic_id" "${active_prd_files[$slot]:-$PRD_FILE}" || true
+          project_state_to_prd "$finished_epic_id" || true
           process_epic_result "${active_indices[$slot]}"
           # Track completed epics for merge_wave
           local post_status
           post_status=$(rjq read "$PRD_FILE" ".epics[${active_indices[$slot]}].status" "pending")
           if [ "$post_status" = "completed" ]; then
-            sync_root_prd_to_epic_worktree "$finished_epic_id" "${active_prd_files[$slot]:-$PRD_FILE}" || true
             wave_completed_ids+=("$finished_epic_id")
           fi
           cleanup_epic_worktree "$finished_epic_id"
@@ -1507,13 +1535,11 @@ while true; do
           unset 'active_start_times[$slot]'
           unset 'active_logs[$slot]'
           unset 'active_log_lines[$slot]'
-          unset 'active_prd_files[$slot]'
           active_pids=("${active_pids[@]+"${active_pids[@]}"}")
           active_indices=("${active_indices[@]+"${active_indices[@]}"}")
           active_start_times=("${active_start_times[@]+"${active_start_times[@]}"}")
           active_logs=("${active_logs[@]+"${active_logs[@]}"}")
           active_log_lines=("${active_log_lines[@]+"${active_log_lines[@]}"}")
-          active_prd_files=("${active_prd_files[@]+"${active_prd_files[@]}"}")
           return
         fi
 
@@ -1553,7 +1579,6 @@ while true; do
     active_start_times+=("$(date +%s)")
     active_logs+=("$LAST_SPAWN_LOG")
     active_log_lines+=("0")
-    active_prd_files+=("$LAST_SPAWN_PRD")
   done
 
   # Wait for all remaining active processes to finish

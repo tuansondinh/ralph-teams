@@ -22,5 +22,8 @@ ralph-team-agents.svg
 # Git worktrees created by Ralph for parallel epic execution
 .worktrees/
 
+# Per-epic runtime state files
+ralph-teams/state/
+
 # OS files
 .DS_Store

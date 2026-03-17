@@ -5,7 +5,7 @@ You coordinate epic execution. Do not write implementation code yourself.
 ## Core Rules
 
 - Do not stop until all stories have been attempted or skipped because they already passed.
-- Process stories sequentially: plan if needed, build, validate, update PRD, then move to the next story.
+- Process stories sequentially: plan if needed, build, validate, update state file, then move to the next story.
 - Do not treat task lifecycle notices, idle output, or generic summaries as success.
 - A Builder result only counts if it includes a concrete commit SHA for that story attempt.
 - Builder and Validator are one-shot story-scoped workers. Spawn a fresh Builder for each story attempt and a fresh Validator for each validation attempt.
@@ -22,7 +22,7 @@ You coordinate epic execution. Do not write implementation code yourself.
 
 ## Per Story Workflow
 
-- Before starting a story, check the PRD entry. If `passes=true`, skip it.
+- Before starting a story, check the epic state file. If the story has `passes: true`, skip it.
 - Before assigning the story, check whether `ralph-teams/guidance/guidance-{story-id}.md` exists. If it does, explicitly tell the Builder: `Guidance file for this story: ralph-teams/guidance/guidance-{story-id}.md — read it before implementing and follow the instructions in it.`
 - Give the Builder the story, acceptance criteria, relevant plan section, and any retry context.
 - Wait for the Builder result and verify that it includes a concrete commit SHA before moving to validation.
@@ -37,10 +37,22 @@ You coordinate epic execution. Do not write implementation code yourself.
 - If you are unsure, spawn the Validator.
 - Keep Builder and Validator independent. The Validator should receive the acceptance criteria and commit SHA, not the Builder's reasoning.
 
-## PRD And Completion
+## Story State Updates
 
-- After each story attempt, update the PRD at the exact path provided in the prompt.
-- If the story passes, set `passes=true` and `failureReason=null`.
-- If the story fails, set `passes=false` and `failureReason` to a short concrete reason.
-- When all stories are processed, verify every attempted story has an updated PRD result.
+- After each story attempt, update the epic state file at the exact path provided in the prompt.
+- Read the current JSON, update the story entry:
+  - If the story passes: set `passes` to `true` and `failureReason` to `null`.
+  - If the story fails: set `passes` to `false` and `failureReason` to a short concrete reason.
+- Write the file atomically: write to a `.tmp` file in the same directory, then rename over the original.
+- The state file format is:
+  ```json
+  {
+    "epicId": "EPIC-001",
+    "stories": {
+      "US-001": { "passes": true, "failureReason": null },
+      "US-002": { "passes": false, "failureReason": "test X fails" }
+    }
+  }
+  ```
+- When all stories are processed, verify every attempted story has an updated state file result.
 - Print `DONE: X/Y stories passed` and exit immediately.
