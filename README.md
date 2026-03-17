@@ -242,7 +242,8 @@ Notes:
 Planning behavior:
 
 - if an epic has `planned: true`, the Team Lead is expected to read `plans/plan-EPIC-xxx.md` and follow it
-- if an epic is still unplanned, the Team Lead may still decide to spawn a planner during execution
+- if an epic is still unplanned, medium- and high-complexity epics should spawn a planner before implementation
+- only clearly low-complexity epics should skip planning during execution
 
 ### `ralph-teams task <prompt>`
 
@@ -440,6 +441,7 @@ Notes:
 
 - Ralph enables Codex multi-agent mode per run, so no global `~/.codex/config.toml` edits are required
 - Codex runs from each epic worktree and is granted write access to the repo root so it can update the shared PRD and result files
+- Codex does not use a separate repo-local Team Lead role file; the Team Lead policy comes from the runtime prompt assembled in `ralph.sh`, while `.codex/agents/*.toml` define the spawned planner, builder, validator, and merger roles
 
 ## PRD Format
 

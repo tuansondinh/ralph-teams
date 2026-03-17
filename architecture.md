@@ -139,7 +139,9 @@ Each epic is executed through a team-lead prompt assembled in `ralph.sh`.
 
 The team lead is instructed to:
 
-- spawn a planner first
+- follow `plans/plan-EPIC-xxx.md` directly when the epic is already marked `planned: true`
+- spawn a planner for unplanned medium- and high-complexity epics
+- skip planner only for clearly low-complexity unplanned epics
 - plan only the pending stories for that epic
 - process stories sequentially
 - use builder then validator per story
@@ -317,6 +319,8 @@ This makes failure modes inspectable after the fact because evidence is left on 
 - `.claude/agents/`
 - `.github/agents/`
 - `.codex/agents/`
+
+For Codex specifically, `.codex/agents/` defines the spawned teammate roles. The Codex Team Lead policy itself is injected by `ralph.sh` at runtime rather than coming from a separate `.codex/agents/team-lead.toml` file.
 
 ### Tests
 
