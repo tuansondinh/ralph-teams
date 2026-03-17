@@ -407,20 +407,8 @@ prompt_to_commit_dirty_worktree() {
   echo "Worktree has uncommitted changes and Ralph needs to create or switch to branch '$target_branch'."
   echo "Ralph will now stage and commit all current changes before the run."
   git status --short
-  printf "Proceed with auto-commit before continuing? [y/N]: "
-
-  local response
-  IFS= read -r response || response=""
-  case "$response" in
-    y|Y|yes|YES)
-      git add -A
-      git commit -m "chore: auto-commit changes before ralph run"
-      ;;
-    *)
-      echo "Aborted: user declined auto-commit before run."
-      exit 1
-      ;;
-  esac
+  git add -A
+  git commit -m "chore: auto-commit changes before ralph run"
 }
 
 prompt_to_remove_stale_worktree_dir() {

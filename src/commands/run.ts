@@ -4,6 +4,7 @@ import { spawnSync } from 'child_process';
 import chalk from 'chalk';
 import { loadConfig, loadExplicitAgentModelOverrides, mergeCliOverrides } from '../config';
 import { getRalphStatePath } from '../runtime-paths';
+import packageJson from '../../package.json';
 
 interface RunDeps {
   existsSync: typeof fs.existsSync;
@@ -127,6 +128,7 @@ export async function runCommand(
     // ignore chmod errors
   }
 
+  console.log(chalk.bold(`ralph-teams v${packageJson.version}`));
   console.log(chalk.dim(`Using PRD: ${resolved}`));
   console.log(chalk.dim(`Using backend: ${backend}`));
   console.log(chalk.dim(`Using ralph.sh: ${ralphSh}`));

@@ -558,7 +558,7 @@ npm install -g ralph-teams
 
 ### Ralph needs to switch branches but the worktree is dirty
 
-Ralph may prompt to auto-commit current changes before creating or switching to the loop branch. If you do not want that commit, clean up the worktree yourself before starting the run.
+Ralph auto-commits current changes before creating or switching to the loop branch. If you do not want that commit, clean up the worktree yourself before starting the run.
 
 ## Development
 

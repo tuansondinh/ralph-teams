@@ -278,31 +278,10 @@ function setupTempRepo() {
   return { tempDir, binDir };
 }
 
-test('ralph.sh asks before auto-committing and aborts when declined', () => {
+test('ralph.sh auto-commits dirty changes without prompting before switching branches', () => {
   const { tempDir, binDir } = setupTempRepo();
   const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
     cwd: tempDir,
-    input: 'n\n',
-    env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH ?? ''}`,
-    },
-    encoding: 'utf-8',
-  });
-
-  assert.equal(result.status, 1);
-  assert.match(result.stdout, /Ralph will now stage and commit all current changes before the run\./);
-  assert.match(result.stdout, /create or switch to branch 'ralph\/loop\//);
-  assert.match(result.stdout, /Proceed with auto-commit before continuing\? \[y\/N\]: /);
-  assert.match(result.stdout, /Aborted: user declined auto-commit before run\./);
-  assert.match(execFileSync('git', ['status', '--short'], { cwd: tempDir, encoding: 'utf-8' }), /^ M README\.md$/m);
-});
-
-test('ralph.sh auto-commits dirty changes after confirmation and continues', () => {
-  const { tempDir, binDir } = setupTempRepo();
-  const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
-    cwd: tempDir,
-    input: 'y\n',
     env: {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH ?? ''}`,
@@ -311,7 +290,26 @@ test('ralph.sh auto-commits dirty changes after confirmation and continues', () 
   });
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /Proceed with auto-commit before continuing\? \[y\/N\]: /);
+  assert.match(result.stdout, /Ralph will now stage and commit all current changes before the run\./);
+  assert.match(result.stdout, /create or switch to branch 'ralph\/loop\//);
+  assert.doesNotMatch(result.stdout, /Proceed with auto-commit before continuing\? \[y\/N\]: /);
+  assert.match(execFileSync('git', ['log', '-1', '--pretty=%s'], { cwd: tempDir, encoding: 'utf-8' }), /chore: auto-commit changes before ralph run/);
+  assert.equal(execFileSync('git', ['status', '--short'], { cwd: tempDir, encoding: 'utf-8' }).trim(), '');
+});
+
+test('ralph.sh auto-commits dirty changes and continues', () => {
+  const { tempDir, binDir } = setupTempRepo();
+  const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
+    cwd: tempDir,
+    env: {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ''}`,
+    },
+    encoding: 'utf-8',
+  });
+
+  assert.equal(result.status, 0);
+  assert.doesNotMatch(result.stdout, /Proceed with auto-commit before continuing\? \[y\/N\]: /);
   assert.match(result.stdout, /Creating loop branch: ralph\/loop\//);
   assert.match(execFileSync('git', ['log', '-1', '--pretty=%s'], { cwd: tempDir, encoding: 'utf-8' }), /chore: auto-commit changes before ralph run/);
   assert.equal(execFileSync('git', ['status', '--short'], { cwd: tempDir, encoding: 'utf-8' }).trim(), '');

@@ -111,6 +111,7 @@ test('runCommand invokes ralph.sh with the resolved PRD path and backend', async
   assert.equal(ralphCall.args?.[0], path.resolve(prdPath));
   assert.deepEqual(ralphCall.args?.slice(1), ['--backend', 'copilot']);
   assert.equal(chmodTarget, resolvedRalphSh);
+  assert.match(logs[0] ?? '', /ralph-teams v\d+\.\d+\.\d+/i);
   assert.ok(logs.some(line => line.includes(`Using PRD: ${path.resolve(prdPath)}`)));
   assert.ok(logs.some(line => line.includes('Using backend: copilot')));
 });
