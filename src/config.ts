@@ -92,8 +92,13 @@ export function renderCommentedConfigTemplate(config: RalphConfig = DEFAULT_CONF
     '# A fully commented or empty file means "use built-in defaults".',
     '#',
   ];
+  const templateConfig = {
+    timeouts: config.timeouts,
+    execution: config.execution,
+    agents: config.agents,
+  };
 
-  const commentedBody = renderConfigYaml(config)
+  const commentedBody = `${yaml.dump(templateConfig, { noRefs: true, lineWidth: -1 }).trimEnd()}\n`
     .trimEnd()
     .split('\n')
     .map(line => `# ${line}`);

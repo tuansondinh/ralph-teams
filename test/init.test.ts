@@ -92,6 +92,8 @@ test('ensureDefaultConfigFile creates a commented default ralph.config.yml templ
   assert.ok(contents.includes('# Ralph Teams configuration'));
   assert.ok(contents.includes('# execution:'));
   assert.ok(contents.includes('#   backend: claude'));
+  assert.ok(!contents.includes('inputTokenCostPer1k'));
+  assert.ok(!contents.includes('outputTokenCostPer1k'));
   assert.deepEqual(loadConfig(projectRoot), DEFAULT_CONFIG);
 });
 
