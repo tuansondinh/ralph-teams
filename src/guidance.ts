@@ -9,7 +9,7 @@
  * e.g.
  *   guidance/guidance-US-003.md
  *
- * Pure I/O module — no TUI or dashboard dependencies.
+ * Pure I/O module with no terminal UI dependencies.
  */
 
 import * as fs from 'fs';

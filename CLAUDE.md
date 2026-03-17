@@ -7,9 +7,9 @@ Ralph is a project manager that spawns AI coding agent teams to implement epics 
 ```
 ralph.sh (shell harness — scheduling, persistence, dependency graph)
   └── team-lead agent (coordinator — one per epic) [opus]
-        ├── planner agent (first — explores codebase, writes plan) [opus]
-        ├── builder agent (sonnet — writes code, commits) [sonnet]
-        └── validator agent (independent verification) [sonnet]
+        ├── planner agent (first — explores codebase, writes plan) [haiku|sonnet|opus]
+        ├── builder agent (writes code, commits) [haiku|sonnet|opus]
+        └── validator agent (independent verification) [haiku|sonnet|opus]
 ```
 
 ## How It Works
@@ -20,7 +20,7 @@ ralph.sh (shell harness — scheduling, persistence, dependency graph)
 4. Team Lead then spawns Builder + Validator
 5. For each user story: check if already passed (skip if so) → Builder implements → Validator verifies
 6. Max 2 total build+validate cycles per story (first attempt + 1 retry). On failure: document and move on.
-7. Team Lead writes result to `results/result-{epic-id}.txt`. Ralph reads that file to update PRD status and logs to progress.txt.
+7. Team Lead updates `prd.json` per-story (`passes: true/false`) as it goes. Ralph reads story passes from `prd.json` to derive epic status (completed/partial/failed) and logs to progress.txt.
 
 ## Key Rules
 
@@ -29,7 +29,7 @@ ralph.sh (shell harness — scheduling, persistence, dependency graph)
 - Validator never sees Builder reasoning — only code output (via commit SHA diff)
 - 2-cycle hard limit per story (first attempt + 1 retry = 2 total) — no human escalation, just document and continue
 - Epics should target ~5 user stories each when the scope supports it
-- Team Lead must NOT stop early — all stories must be processed before writing the result file
+- Team Lead must NOT stop early — all stories must be processed before stopping
 
 ## PRD Format
 
@@ -57,3 +57,12 @@ See `prd.json.example` for the expected format. Key fields:
 | `codex` | `codex exec` | `.codex/agents/*.toml` | Codex multi-agent roles | `-a never -s workspace-write` |
 
 All backends support sub-agent spawning. The team lead spawns planner, builder, and validator as sub-agents using their respective tool systems.
+
+For Claude, the default policy is:
+- keep `team-lead` on `opus`
+- let the Team Lead choose `haiku` for easy tasks, `sonnet` for medium tasks, and `opus` for difficult tasks
+- if `ralph.config.yml` explicitly sets a Claude agent model, that explicit setting wins
+
+Equivalent backend mappings:
+- Copilot uses `claude-haiku-4.5`, `claude-sonnet-4.6`, and `claude-opus-4.6`
+- Codex uses `gpt-5-mini`, `gpt-5.3-codex`, and `gpt-5.4`

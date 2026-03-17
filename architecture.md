@@ -6,7 +6,7 @@
 
 The architecture is intentionally split:
 
-- The Node CLI is the control plane for user-facing commands, config loading, validation, stats, and the TUI dashboard.
+- The Node CLI is the control plane for user-facing commands, config loading, validation, planning, discussion, and stats.
 - `ralph.sh` is the execution engine. It owns the run loop, git worktrees, backend process lifecycle, timeouts, merges, and resume state.
 - External agent CLIs (`claude`, `gh copilot`, `codex`) do the implementation work. This repo provides prompts, agent role definitions, and orchestration around them.
 
@@ -34,12 +34,6 @@ flowchart LR
     SH --> PRD[prd.json]
     SH --> PROGRESS[progress.txt]
     SH --> STATE[ralph-state.json]
-    SH --> STATS[ralph-run-stats.json]
-    RUN --> DASH[src/dashboard/*]
-    DASH --> PRD
-    DASH --> PROGRESS
-    DASH --> LOGS
-    DASH --> STATS
 ```
 
 ## Main Layers
@@ -60,9 +54,9 @@ Important commands:
 - `resume`: `src/commands/resume.ts`
 - `init`: `src/commands/init.ts`
 - `plan`: `src/commands/plan.ts`
+- `discuss`: `src/commands/discuss.ts`
 - `validate`: `src/commands/validate.ts`
-- `status`, `summary`, `logs`, `stats`, `reset`
-- `update-stats`: internal helper command called from `ralph.sh`
+- `status`, `summary`, `logs`, `reset`, `task`
 
 The CLI does not directly implement epic execution. It either prepares inputs for `ralph.sh` or renders derived views over files that `ralph.sh` maintains.
 
@@ -89,36 +83,16 @@ The Bash layer is stateful and process-oriented. That is why it owns:
 - polling for log output and result files
 - merge conflict handling
 
-### 3. Dashboard read model
-
-Main files:
-
-- `src/dashboard/index.ts`
-- `src/dashboard/poller.ts`
-- `src/dashboard/screen.ts`
-- `src/dashboard/renderer.ts`
-- `src/dashboard/activity-parser.ts`
-
-The dashboard is deliberately read-only. It does not drive the run loop directly. Instead it polls:
-
-- `prd.json`
-- `progress.txt`
-- `ralph-run-stats.json`
-- `logs/*.log`
-
-It builds a `DashboardState` snapshot and renders that into blessed views. This is a separate read model over the execution artifacts, not a source of truth.
-
-### 4. Domain and utility modules
+### 3. Domain and utility modules
 
 Core shared modules:
 
 - `src/prd-utils.ts`: PRD types and simple load/save helpers
 - `src/config.ts`: `ralph.config.yml` parsing, validation, defaults, CLI override merge
-- `src/run-stats.ts`: run stats schema, aggregation, estimate calculation, atomic save
 - `src/token-parser.ts`: backend log token extraction
-- `src/retry-controller.ts`: pure PRD reset logic for retry flows
 - `src/commands/plan.ts`: guided epic planning entrypoint and prompt builder
 - `src/discuss.ts`: failed-story discussion and guidance persistence
+- `src/guidance.ts`: persisted guidance file helpers
 - `src/commands/discuss.ts`: direct guided discuss entrypoint for failed stories
 
 These modules are mostly synchronous and file-oriented. That matches the rest of the codebase, which prefers simple filesystem contracts over in-memory services.
@@ -134,9 +108,7 @@ These modules are mostly synchronous and file-oriented. That matches the rest of
 3. Merge CLI overrides such as `--backend` and `--parallel`.
 4. Validate that the selected backend CLI exists.
 5. Locate `ralph.sh`.
-6. Either:
-   - run it directly with inherited stdio, or
-   - spawn it asynchronously and attach the TUI dashboard.
+6. Run it directly with inherited stdio.
 
 The command passes runtime settings to `ralph.sh` via environment variables:
 
@@ -198,7 +170,7 @@ The scheduler reads dependencies and completion state directly from this file on
 
 ### `progress.txt`
 
-Narrative event log for humans and dashboard parsers.
+Narrative event log for humans and follow-up tooling.
 
 Used for:
 
@@ -214,7 +186,6 @@ Raw backend output per epic and per merge attempt.
 Used for:
 
 - operator visibility
-- dashboard activity parsing
 - token usage extraction
 - timeout/idle detection
 
@@ -249,25 +220,6 @@ Contains enough state to restart the run consistently:
 
 `src/commands/resume.ts` reloads this file and simply restarts `ralph.sh` with the saved backend/parallel settings.
 
-### `ralph-run-stats.json`
-
-Derived quantitative state.
-
-Managed by:
-
-- `src/commands/update-stats.ts`
-- `src/run-stats.ts`
-- `src/token-parser.ts`
-
-Stores:
-
-- per-story token, cost, and duration data
-- per-epic aggregates
-- total run aggregates
-- estimated total cost/time based on completed work
-
-This file is not required for execution correctness. It is a telemetry sidecar.
-
 ## Scheduling and Dependency Logic
 
 The scheduler is wave-based.
@@ -299,7 +251,6 @@ Integration points:
 
 - CLI validation in `src/commands/run.ts` and `src/commands/init.ts`
 - shell backend command selection in `ralph.sh`
-- dashboard log parsing in `src/dashboard/activity-parser.ts`
 - token accounting in `src/token-parser.ts`
 
 Backend differences are intentionally normalized into a few contracts:
@@ -322,36 +273,6 @@ Merge flow in `ralph.sh`:
 4. If not, abort the merge and mark the epic `merge-failed` in `prd.json`.
 
 This separates "implementation succeeded in isolation" from "integration succeeded into the loop branch". That distinction is important throughout the codebase.
-
-## Dashboard Architecture
-
-The dashboard has three major parts:
-
-### Poller
-
-`src/dashboard/poller.ts`
-
-- reads files with mtime caching
-- continuously polls active epic logs
-- derives `DashboardState`
-
-### Activity parsing
-
-`src/dashboard/activity-parser.ts`
-
-- parses Claude stream-json tool usage and assistant text
-- parses text logs for Copilot/Codex
-- degrades stale Claude tool activity back to `idle`
-
-### Screen and views
-
-`src/dashboard/screen.ts` and `src/dashboard/views/*`
-
-- renders dashboard, logs, epic detail, summary, and discuss modes
-- supports retry from summary mode
-- saves guidance artifacts for failed stories
-
-The dashboard does not depend on internal callbacks from `ralph.sh`. It works by observing files, which keeps coupling low.
 
 ## Failure and Recovery
 
@@ -384,20 +305,10 @@ This makes failure modes inspectable after the fact because evidence is left on 
 - `src/config.ts`
 - `prd.json.example`
 
-### Stats and telemetry
+### Planning and discussion
 
-- `src/commands/update-stats.ts`
-- `src/run-stats.ts`
-- `src/token-parser.ts`
-- `src/commands/stats.ts`
-
-### Dashboard
-
-- `src/dashboard/*`
-
-### Retry and discuss
-
-- `src/retry-controller.ts`
+- `src/commands/plan.ts`
+- `src/commands/discuss.ts`
 - `src/discuss.ts`
 - `src/guidance.ts`
 
@@ -420,7 +331,6 @@ Strengths:
 - strong process isolation via git worktrees
 - easy recovery after interruption
 - backend abstraction without over-engineering
-- dashboard decoupled from executor internals
 
 Tradeoffs:
 
@@ -435,12 +345,10 @@ Use these rules:
 
 1. If you are changing run control flow, start in `ralph.sh`.
 2. If you are changing user-facing command semantics, start in `src/commands/*`.
-3. If you are changing how progress is displayed, start in `src/dashboard/*`.
-4. If you are changing PRD schema or runtime state semantics, update both `src/commands/validate.ts` and any `rjq` usage in `ralph.sh`.
-5. If you are adding a backend, update:
+3. If you are changing PRD schema or runtime state semantics, update both `src/commands/validate.ts` and any `rjq` usage in `ralph.sh`.
+4. If you are adding a backend, update:
    - backend availability checks
    - shell spawn logic
-   - dashboard activity parsing
    - token parsing assumptions
    - any bundled agent role definitions
 

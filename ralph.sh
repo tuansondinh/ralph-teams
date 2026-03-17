@@ -38,6 +38,7 @@ fi
 # CLI flags passed directly to ralph.sh take precedence over these env vars.
 EPIC_TIMEOUT="${RALPH_EPIC_TIMEOUT:-3600}"
 IDLE_TIMEOUT="${RALPH_IDLE_TIMEOUT:-300}"
+MAX_CRASH_RETRIES="${RALPH_MAX_CRASH_RETRIES:-2}"
 VALIDATOR_MAX_PUSHBACKS="${RALPH_VALIDATOR_MAX_PUSHBACKS:-1}"
 MODEL_TEAM_LEAD="${RALPH_MODEL_TEAM_LEAD:-opus}"
 MODEL_PLANNER="${RALPH_MODEL_PLANNER:-opus}"
@@ -48,6 +49,50 @@ MODEL_MERGER="${RALPH_MODEL_MERGER:-sonnet}"
 if [ -z "$PARALLEL" ] && [ -n "${RALPH_PARALLEL:-}" ] && [ "${RALPH_PARALLEL}" != "0" ]; then
   PARALLEL="$RALPH_PARALLEL"
 fi
+
+map_model_for_backend() {
+  local backend="$1"
+  local model="$2"
+
+  case "$backend:$model" in
+    claude:haiku|claude:sonnet|claude:opus)
+      echo "$model"
+      ;;
+    copilot:haiku)
+      echo "claude-haiku-4.5"
+      ;;
+    copilot:sonnet)
+      echo "claude-sonnet-4.6"
+      ;;
+    copilot:opus)
+      echo "claude-opus-4.6"
+      ;;
+    codex:haiku)
+      echo "gpt-5-mini"
+      ;;
+    codex:sonnet)
+      echo "gpt-5.3-codex"
+      ;;
+    codex:opus)
+      echo "gpt-5.4"
+      ;;
+    *)
+      echo "$model"
+      ;;
+  esac
+}
+
+MODEL_TEAM_LEAD="$(map_model_for_backend "$BACKEND" "$MODEL_TEAM_LEAD")"
+MODEL_PLANNER="$(map_model_for_backend "$BACKEND" "$MODEL_PLANNER")"
+MODEL_BUILDER="$(map_model_for_backend "$BACKEND" "$MODEL_BUILDER")"
+MODEL_VALIDATOR="$(map_model_for_backend "$BACKEND" "$MODEL_VALIDATOR")"
+MODEL_MERGER="$(map_model_for_backend "$BACKEND" "$MODEL_MERGER")"
+
+export RALPH_MODEL_TEAM_LEAD="$MODEL_TEAM_LEAD"
+export RALPH_MODEL_PLANNER="$MODEL_PLANNER"
+export RALPH_MODEL_BUILDER="$MODEL_BUILDER"
+export RALPH_MODEL_VALIDATOR="$MODEL_VALIDATOR"
+export RALPH_MODEL_MERGER="$MODEL_MERGER"
 
 # --- Backend configuration ---
 case "$BACKEND" in
@@ -61,7 +106,7 @@ case "$BACKEND" in
     # Copilot uses -p for non-interactive, --allow-all for full permissions
     # --agent team-lead loads .github/agents/team-lead.agent.md
     # --no-ask-user for autonomous execution, --stream on for live output
-    AGENT_FLAGS="copilot -- --agent team-lead --allow-all --no-ask-user --stream on -p"
+    AGENT_FLAGS="copilot -- --agent team-lead --model $MODEL_TEAM_LEAD --allow-all --no-ask-user --stream on -p"
     STREAM_FORMAT="text"
     ;;
   codex)
@@ -473,6 +518,67 @@ CURRENT_STORY_ID=""
 PRD_ABS_PATH="$(cd "$(dirname "$PRD_FILE")" && pwd)/$(basename "$PRD_FILE")"
 ROOT_DIR="$(pwd)"
 CODEX_AGENT_DIR="${SCRIPT_DIR}/.codex/agents"
+CODEX_AGENT_RUNTIME_DIR=""
+
+write_codex_agent_config() {
+  local source_file="$1"
+  local output_file="$2"
+  local model="$3"
+
+  {
+    printf 'sandbox_mode = "workspace-write"\n'
+    printf 'model = "%s"\n' "$model"
+    sed '1{/^sandbox_mode = /d;}' "$source_file"
+  } > "$output_file"
+}
+
+prepare_codex_agent_configs() {
+  [ "$BACKEND" = "codex" ] || return 0
+
+  CODEX_AGENT_RUNTIME_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ralph-codex-agents.XXXXXX")
+
+  local planner_model_easy="$MODEL_PLANNER"
+  local planner_model_medium="$MODEL_PLANNER"
+  local planner_model_difficult="$MODEL_PLANNER"
+  local builder_model_easy="$MODEL_BUILDER"
+  local builder_model_medium="$MODEL_BUILDER"
+  local builder_model_difficult="$MODEL_BUILDER"
+  local validator_model_easy="$MODEL_VALIDATOR"
+  local validator_model_medium="$MODEL_VALIDATOR"
+  local validator_model_difficult="$MODEL_VALIDATOR"
+
+  if [ "${RALPH_MODEL_PLANNER_EXPLICIT:-0}" != "1" ]; then
+    planner_model_easy="$(map_model_for_backend codex haiku)"
+    planner_model_medium="$(map_model_for_backend codex sonnet)"
+    planner_model_difficult="$(map_model_for_backend codex opus)"
+  fi
+
+  if [ "${RALPH_MODEL_BUILDER_EXPLICIT:-0}" != "1" ]; then
+    builder_model_easy="$(map_model_for_backend codex haiku)"
+    builder_model_medium="$(map_model_for_backend codex sonnet)"
+    builder_model_difficult="$(map_model_for_backend codex opus)"
+  fi
+
+  if [ "${RALPH_MODEL_VALIDATOR_EXPLICIT:-0}" != "1" ]; then
+    validator_model_easy="$(map_model_for_backend codex haiku)"
+    validator_model_medium="$(map_model_for_backend codex sonnet)"
+    validator_model_difficult="$(map_model_for_backend codex opus)"
+  fi
+
+  write_codex_agent_config "${CODEX_AGENT_DIR}/planner.toml" "${CODEX_AGENT_RUNTIME_DIR}/planner-easy.toml" "$planner_model_easy"
+  write_codex_agent_config "${CODEX_AGENT_DIR}/planner.toml" "${CODEX_AGENT_RUNTIME_DIR}/planner-medium.toml" "$planner_model_medium"
+  write_codex_agent_config "${CODEX_AGENT_DIR}/planner.toml" "${CODEX_AGENT_RUNTIME_DIR}/planner-difficult.toml" "$planner_model_difficult"
+
+  write_codex_agent_config "${CODEX_AGENT_DIR}/builder.toml" "${CODEX_AGENT_RUNTIME_DIR}/builder-easy.toml" "$builder_model_easy"
+  write_codex_agent_config "${CODEX_AGENT_DIR}/builder.toml" "${CODEX_AGENT_RUNTIME_DIR}/builder-medium.toml" "$builder_model_medium"
+  write_codex_agent_config "${CODEX_AGENT_DIR}/builder.toml" "${CODEX_AGENT_RUNTIME_DIR}/builder-difficult.toml" "$builder_model_difficult"
+
+  write_codex_agent_config "${CODEX_AGENT_DIR}/validator.toml" "${CODEX_AGENT_RUNTIME_DIR}/validator-easy.toml" "$validator_model_easy"
+  write_codex_agent_config "${CODEX_AGENT_DIR}/validator.toml" "${CODEX_AGENT_RUNTIME_DIR}/validator-medium.toml" "$validator_model_medium"
+  write_codex_agent_config "${CODEX_AGENT_DIR}/validator.toml" "${CODEX_AGENT_RUNTIME_DIR}/validator-difficult.toml" "$validator_model_difficult"
+
+  write_codex_agent_config "${CODEX_AGENT_DIR}/merger.toml" "${CODEX_AGENT_RUNTIME_DIR}/merger.toml" "$MODEL_MERGER"
+}
 
 run_codex_exec() {
   local workdir="$1"
@@ -483,18 +589,31 @@ run_codex_exec() {
     -a never \
     exec \
     -C "$workdir" \
+    -m "$MODEL_TEAM_LEAD" \
     -s workspace-write \
     --skip-git-repo-check \
     --color never \
     --enable multi_agent \
     -c "agents.max_threads=3" \
     -c "agents.max_depth=2" \
-    -c "agents.planner.description='Implementation planner for Ralph epic execution'" \
-    -c "agents.planner.config_file='${CODEX_AGENT_DIR}/planner.toml'" \
-    -c "agents.builder.description='Implementation builder for a single Ralph story'" \
-    -c "agents.builder.config_file='${CODEX_AGENT_DIR}/builder.toml'" \
-    -c "agents.validator.description='Independent validator for a single Ralph story'" \
-    -c "agents.validator.config_file='${CODEX_AGENT_DIR}/validator.toml'" \
+    -c "agents.planner_easy.description='Implementation planner for easy Ralph tasks'" \
+    -c "agents.planner_easy.config_file='${CODEX_AGENT_RUNTIME_DIR}/planner-easy.toml'" \
+    -c "agents.planner_medium.description='Implementation planner for normal Ralph tasks'" \
+    -c "agents.planner_medium.config_file='${CODEX_AGENT_RUNTIME_DIR}/planner-medium.toml'" \
+    -c "agents.planner_difficult.description='Implementation planner for difficult Ralph tasks'" \
+    -c "agents.planner_difficult.config_file='${CODEX_AGENT_RUNTIME_DIR}/planner-difficult.toml'" \
+    -c "agents.builder_easy.description='Implementation builder for easy Ralph stories'" \
+    -c "agents.builder_easy.config_file='${CODEX_AGENT_RUNTIME_DIR}/builder-easy.toml'" \
+    -c "agents.builder_medium.description='Implementation builder for normal Ralph stories'" \
+    -c "agents.builder_medium.config_file='${CODEX_AGENT_RUNTIME_DIR}/builder-medium.toml'" \
+    -c "agents.builder_difficult.description='Implementation builder for difficult Ralph stories'" \
+    -c "agents.builder_difficult.config_file='${CODEX_AGENT_RUNTIME_DIR}/builder-difficult.toml'" \
+    -c "agents.validator_easy.description='Independent validator for easy Ralph stories'" \
+    -c "agents.validator_easy.config_file='${CODEX_AGENT_RUNTIME_DIR}/validator-easy.toml'" \
+    -c "agents.validator_medium.description='Independent validator for normal Ralph stories'" \
+    -c "agents.validator_medium.config_file='${CODEX_AGENT_RUNTIME_DIR}/validator-medium.toml'" \
+    -c "agents.validator_difficult.description='Independent validator for difficult Ralph stories'" \
+    -c "agents.validator_difficult.config_file='${CODEX_AGENT_RUNTIME_DIR}/validator-difficult.toml'" \
     "$@" \
     -
 }
@@ -651,48 +770,39 @@ trap handle_sigint INT
 detect_circular_deps "$PRD_FILE" "$TOTAL_EPICS"
 normalize_epic_statuses
 initialize_counters
+prepare_codex_agent_configs
 
 # Cleanup worktrees on exit only when NOT interrupted (on interrupt, worktrees are preserved for resume)
-trap 'if [ "$INTERRUPTED" = false ]; then cleanup_all_worktrees; fi; kill $(jobs -p) 2>/dev/null || true' EXIT
+trap 'if [ "$INTERRUPTED" = false ]; then cleanup_all_worktrees; fi; [ -n "${CODEX_AGENT_RUNTIME_DIR:-}" ] && rm -rf "${CODEX_AGENT_RUNTIME_DIR}"; kill $(jobs -p) 2>/dev/null || true' EXIT
 
-# process_epic_result: parse result file and update PRD status for a given epic index
+# process_epic_result: derive epic result from prd.json story passes and update PRD status
 process_epic_result() {
   local epic_index="$1"
   local epic_id
   epic_id=$(rjq read "$PRD_FILE" ".epics[$epic_index].id")
-  local result_file="$(pwd)/results/result-${epic_id}.txt"
 
-  if [ ! -f "$result_file" ]; then
+  local total_stories
+  total_stories=$(rjq length "$PRD_FILE" ".epics[$epic_index].userStories")
+  local passed_stories
+  passed_stories=$(rjq count-where "$PRD_FILE" ".epics[$epic_index].userStories" "passes=true")
+
+  if [ "$passed_stories" -eq "$total_stories" ] && [ "$total_stories" -gt 0 ]; then
     echo ""
-    echo "  [$epic_id] FAILED — no result file found at $result_file"
-    rjq set "$PRD_FILE" ".epics[$epic_index].status" '"failed"'
-    FAILED=$((FAILED + 1))
-    echo "[$epic_id] FAILED (no result file) — $(date)" >> "$PROGRESS_FILE"
-    return
-  fi
-
-  local result
-  result=$(cat "$result_file")
-
-  if echo "$result" | grep -qi "^PASS$"; then
-    echo ""
-    echo "  [$epic_id] PASSED — all stories completed"
+    echo "  [$epic_id] PASSED — all stories completed ($passed_stories/$total_stories)"
     rjq set "$PRD_FILE" ".epics[$epic_index].status" '"completed"'
     COMPLETED=$((COMPLETED + 1))
     echo "[$epic_id] PASSED — $(date)" >> "$PROGRESS_FILE"
-
-  elif echo "$result" | grep -qi "^PARTIAL"; then
+  elif [ "$passed_stories" -gt 0 ]; then
     echo ""
-    echo "  [$epic_id] PARTIAL — $result"
+    echo "  [$epic_id] PARTIAL — $passed_stories/$total_stories stories passed"
     rjq set "$PRD_FILE" ".epics[$epic_index].status" '"partial"'
-    echo "[$epic_id] PARTIAL — $(date) — $result" >> "$PROGRESS_FILE"
-
+    echo "[$epic_id] PARTIAL ($passed_stories/$total_stories) — $(date)" >> "$PROGRESS_FILE"
   else
     echo ""
-    echo "  [$epic_id] FAILED — $result"
+    echo "  [$epic_id] FAILED — 0/$total_stories stories passed"
     rjq set "$PRD_FILE" ".epics[$epic_index].status" '"failed"'
     FAILED=$((FAILED + 1))
-    echo "[$epic_id] FAILED — $(date) — $result" >> "$PROGRESS_FILE"
+    echo "[$epic_id] FAILED (0/$total_stories) — $(date)" >> "$PROGRESS_FILE"
   fi
 }
 
@@ -747,34 +857,46 @@ $ROOT_DIR/plans/plan-${EPIC_ID}.md
 Only these stories should be planned or worked in this run. Stories omitted here are already passed and must be treated as done context only.
 $PENDING_STORIES_JSON
 
+## Model Selection Policy
+- Respect explicit `ralph.config.yml` agent model overrides when they are present.
+  - If `RALPH_MODEL_PLANNER_EXPLICIT=1`, use `RALPH_MODEL_PLANNER` for planner work.
+  - If `RALPH_MODEL_BUILDER_EXPLICIT=1`, use `RALPH_MODEL_BUILDER` for builder work.
+  - If `RALPH_MODEL_VALIDATOR_EXPLICIT=1`, use `RALPH_MODEL_VALIDATOR` for validator work.
+  - If `RALPH_MODEL_MERGER_EXPLICIT=1`, use `RALPH_MODEL_MERGER` for merger work.
+- If there is no explicit override for that role, choose the model by task difficulty.
+- Default difficulty policy by backend:
+  - Claude / Copilot-Claude: easy -> haiku, medium -> sonnet, difficult -> opus
+  - Codex: easy -> gpt-5-mini, medium -> gpt-5.3-codex, difficult -> gpt-5.4
+- If your runtime supports setting reasoning effort per spawned task, use low for easy tasks, medium for normal tasks, high for difficult tasks, and xhigh only for unusually hard analysis or verification.
+- If your runtime is Codex, use these exact named teammate roles when spawning:
+  - planners: `planner_easy`, `planner_medium`, `planner_difficult`
+  - builders: `builder_easy`, `builder_medium`, `builder_difficult`
+  - validators: `validator_easy`, `validator_medium`, `validator_difficult`
+
 ## Instructions
 1. **Planner decision.**
    - If this epic has planned=true in the PRD: do NOT spawn the Planner. Read $ROOT_DIR/plans/plan-${EPIC_ID}.md and follow that plan.
    - If this epic does not have planned=true: ask yourself: \"Could a developer implement every story in this epic without any design decisions, just by following the acceptance criteria literally?\" If YES → do NOT spawn the Planner. If NO → spawn it and wait for plans/plan-${EPIC_ID}.md.
    - DO NOT spawn for: adding/removing lines in named files, adding console.log statements, changing config values, renaming things
    - SPAWN for: new features, new files/modules, refactors, anything requiring architectural judgment
-   - If your agent runtime supports named sub-agents, use the dedicated planner role for this
+   - If your agent runtime supports named sub-agents, use the dedicated planner role for this and choose its model using the policy above
 2. Process ALL user stories in priority order — do NOT stop until every story has been attempted
 3. For each story: check if passes=true in the PRD (skip those — they are already done), then Builder implements → verify → max 2 total cycles
-   - If your agent runtime supports named sub-agents, use the dedicated builder role for implementation
+   - If your agent runtime supports named sub-agents, use the dedicated builder role for implementation and choose its model using the policy above
    - Before assigning each story, check if guidance/guidance-{story-id}.md exists (e.g. guidance/guidance-US-003.md). If it does, explicitly include this in your Builder assignment: Guidance file for this story: guidance/guidance-{story-id}.md — read it before implementing and follow the instructions in it.
    - **Validator — only spawn if truly needed.** Ask yourself: \"Can I verify this story is correct just by reading the changed files?\" If YES → do NOT spawn the Validator — self-verify by reading the files and checking each criterion. If NO → spawn the Validator.
    - DO NOT spawn Validator for: adding a line to a named file (read the file, check the line is there), build/typecheck (trust Builder output or run the command yourself)
    - SPAWN Validator for: logic correctness, new behaviour, API contracts, anything requiring judgment to verify
-   - If your agent runtime supports named sub-agents, use the dedicated validator role when spawning
+   - If your agent runtime supports named sub-agents, use the dedicated validator role when spawning and choose its model using the policy above
    - After each story attempt, update the story object in $PRD_ABS_PATH:
      - if the story passes, set passes=true and failureReason=null
      - if the story fails, set passes=false and failureReason to a short concrete reason string from the validator feedback
 4. Document any failures and move on to the next story
-5. When ALL stories have been processed (or skipped because already passed), write your result to: $RESULT_FILE
-   - Write ONLY one line: PASS, PARTIAL, or FAIL with details
-   - Example: PASS
-   - Example: PARTIAL: 3/5 stories passed. Failed: US-003, US-005
-   - Example: FAIL: 0/5 stories passed.
-6. Immediately after writing the result file, print the same single-line result and exit the session. Do not remain idle.
+5. When ALL stories have been processed (or skipped because already passed), verify the PRD file has been updated for every story (passes: true or false).
+6. Print a summary line \"DONE: X/Y stories passed\" and exit the session. Do not remain idle.
 
 ## Critical Rules
-- Do NOT stop after the first story — process ALL stories before writing the result file
+- Do NOT stop after the first story — process ALL stories before exiting
 - Idle or waiting messages from teammates are NORMAL — they do not mean the session should end
 - Once the final result is written, end the session immediately. Do not wait for more input.
 - Process stories sequentially: build → validate → next. Do not stop early.
@@ -794,7 +916,7 @@ Begin."
   else
     (
       COPILOT_TEAM_PROMPT="$TEAM_PROMPT" \
-        script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent team-lead --allow-all --no-ask-user --stream on -p "$COPILOT_TEAM_PROMPT"' \
+        script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent team-lead --model "$MODEL_TEAM_LEAD" --allow-all --no-ask-user --stream on -p "$COPILOT_TEAM_PROMPT"' \
         > "$EPIC_LOG" 2>&1
     ) &
   fi
@@ -876,11 +998,11 @@ Begin resolving."
           ;;
         copilot)
           COPILOT_MERGE_PROMPT="$merge_prompt" \
-            script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent merger --allow-all --no-ask-user --stream on -p "$COPILOT_MERGE_PROMPT"' \
+            script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent merger --model "$MODEL_MERGER" --allow-all --no-ask-user --stream on -p "$COPILOT_MERGE_PROMPT"' \
             > "$merge_log" 2>&1 || true
           ;;
         codex)
-          run_codex_exec "$ROOT_DIR" "$merge_prompt" > "$merge_log" 2>&1 || true
+          MODEL_TEAM_LEAD="$MODEL_MERGER" run_codex_exec "$ROOT_DIR" "$merge_prompt" > "$merge_log" 2>&1 || true
           ;;
       esac
 
@@ -1005,6 +1127,7 @@ while true; do
   active_log_lines=()
   # wave_completed_ids collects epic IDs that completed successfully (for merge_wave)
   wave_completed_ids=()
+  declare -A crash_retries  # track crash retry count per epic ID
   queue_pos=0
 
   # Helper: wait_for_one_slot — polls active_pids until a slot is free,
@@ -1029,13 +1152,28 @@ while true; do
           echo "  [$finished_epic_id] TIMED OUT after ${EPIC_TIMEOUT}s"
           terminate_process_tree "${active_pids[$slot]}"
           wait "${active_pids[$slot]}" 2>/dev/null || true
+          # Check progress and retry if possible
+          local _to_total _to_passed
+          _to_total=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories")
+          _to_passed=$(rjq count-where "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories" "passes=true")
+          local _to_retry_count="${crash_retries[$finished_epic_id]:-0}"
+          if [ "$_to_retry_count" -lt "$MAX_CRASH_RETRIES" ] && [ "$_to_passed" -lt "$_to_total" ]; then
+            crash_retries[$finished_epic_id]=$((_to_retry_count + 1))
+            echo "  [$finished_epic_id] Timeout with $_to_passed/$_to_total passed — retry $((_to_retry_count + 1))/$MAX_CRASH_RETRIES"
+            echo "[$finished_epic_id] TIMEOUT RETRY $((_to_retry_count + 1))/$MAX_CRASH_RETRIES ($_to_passed/$_to_total passed) — $(date)" >> "$PROGRESS_FILE"
+            cleanup_epic_worktree "$finished_epic_id"
+            spawn_epic_bg "${active_indices[$slot]}"
+            active_pids[$slot]="$LAST_SPAWN_PID"
+            active_start_times[$slot]="$(date +%s)"
+            active_logs[$slot]="$LAST_SPAWN_LOG"
+            active_log_lines[$slot]="0"
+            continue
+          fi
           cleanup_epic_worktree "$finished_epic_id"
-          # Mark epic as failed in PRD
-          rjq set "$PRD_FILE" ".epics[${active_indices[$slot]}].status" '"failed"'
-          FAILED=$((FAILED + 1))
-          # Log timeout to progress.txt and epic log
-          echo "[$finished_epic_id] FAILED (epic timeout after ${EPIC_TIMEOUT}s) — $(date)" >> "$PROGRESS_FILE"
           echo "TIMEOUT: Epic exceeded ${EPIC_TIMEOUT}s limit" >> "${active_logs[$slot]}"
+          # Log timeout-specific message before generic result
+          echo "[$finished_epic_id] FAILED (epic timeout after ${EPIC_TIMEOUT}s) — $(date)" >> "$PROGRESS_FILE"
+          process_epic_result "${active_indices[$slot]}"
           # Clean up tracking arrays
           unset 'active_pids[$slot]'
           unset 'active_indices[$slot]'
@@ -1066,12 +1204,27 @@ while true; do
           echo "  [$finished_epic_id] IDLE TIMEOUT — no output for ${IDLE_TIMEOUT}s"
           terminate_process_tree "${active_pids[$slot]}"
           wait "${active_pids[$slot]}" 2>/dev/null || true
+          # Check progress and retry if possible
+          local _it_total _it_passed
+          _it_total=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories")
+          _it_passed=$(rjq count-where "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories" "passes=true")
+          local _it_retry_count="${crash_retries[$finished_epic_id]:-0}"
+          if [ "$_it_retry_count" -lt "$MAX_CRASH_RETRIES" ] && [ "$_it_passed" -lt "$_it_total" ]; then
+            crash_retries[$finished_epic_id]=$((_it_retry_count + 1))
+            echo "  [$finished_epic_id] Idle timeout with $_it_passed/$_it_total passed — retry $((_it_retry_count + 1))/$MAX_CRASH_RETRIES"
+            echo "[$finished_epic_id] IDLE RETRY $((_it_retry_count + 1))/$MAX_CRASH_RETRIES ($_it_passed/$_it_total passed) — $(date)" >> "$PROGRESS_FILE"
+            cleanup_epic_worktree "$finished_epic_id"
+            spawn_epic_bg "${active_indices[$slot]}"
+            active_pids[$slot]="$LAST_SPAWN_PID"
+            active_start_times[$slot]="$(date +%s)"
+            active_logs[$slot]="$LAST_SPAWN_LOG"
+            active_log_lines[$slot]="0"
+            continue
+          fi
           cleanup_epic_worktree "$finished_epic_id"
-          # Mark epic as failed in PRD
-          rjq set "$PRD_FILE" ".epics[${active_indices[$slot]}].status" '"failed"'
-          FAILED=$((FAILED + 1))
-          # Log idle timeout to progress.txt
+          # Log idle-timeout-specific message before generic result
           echo "[$finished_epic_id] FAILED (idle timeout — no output for ${IDLE_TIMEOUT}s) — $(date)" >> "$PROGRESS_FILE"
+          process_epic_result "${active_indices[$slot]}"
           # Clean up tracking arrays
           unset 'active_pids[$slot]'
           unset 'active_indices[$slot]'
@@ -1097,6 +1250,35 @@ while true; do
             terminate_process_tree "${active_pids[$slot]}"
           fi
           wait "${active_pids[$slot]}" 2>/dev/null || true
+
+          # Check if this was a crash (process exited, no result file, not all stories done)
+          local total_s passed_s
+          total_s=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories")
+          passed_s=$(rjq count-where "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories" "passes=true")
+          local all_done=false
+          [ "$passed_s" -eq "$total_s" ] && [ "$total_s" -gt 0 ] && all_done=true
+
+          if [ ! -f "$result_file" ] && [ "$all_done" = false ]; then
+            local retry_count="${crash_retries[$finished_epic_id]:-0}"
+            if [ "$retry_count" -lt "$MAX_CRASH_RETRIES" ]; then
+              crash_retries[$finished_epic_id]=$((retry_count + 1))
+              echo ""
+              echo "  [$finished_epic_id] CRASH DETECTED ($passed_s/$total_s passed) — retry $((retry_count + 1))/$MAX_CRASH_RETRIES"
+              echo "[$finished_epic_id] CRASH RETRY $((retry_count + 1))/$MAX_CRASH_RETRIES ($passed_s/$total_s passed so far) — $(date)" >> "$PROGRESS_FILE"
+              cleanup_epic_worktree "$finished_epic_id"
+              spawn_epic_bg "${active_indices[$slot]}"
+              active_pids[$slot]="$LAST_SPAWN_PID"
+              active_start_times[$slot]="$(date +%s)"
+              active_logs[$slot]="$LAST_SPAWN_LOG"
+              active_log_lines[$slot]="0"
+              # Don't free slot — respawned epic reuses it. Continue polling.
+              continue
+            fi
+            echo ""
+            echo "  [$finished_epic_id] CRASH — retries exhausted ($passed_s/$total_s stories passed)"
+            echo "[$finished_epic_id] CRASH RETRIES EXHAUSTED ($passed_s/$total_s passed) — $(date)" >> "$PROGRESS_FILE"
+          fi
+
           echo "  [$finished_epic_id] finished — processing result"
           cleanup_epic_worktree "$finished_epic_id"
           process_epic_result "${active_indices[$slot]}"
@@ -1106,29 +1288,6 @@ while true; do
           if [ "$post_status" = "completed" ]; then
             wave_completed_ids+=("$finished_epic_id")
           fi
-          # Update run stats (failures are non-fatal — stats tracking must not break the run)
-          local epic_passed="false"
-          [ "$post_status" = "completed" ] && epic_passed="true"
-          local _epic_end_time
-          _epic_end_time=$(date +%s)
-          local _epic_start_time="${active_start_times[$slot]:-$_epic_end_time}"
-          # Convert epoch seconds to ISO 8601 (macOS: date -r, Linux: date -d @)
-          local _started_at _completed_at
-          _started_at=$(date -u -r "$_epic_start_time" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-            || date -u -d "@${_epic_start_time}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-            || echo "")
-          _completed_at=$(date -u -r "$_epic_end_time" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-            || date -u -d "@${_epic_end_time}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-            || echo "")
-          ralph-teams update-stats \
-            --epic-id "$finished_epic_id" \
-            --story-id "all" \
-            --log-file "${active_logs[$slot]}" \
-            --passed "$epic_passed" \
-            --backend "$BACKEND" \
-            --stories-total "$TOTAL_STORIES" \
-            ${_started_at:+--started-at "$_started_at"} \
-            ${_completed_at:+--completed-at "$_completed_at"} 2>/dev/null || true
           unset 'active_pids[$slot]'
           unset 'active_indices[$slot]'
           unset 'active_start_times[$slot]'

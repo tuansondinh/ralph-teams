@@ -1,23 +1,19 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawnSync, spawn, SpawnSyncReturns, ChildProcess } from 'child_process';
-import * as readline from 'readline/promises';
+import { spawnSync } from 'child_process';
 import chalk from 'chalk';
-import { loadConfig, mergeCliOverrides } from '../config';
-import { startDashboard, resolveDashboardOptions, RetryController } from '../dashboard';
-import { gatherDiscussContext, runDiscussSession } from '../discuss';
-import { resetFailedEpics } from '../retry-controller';
+import { loadConfig, loadExplicitAgentModelOverrides, mergeCliOverrides } from '../config';
 
 interface RunDeps {
   existsSync: typeof fs.existsSync;
   chmodSync: typeof fs.chmodSync;
   unlinkSync: typeof fs.unlinkSync;
   spawnSync: typeof spawnSync;
-  spawn: typeof spawn;
   exit: (code?: number) => never;
   cwd: () => string;
   /** Override for config loading — used in tests to inject a mock loader. */
   loadConfig?: typeof loadConfig;
+  loadExplicitAgentModelOverrides?: typeof loadExplicitAgentModelOverrides;
 }
 
 const defaultDeps: RunDeps = {
@@ -25,10 +21,10 @@ const defaultDeps: RunDeps = {
   chmodSync: fs.chmodSync,
   unlinkSync: fs.unlinkSync,
   spawnSync,
-  spawn,
   exit: (code?: number) => process.exit(code),
   cwd: () => process.cwd(),
   loadConfig,
+  loadExplicitAgentModelOverrides,
 };
 
 function findRalphSh(deps: RunDeps): string | null {
@@ -61,100 +57,14 @@ function parseParallel(parallel: string): number | null {
   return parseInt(parallel, 10);
 }
 
-function getCurrentGitBranch(deps: RunDeps): string | null {
-  const result = deps.spawnSync('git', ['branch', '--show-current'], {
-    encoding: 'utf-8',
-  });
-
-  if (result.status !== 0) {
-    return null;
-  }
-
-  const stdout = typeof result.stdout === 'string' ? result.stdout.trim() : '';
-  return stdout === '' ? null : stdout;
-}
-
-function hasDirtyGitWorktree(deps: RunDeps): boolean {
-  const unstaged = deps.spawnSync('git', ['diff', '--quiet']);
-  if (unstaged.status !== 0) {
-    return true;
-  }
-
-  const staged = deps.spawnSync('git', ['diff', '--cached', '--quiet']);
-  return staged.status !== 0;
-}
-
-async function promptForAutoCommit(targetBranch: string, deps: RunDeps): Promise<boolean> {
-  console.log(`Worktree has uncommitted changes and Ralph needs to create or switch to branch '${targetBranch}'.`);
-  console.log('Ralph will now stage and commit all current changes before the run.');
-
-  const statusResult = deps.spawnSync('git', ['status', '--short'], {
-    encoding: 'utf-8',
-  });
-  if (statusResult.status === 0 && typeof statusResult.stdout === 'string' && statusResult.stdout.trim() !== '') {
-    process.stdout.write(statusResult.stdout);
-  }
-
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  try {
-    const answer = await rl.question('Proceed with auto-commit before continuing? [y/N]: ');
-    const normalized = answer.trim().toLowerCase();
-    if (normalized !== 'y' && normalized !== 'yes') {
-      return false;
-    }
-  } finally {
-    rl.close();
-  }
-
-  const addResult = deps.spawnSync('git', ['add', '-A'], {
-    stdio: 'inherit',
-  });
-  if (addResult.status !== 0) {
-    console.error(chalk.red('Error: failed to stage changes before starting Ralph.'));
-    deps.exit(addResult.status ?? 1);
-  }
-
-  const commitResult = deps.spawnSync('git', ['commit', '-m', 'chore: auto-commit changes before ralph run'], {
-    stdio: 'inherit',
-  });
-  if (commitResult.status !== 0) {
-    console.error(chalk.red('Error: failed to auto-commit changes before starting Ralph.'));
-    deps.exit(commitResult.status ?? 1);
-  }
-
-  return true;
-}
-
-/**
- * Spawns ralph.sh as a child process with piped stdio.
- * Extracted so it can be reused for retry rounds.
- */
-function spawnRalph(
-  ralphSh: string,
-  args: string[],
-  spawnEnv: NodeJS.ProcessEnv,
-  deps: RunDeps,
-): ChildProcess {
-  return deps.spawn(ralphSh, args, {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    shell: false,
-    env: spawnEnv,
-  });
-}
-
 export async function runCommand(
   prdPath: string,
-  options: { backend?: string; parallel?: string; dashboard?: boolean },
+  options: { backend?: string; parallel?: string },
   deps: RunDeps = defaultDeps,
 ): Promise<void> {
   const resolved = path.resolve(prdPath);
   const stateFile = path.join(path.dirname(resolved), 'ralph-state.json');
   const parallel = options.parallel;
-  const useDashboard = options.dashboard === true;
 
   if (!deps.existsSync(resolved)) {
     console.error(chalk.red(`Error: prd.json not found at ${resolved}`));
@@ -165,6 +75,7 @@ export async function runCommand(
   // Load ralph.config.yml (if present) and merge CLI overrides
   const configLoader = deps.loadConfig ?? loadConfig;
   let config;
+  let explicitAgentOverrides;
   try {
     const baseConfig = configLoader(deps.cwd());
     const parallelNum = parallel !== undefined ? parseParallel(parallel) : undefined;
@@ -172,6 +83,8 @@ export async function runCommand(
       ...(options.backend !== undefined ? { backend: options.backend } : {}),
       ...(parallelNum !== null && parallelNum !== undefined ? { parallel: parallelNum } : {}),
     });
+    const explicitOverridesLoader = deps.loadExplicitAgentModelOverrides ?? loadExplicitAgentModelOverrides;
+    explicitAgentOverrides = explicitOverridesLoader(deps.cwd());
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(chalk.red(`Error: ${msg}`));
@@ -181,13 +94,6 @@ export async function runCommand(
   // config is always defined here (exit called on error), but TypeScript needs this assertion
   const resolvedConfig = config!;
   const backend = resolvedConfig.execution.backend;
-  const currentBranch = getCurrentGitBranch(deps);
-
-  if (useDashboard) {
-    console.error(chalk.red('Error: --dashboard is temporarily disabled.'));
-    console.error(chalk.dim('Run without --dashboard for now.'));
-    deps.exit(1);
-  }
 
   if (backend === 'claude' && !isCommandInstalled('claude', deps)) {
     console.error(chalk.red('Error: claude CLI is not installed or not in PATH.'));
@@ -264,6 +170,11 @@ export async function runCommand(
     RALPH_MODEL_BUILDER: resolvedConfig.agents.builder,
     RALPH_MODEL_VALIDATOR: resolvedConfig.agents.validator,
     RALPH_MODEL_MERGER: resolvedConfig.agents.merger,
+    RALPH_MODEL_TEAM_LEAD_EXPLICIT: explicitAgentOverrides?.teamLead !== undefined ? '1' : '0',
+    RALPH_MODEL_PLANNER_EXPLICIT: explicitAgentOverrides?.planner !== undefined ? '1' : '0',
+    RALPH_MODEL_BUILDER_EXPLICIT: explicitAgentOverrides?.builder !== undefined ? '1' : '0',
+    RALPH_MODEL_VALIDATOR_EXPLICIT: explicitAgentOverrides?.validator !== undefined ? '1' : '0',
+    RALPH_MODEL_MERGER_EXPLICIT: explicitAgentOverrides?.merger !== undefined ? '1' : '0',
   };
 
   if (deps.existsSync(stateFile)) {
@@ -277,153 +188,11 @@ export async function runCommand(
     }
   }
 
-  if (useDashboard && currentBranch !== null && hasDirtyGitWorktree(deps)) {
-    const confirmed = await promptForAutoCommit(`a new Ralph loop branch from '${currentBranch}'`, deps);
-    if (!confirmed) {
-      console.log('Aborted: user declined auto-commit before run.');
-      deps.exit(1);
-    }
-  }
+  const result = deps.spawnSync(ralphSh, args, {
+    stdio: 'inherit',
+    shell: false,
+    env: spawnEnv,
+  });
 
-  if (!useDashboard) {
-    // Default: fall back to synchronous spawnSync with stdio:inherit
-    const result = deps.spawnSync(ralphSh, args, {
-      stdio: 'inherit',
-      shell: false,
-      env: spawnEnv,
-    });
-
-    deps.exit(result.status ?? 1);
-  } else {
-    // --dashboard: launch async with piped stdio and start dashboard
-    const dashboardOptions = resolveDashboardOptions(resolved, deps.cwd(), backend);
-    const cwd = deps.cwd();
-
-    const postRunCallbacks = {
-      onDiscuss: (storyId: string) => {
-        // Stop the dashboard screen temporarily so readline can take over the terminal
-        dashboard.stop();
-
-        // Gather context from prd.json, progress.txt, plans/, and worktrees/
-        const progressPath = path.join(cwd, 'progress.txt');
-        const plansDir = path.join(cwd, 'plans');
-
-        // Find the epic ID from the story ID so we can locate the correct worktree
-        const prd = fs.existsSync(resolved)
-          ? (() => {
-              try {
-                return JSON.parse(fs.readFileSync(resolved, 'utf-8')) as {
-                  epics: Array<{ id: string; userStories: Array<{ id: string }> }>;
-                };
-              } catch {
-                return { epics: [] };
-              }
-            })()
-          : { epics: [] };
-
-        let epicId = '';
-        for (const epic of prd.epics) {
-          if (epic.userStories.some(s => s.id === storyId)) {
-            epicId = epic.id;
-            break;
-          }
-        }
-
-        const worktreeDir = epicId
-          ? path.join(cwd, '.worktrees', epicId)
-          : cwd;
-
-        const context = gatherDiscussContext(
-          storyId,
-          resolved,
-          progressPath,
-          plansDir,
-          worktreeDir,
-        );
-
-        // Run the interactive discuss session (async, but we fire-and-forget here)
-        // The dashboard was already stopped above so readline can use the terminal
-        const guidanceDir = path.join(cwd, 'guidance');
-        runDiscussSession(context, { guidanceDir, backend: backend as 'claude' | 'copilot' | 'codex' }).then(() => {
-          // After the session, exit cleanly — user can restart the dashboard if needed
-          deps.exit(0);
-        }).catch((err: Error) => {
-          console.error(chalk.red(`Discuss session error: ${err.message}`));
-          deps.exit(1);
-        });
-      },
-
-      onRetry: () => {
-        // Retry is handled by re-running ralph — just exit for now
-        dashboard.stop();
-        deps.exit(0);
-      },
-
-      onQuit: () => {
-        dashboard.stop();
-        deps.exit(0);
-      },
-    };
-
-    // Track the active child process so we can terminate it on retry.
-    let activeChild: ChildProcess | null = null;
-    let retrying = false;
-
-    /**
-     * Attaches close/error handlers to a ralph child process.
-     * On close: if a retry is in progress the handler is a no-op (the
-     * retry spawned a new child already). Otherwise exit.
-     */
-    function wireChild(child: ChildProcess): void {
-      activeChild = child;
-
-      child.on('close', (code: number | null) => {
-        // If a retry round just started, this is the old child finishing — ignore.
-        if (retrying) {
-          retrying = false;
-          return;
-        }
-        dashboard.stop();
-        deps.exit(code ?? 0);
-      });
-
-      child.on('error', (err: Error) => {
-        if (retrying) return;
-        dashboard.stop();
-        console.error(chalk.red(`Error: ${err.message}`));
-        deps.exit(1);
-      });
-    }
-
-    const retryController: RetryController = {
-      retryFailed() {
-        retrying = true;
-        // Reset failed/partial epics in the PRD so ralph re-processes them
-        try {
-          resetFailedEpics(resolved);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.error(chalk.red(`Retry: failed to reset PRD: ${msg}`));
-          retrying = false;
-          return;
-        }
-        // Terminate the old child process if it's still running
-        if (activeChild && !activeChild.killed) {
-          activeChild.kill();
-        }
-        // Spawn a new ralph round
-        const newChild = spawnRalph(ralphSh!, args, spawnEnv, deps);
-        wireChild(newChild);
-      },
-
-      isRetrying() {
-        return retrying;
-      },
-    };
-
-    const dashboard = startDashboard(dashboardOptions, postRunCallbacks, retryController);
-
-    const initialChild = spawnRalph(ralphSh!, args, spawnEnv, deps);
-    wireChild(initialChild);
-  }
+  deps.exit(result.status ?? 1);
 }

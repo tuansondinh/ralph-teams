@@ -16,6 +16,13 @@ The system has two layers:
   - `builder` makes changes and runs tests
   - `validator` verifies the result independently
 
+Default Team Lead policy by backend:
+- Claude: keep `team-lead` on `opus`; for spawned work use `haiku` for easy tasks, `sonnet` for medium tasks, `opus` for difficult tasks
+- Copilot: resolve those same tiers to `claude-haiku-4.5`, `claude-sonnet-4.6`, and `claude-opus-4.6`
+- Codex: resolve those same tiers to `gpt-5-mini`, `gpt-5.3-codex`, and `gpt-5.4`
+
+If `ralph.config.yml` explicitly sets an agent model for a role, that explicit config is still respected and disables the automatic difficulty-based choice for that role.
+
 Ralph never writes code itself. It only schedules work, tracks results, and updates project state.
 
 Current backends:
@@ -32,7 +39,6 @@ The runtime is file-based. During a run, Ralph treats these files as the working
 - `logs/`: raw backend logs
 - `results/`: per-epic final result markers
 - `ralph-state.json`: interrupt/resume state
-- `ralph-run-stats.json`: cost, token, and duration telemetry
 
 ## Flow
 
@@ -232,12 +238,32 @@ Notes:
 - `--backend` is forwarded to `ralph.sh`
 - runs sequentially by default
 - `--parallel <n>` enables the experimental parallel wave runner
-- `--dashboard` is temporarily disabled
 
 Planning behavior:
 
 - if an epic has `planned: true`, the Team Lead is expected to read `plans/plan-EPIC-xxx.md` and follow it
 - if an epic is still unplanned, the Team Lead may still decide to spawn a planner during execution
+
+### `ralph-teams task <prompt>`
+
+Runs an ad hoc task in the current repository without creating a PRD, epic, or story structure.
+
+```bash
+ralph-teams task "fix the flaky auth test"
+ralph-teams task "add rate limiting to login" --backend codex
+```
+
+Behavior:
+
+- requires a checked out git branch and runs on that same branch
+- asks once whether you want to plan the task first
+- if you choose planning, starts a guided planning session with the agent
+- otherwise starts direct Team Lead execution for the task
+
+Notes:
+
+- this mode does not create `prd.json` entries or worktrees
+- `--backend` controls whether the task uses `claude`, `copilot`, or `codex`
 
 ### `ralph-teams plan [path]`
 
@@ -328,20 +354,6 @@ Resets one epic to `pending` and sets all of its stories back to `passes: false`
 ralph-teams reset EPIC-002
 ```
 
-### `ralph-teams add-epic [path]`
-
-Interactively appends a new epic to an existing PRD.
-
-```bash
-ralph-teams add-epic
-```
-
-This command:
-
-- creates the next `EPIC-###` id
-- creates globally unique `US-###` ids across the PRD
-- lets you choose dependencies from existing epics
-
 ### `ralph-teams validate [path]`
 
 Validates PRD structure and dependency integrity.
@@ -374,17 +386,6 @@ Shows:
 - epic status
 - story pass counts
 - blocked epics
-
-### `ralph-teams stats [path]`
-
-Shows the current stats feature status.
-
-```bash
-ralph-teams stats
-ralph-teams stats ./ralph-run-stats.json
-```
-
-This command is temporarily disabled while the telemetry model is being corrected.
 
 ## Backends
 
@@ -501,7 +502,6 @@ During a run, Ralph writes:
 - `results/result-EPIC-xxx.txt`: final pass/partial/fail result per epic
 - `logs/epic-EPIC-xxx-<timestamp>.log`: raw backend session log
 - `ralph-state.json`: saved interrupt/resume state
-- `ralph-run-stats.json`: token, cost, duration, and estimate data
 - `guidance/guidance-US-xxx.md`: retry guidance captured from discuss flows
 
 Ralph also updates the original `prd.json` in place as story and epic state changes.

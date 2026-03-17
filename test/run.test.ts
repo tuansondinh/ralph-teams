@@ -3,9 +3,8 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { spawnSync, spawn } from 'node:child_process';
 import { runCommand } from '../src/commands/run';
-import { ExitSignal, mockProcessExit } from './helpers';
+import { ExitSignal } from './helpers';
 
 afterEach(() => {
   mock.restoreAll();
@@ -17,7 +16,6 @@ function createRunDeps(overrides: Partial<Parameters<typeof runCommand>[2]> = {}
     chmodSync: fs.chmodSync,
     unlinkSync: fs.unlinkSync,
     spawnSync: () => ({ status: 0 }) as ReturnType<NonNullable<Parameters<typeof runCommand>[2]>['spawnSync']>,
-    spawn: spawn,
     exit: (code?: number) => {
       throw new ExitSignal(code);
     },
@@ -97,7 +95,7 @@ test('runCommand invokes ralph.sh with the resolved PRD path and backend', async
     cwd: () => tempDir,
   });
 
-  await assert.rejects(runCommand(prdPath, { backend: 'copilot', dashboard: false }, deps), (error: unknown) => {
+  await assert.rejects(runCommand(prdPath, { backend: 'copilot' }, deps), (error: unknown) => {
     assert.ok(error instanceof ExitSignal);
     assert.equal(error.code, 0);
     return true;
@@ -139,7 +137,7 @@ test('runCommand removes stale ralph-state.json before a fresh run', async () =>
     cwd: () => tempDir,
   });
 
-  await assert.rejects(runCommand(prdPath, { backend: 'claude', dashboard: false }, deps), (error: unknown) => {
+  await assert.rejects(runCommand(prdPath, { backend: 'claude' }, deps), (error: unknown) => {
     assert.ok(error instanceof ExitSignal);
     assert.equal(error.code, 0);
     return true;
@@ -168,7 +166,7 @@ test('runCommand with --parallel passes flag to ralph.sh', async () => {
     cwd: () => tempDir,
   });
 
-  await assert.rejects(runCommand(prdPath, { backend: 'claude', parallel: '3', dashboard: false }, deps), (error: unknown) => {
+  await assert.rejects(runCommand(prdPath, { backend: 'claude', parallel: '3' }, deps), (error: unknown) => {
     assert.ok(error instanceof ExitSignal);
     assert.equal(error.code, 0);
     return true;
@@ -199,7 +197,7 @@ test('runCommand without --parallel does not include --parallel in args', async 
     cwd: () => tempDir,
   });
 
-  await assert.rejects(runCommand(prdPath, { backend: 'claude', dashboard: false }, deps), (error: unknown) => {
+  await assert.rejects(runCommand(prdPath, { backend: 'claude' }, deps), (error: unknown) => {
     assert.ok(error instanceof ExitSignal);
     assert.equal(error.code, 0);
     return true;
@@ -249,26 +247,7 @@ test('runCommand exits when --parallel is zero', async () => {
   assert.match(errors[0] ?? '', /--parallel must be greater than 0/i);
 });
 
-test('runCommand exits when --dashboard is requested', async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
-  const prdPath = path.join(tempDir, 'prd.json');
-  fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
-
-  const errors: string[] = [];
-  mock.method(console, 'error', (...args: unknown[]) => {
-    errors.push(args.join(' '));
-  });
-
-  await assert.rejects(runCommand(prdPath, { backend: 'claude', dashboard: true }, createRunDeps()), (error: unknown) => {
-    assert.ok(error instanceof ExitSignal);
-    assert.equal(error.code, 1);
-    return true;
-  });
-
-  assert.match(errors[0] ?? '', /--dashboard is temporarily disabled/i);
-});
-
-test('runCommand without --dashboard uses spawnSync (sync path)', async () => {
+test('runCommand uses spawnSync for execution', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
   const prdPath = path.join(tempDir, 'prd.json');
   fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
@@ -277,7 +256,6 @@ test('runCommand without --dashboard uses spawnSync (sync path)', async () => {
   fs.writeFileSync(tempRalphSh, '#!/bin/sh\n');
 
   const spawnSyncCalls: string[] = [];
-  const spawnCalls: string[] = [];
 
   const deps = createRunDeps({
     existsSync: (target: fs.PathLike) => fs.existsSync(target),
@@ -285,24 +263,17 @@ test('runCommand without --dashboard uses spawnSync (sync path)', async () => {
       spawnSyncCalls.push(command);
       return { status: 0 } as ReturnType<NonNullable<Parameters<typeof runCommand>[2]>['spawnSync']>;
     }) as NonNullable<Parameters<typeof runCommand>[2]>['spawnSync'],
-    spawn: ((...args: Parameters<typeof spawn>) => {
-      spawnCalls.push(args[0]);
-      return { on: () => {} } as unknown as ReturnType<typeof spawn>;
-    }) as typeof spawn,
     chmodSync: (() => {}) as typeof fs.chmodSync,
     cwd: () => tempDir,
   });
 
-  await assert.rejects(runCommand(prdPath, { backend: 'claude', dashboard: false }, deps), (error: unknown) => {
+  await assert.rejects(runCommand(prdPath, { backend: 'claude' }, deps), (error: unknown) => {
     assert.ok(error instanceof ExitSignal);
     assert.equal(error.code, 0);
     return true;
   });
 
-  // spawnSync called (for both backend check and ralph.sh invocation)
   assert.ok(spawnSyncCalls.length >= 2, 'spawnSync should be called at least twice');
-  // spawn (async) should NOT be called when dashboard is disabled
-  assert.equal(spawnCalls.length, 0, 'async spawn should not be called without --dashboard');
 });
 
 test('runCommand checks for the codex CLI when codex backend is selected', async () => {

@@ -1,0 +1,290 @@
+import { spawn, spawnSync } from 'child_process';
+import * as readline from 'readline/promises';
+import chalk from 'chalk';
+import { loadConfig, loadExplicitAgentModelOverrides, mergeCliOverrides } from '../config';
+import { createDefaultSpawner, type AgentSpawner } from '../discuss';
+
+type SupportedBackend = 'claude' | 'copilot' | 'codex';
+
+interface TaskOptions {
+  backend?: string;
+}
+
+interface TaskDeps {
+  cwd: () => string;
+  exit: (code?: number) => never;
+  loadConfig?: typeof loadConfig;
+  loadExplicitAgentModelOverrides?: typeof loadExplicitAgentModelOverrides;
+  ensureBackendAvailable?: (backend: SupportedBackend) => void;
+  askShouldPlan?: () => Promise<boolean>;
+  runPlanningSession?: (prompt: string, backend: SupportedBackend, env: NodeJS.ProcessEnv) => Promise<void>;
+  runExecutionSession?: (prompt: string, backend: SupportedBackend, env: NodeJS.ProcessEnv) => Promise<void>;
+  getCurrentBranch?: () => string | null;
+}
+
+const defaultDeps: TaskDeps = {
+  cwd: () => process.cwd(),
+  exit: (code?: number) => process.exit(code),
+  loadConfig,
+  loadExplicitAgentModelOverrides,
+};
+
+function ensureBackendAvailable(backend: SupportedBackend): void {
+  if (backend === 'claude') {
+    const result = spawnSync('command', ['-v', 'claude'], { shell: true, stdio: 'ignore' });
+    if (result.status !== 0) {
+      console.error(chalk.red('Error: claude CLI is not installed or not in PATH.'));
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (backend === 'copilot') {
+    const ghResult = spawnSync('command', ['-v', 'gh'], { shell: true, stdio: 'ignore' });
+    if (ghResult.status !== 0) {
+      console.error(chalk.red('Error: gh CLI is not installed or not in PATH.'));
+      process.exit(1);
+    }
+
+    const copilotResult = spawnSync('gh', ['copilot', '--', '--version'], {
+      stdio: 'ignore',
+    });
+    if (copilotResult.status !== 0) {
+      console.error(chalk.red('Error: GitHub Copilot CLI is not available.'));
+      process.exit(1);
+    }
+    return;
+  }
+
+  const codexResult = spawnSync('command', ['-v', 'codex'], { shell: true, stdio: 'ignore' });
+  if (codexResult.status !== 0) {
+    console.error(chalk.red('Error: codex CLI is not installed or not in PATH.'));
+    process.exit(1);
+  }
+}
+
+function getCurrentBranch(): string | null {
+  const result = spawnSync('git', ['branch', '--show-current'], {
+    encoding: 'utf-8',
+  });
+
+  if (result.status !== 0) {
+    return null;
+  }
+
+  const stdout = typeof result.stdout === 'string' ? result.stdout.trim() : '';
+  return stdout === '' ? null : stdout;
+}
+
+function mapModelForBackend(backend: SupportedBackend, model: string): string {
+  switch (`${backend}:${model}`) {
+    case 'copilot:haiku':
+      return 'claude-haiku-4.5';
+    case 'copilot:sonnet':
+      return 'claude-sonnet-4.6';
+    case 'copilot:opus':
+      return 'claude-opus-4.6';
+    case 'codex:haiku':
+      return 'gpt-5-mini';
+    case 'codex:sonnet':
+      return 'gpt-5.3-codex';
+    case 'codex:opus':
+      return 'gpt-5.4';
+    default:
+      return model;
+  }
+}
+
+export function buildTaskPlanningPrompt(task: string, cwd: string, branch: string): string {
+  return [
+    'You are a senior engineering planning partner for Ralph Teams.',
+    'This is an ad hoc task planning session, not a PRD/epic workflow.',
+    '',
+    `Task: ${task}`,
+    `Repository root: ${cwd}`,
+    `Current branch: ${branch}`,
+    '',
+    'Your job is to help the user plan the task before implementation.',
+    'Start by clarifying scope, constraints, affected areas, verification strategy, and any risks.',
+    'Do not implement code in this session.',
+    'Do not ask the user to create files manually.',
+    'Keep the discussion grounded in the current repository and branch.',
+    'End with a concise implementation plan once the user signals they are ready.',
+  ].join('\n');
+}
+
+export function buildTaskExecutionPrompt(task: string, cwd: string, branch: string): string {
+  return [
+    'You are the Team Lead for an ad hoc Ralph Teams task.',
+    'This is not a PRD/epic run. Treat the task below as the whole assignment.',
+    '',
+    `Task: ${task}`,
+    `Working directory: ${cwd}`,
+    `Current branch: ${branch}`,
+    '',
+    'Rules:',
+    '- Work in the current repository and stay on the current branch.',
+    '- Do not create or switch branches unless the user explicitly asks.',
+    '- You may use planner, builder, and validator teammates when helpful.',
+    '- If the runtime supports teammate model choice, respect explicit config overrides first; otherwise choose cheaper models for easy work and stronger models for difficult work.',
+    '- If the runtime is Codex, use these named teammate roles when spawning: planner_easy/planner_medium/planner_difficult, builder_easy/builder_medium/builder_difficult, validator_easy/validator_medium/validator_difficult.',
+    '- You may skip planning for very simple tasks, but plan internally or via a planner teammate when the task has ambiguity or design risk.',
+    '- Validate the final result appropriately before finishing.',
+    '- At the end, print a concise summary of what changed and any verification performed, then exit.',
+    '',
+    'Execute the task now.',
+  ].join('\n');
+}
+
+async function askShouldPlan(): Promise<boolean> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  try {
+    const answer = await rl.question('Plan this task first? [y/N]: ');
+    const normalized = answer.trim().toLowerCase();
+    return normalized === 'y' || normalized === 'yes';
+  } finally {
+    rl.close();
+  }
+}
+
+function buildSpawnEnv(
+  backend: SupportedBackend,
+  projectRoot: string,
+  config: ReturnType<typeof mergeCliOverrides>,
+  explicitAgentOverrides: Partial<Record<'teamLead' | 'planner' | 'builder' | 'validator' | 'merger', string>>,
+): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    RALPH_BACKEND: backend,
+    RALPH_MODEL_TEAM_LEAD: mapModelForBackend(backend, config.agents.teamLead),
+    RALPH_MODEL_PLANNER: mapModelForBackend(backend, config.agents.planner),
+    RALPH_MODEL_BUILDER: mapModelForBackend(backend, config.agents.builder),
+    RALPH_MODEL_VALIDATOR: mapModelForBackend(backend, config.agents.validator),
+    RALPH_MODEL_MERGER: mapModelForBackend(backend, config.agents.merger),
+    RALPH_MODEL_TEAM_LEAD_EXPLICIT: explicitAgentOverrides.teamLead !== undefined ? '1' : '0',
+    RALPH_MODEL_PLANNER_EXPLICIT: explicitAgentOverrides.planner !== undefined ? '1' : '0',
+    RALPH_MODEL_BUILDER_EXPLICIT: explicitAgentOverrides.builder !== undefined ? '1' : '0',
+    RALPH_MODEL_VALIDATOR_EXPLICIT: explicitAgentOverrides.validator !== undefined ? '1' : '0',
+    RALPH_MODEL_MERGER_EXPLICIT: explicitAgentOverrides.merger !== undefined ? '1' : '0',
+    RALPH_TASK_PROJECT_ROOT: projectRoot,
+  };
+}
+
+function runSpawnedProcess(command: string, args: string[], env: NodeJS.ProcessEnv): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: 'inherit',
+      env,
+    });
+
+    child.on('close', (code: number | null) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`${command} exited with code ${code}`));
+    });
+
+    child.on('error', reject);
+  });
+}
+
+async function runPlanningSession(prompt: string, backend: SupportedBackend, env: NodeJS.ProcessEnv): Promise<void> {
+  const spawner: AgentSpawner = createDefaultSpawner(backend);
+  const originalEnv = process.env;
+  Object.assign(process.env, env);
+  try {
+    await spawner(prompt);
+  } finally {
+    process.env = originalEnv;
+  }
+}
+
+async function runExecutionSession(prompt: string, backend: SupportedBackend, env: NodeJS.ProcessEnv): Promise<void> {
+  const cwd = env.RALPH_TASK_PROJECT_ROOT ?? process.cwd();
+
+  if (backend === 'claude') {
+    await runSpawnedProcess('claude', ['--dangerously-skip-permissions', prompt], env);
+    return;
+  }
+
+  if (backend === 'copilot') {
+    await runSpawnedProcess('gh', ['copilot', '--', '--allow-all', '--no-ask-user', '-p', prompt], env);
+    return;
+  }
+
+  await runSpawnedProcess('codex', [
+    '-a', 'never',
+    'exec',
+    '-C', cwd,
+    '-m', env.RALPH_MODEL_TEAM_LEAD ?? 'gpt-5.3-codex',
+    '-s', 'workspace-write',
+    '--skip-git-repo-check',
+    '--color', 'never',
+    '--enable', 'multi_agent',
+    prompt,
+  ], env);
+}
+
+export async function taskCommand(
+  task: string,
+  options: TaskOptions = {},
+  deps: TaskDeps = defaultDeps,
+): Promise<void> {
+  const cwd = deps.cwd();
+  const configLoader = deps.loadConfig ?? loadConfig;
+  const explicitOverridesLoader = deps.loadExplicitAgentModelOverrides ?? loadExplicitAgentModelOverrides;
+
+  let config;
+  let explicitAgentOverrides;
+  try {
+    config = mergeCliOverrides(configLoader(cwd), {
+      ...(options.backend !== undefined ? { backend: options.backend } : {}),
+    });
+    explicitAgentOverrides = explicitOverridesLoader(cwd);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(chalk.red(`Error: ${msg}`));
+    deps.exit(1);
+  }
+
+  const backend = config.execution.backend as SupportedBackend;
+  const branchGetter = deps.getCurrentBranch ?? getCurrentBranch;
+  const branch = branchGetter();
+  if (!branch) {
+    console.error(chalk.red('Error: ralph-teams task must be run inside a git repository on a checked out branch.'));
+    deps.exit(1);
+  }
+
+  const ensureBackend = deps.ensureBackendAvailable ?? ensureBackendAvailable;
+  ensureBackend(backend);
+
+  console.log(chalk.bold('\nralph-teams task\n'));
+  console.log(chalk.dim(`Task: ${task}`));
+  console.log(chalk.dim(`Working directory: ${cwd}`));
+  console.log(chalk.dim(`Current branch: ${branch}`));
+  console.log(chalk.dim(`Using backend: ${backend}\n`));
+
+  const shouldPlan = await (deps.askShouldPlan ?? askShouldPlan)();
+  const env = buildSpawnEnv(backend, cwd, config!, explicitAgentOverrides ?? {});
+
+  try {
+    if (shouldPlan) {
+      const planningPrompt = buildTaskPlanningPrompt(task, cwd, branch);
+      const runner = deps.runPlanningSession ?? runPlanningSession;
+      await runner(planningPrompt, backend, env);
+    } else {
+      const executionPrompt = buildTaskExecutionPrompt(task, cwd, branch);
+      const runner = deps.runExecutionSession ?? runExecutionSession;
+      await runner(executionPrompt, backend, env);
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(chalk.red(`Error: ${msg}`));
+    deps.exit(1);
+  }
+}

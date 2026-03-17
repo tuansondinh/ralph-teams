@@ -7,14 +7,12 @@ import { initCommand } from './commands/init';
 import { runCommand } from './commands/run';
 import { logsCommand } from './commands/logs';
 import { resetCommand } from './commands/reset';
-import { addEpicCommand } from './commands/add-epic';
 import { validateCommand } from './commands/validate';
 import { summaryCommand } from './commands/summary';
 import { resumeCommand } from './commands/resume';
-import { updateStatsCommand } from './commands/update-stats';
-import { statsCommand } from './commands/stats';
 import { discussCommand } from './commands/discuss';
 import { planCommand } from './commands/plan';
+import { taskCommand } from './commands/task';
 
 const program = new Command();
 
@@ -43,8 +41,7 @@ program
   .description('Run ralph.sh with the given prd.json')
   .option('--backend <backend>', 'AI backend to use (claude, copilot, or codex)', 'claude')
   .option('--parallel <n>', 'Max epics to run in parallel per wave (default: sequential)')
-  .option('--dashboard', 'Enable TUI dashboard')
-  .action(async (prdPath: string = './prd.json', options: { backend?: string; parallel?: string; dashboard?: boolean }) => {
+  .action(async (prdPath: string = './prd.json', options: { backend?: string; parallel?: string }) => {
     await runCommand(prdPath, options);
   });
 
@@ -61,13 +58,6 @@ program
   .description('Reset an epic status back to pending')
   .action((epicId: string, prdPath: string = './prd.json') => {
     resetCommand(epicId, prdPath);
-  });
-
-program
-  .command('add-epic [path]')
-  .description('Interactively add a new epic to prd.json')
-  .action(async (prdPath: string = './prd.json') => {
-    await addEpicCommand(prdPath);
   });
 
 program
@@ -101,40 +91,17 @@ program
   });
 
 program
+  .command('task <prompt>')
+  .description('Run an ad hoc task on the current branch with the Ralph team')
+  .option('--backend <backend>', 'AI backend to use (claude, copilot, or codex)')
+  .action(async (prompt: string, options: { backend?: string }) => {
+    await taskCommand(prompt, options);
+  });
+
+program
   .command('resume')
   .description('Resume an interrupted run from saved state')
   .option('--backend <backend>', 'Override the backend from saved state (claude | copilot | codex)')
   .action((opts: { backend?: string }) => resumeCommand(undefined, opts.backend));
-
-program
-  .command('update-stats')
-  .description('Update run stats after a story completes')
-  .requiredOption('--epic-id <id>', 'Epic ID')
-  .requiredOption('--story-id <id>', 'Story ID')
-  .requiredOption('--log-file <path>', 'Path to the epic log file')
-  .requiredOption('--passed <bool>', 'Whether the story passed (true or false)')
-  .option('--backend <backend>', 'Backend used', 'claude')
-  .option('--started-at <iso>', 'ISO 8601 start timestamp')
-  .option('--completed-at <iso>', 'ISO 8601 completion timestamp')
-  .option('--stories-total <n>', 'Total number of stories across all epics in this run')
-  .action((options: {
-    epicId: string;
-    storyId: string;
-    logFile: string;
-    passed: string;
-    backend: string;
-    startedAt?: string;
-    completedAt?: string;
-    storiesTotal?: string;
-  }) => {
-    updateStatsCommand(options);
-  });
-
-program
-  .command('stats [path]')
-  .description('Show cost, token, and time stats from the current run')
-  .action((statsPath: string = './ralph-run-stats.json') => {
-    statsCommand(statsPath);
-  });
 
 program.parse(process.argv);

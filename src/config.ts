@@ -42,6 +42,8 @@ export interface RalphConfig {
   };
 }
 
+export type AgentModelField = keyof RalphConfig['agents'];
+
 const VALID_MODELS = ['opus', 'sonnet', 'haiku'] as const;
 
 /** Default configuration values used when no ralph.config.yml is present. */
@@ -264,4 +266,42 @@ export function mergeCliOverrides(
     agents: { ...config.agents },
     pricing: { ...config.pricing },
   };
+}
+
+export function loadExplicitAgentModelOverrides(projectRoot: string): Partial<Record<AgentModelField, string>> {
+  const configPath = path.join(projectRoot, 'ralph.config.yml');
+
+  if (!fs.existsSync(configPath)) {
+    return {};
+  }
+
+  let raw: unknown;
+  try {
+    raw = yaml.load(fs.readFileSync(configPath, 'utf-8'));
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Invalid YAML in ralph.config.yml: ${msg}`);
+  }
+
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return {};
+  }
+
+  const agents = (raw as Record<string, unknown>)['agents'];
+  if (agents === null || typeof agents !== 'object' || Array.isArray(agents)) {
+    return {};
+  }
+
+  const explicit: Partial<Record<AgentModelField, string>> = {};
+  const agentObj = agents as Record<string, unknown>;
+  const fields: AgentModelField[] = ['teamLead', 'planner', 'builder', 'validator', 'merger'];
+
+  for (const field of fields) {
+    const value = agentObj[field];
+    if (typeof value === 'string') {
+      explicit[field] = value;
+    }
+  }
+
+  return explicit;
 }

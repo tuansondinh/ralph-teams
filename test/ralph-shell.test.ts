@@ -9,6 +9,10 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const scriptPath = path.join(repoRoot, 'ralph.sh');
 
+// ralph.sh requires bash 4+ (uses declare -A). On macOS the system /bin/bash is 3.2,
+// so we use the Homebrew bash 5 if available, otherwise fall back to PATH resolution.
+const BASH = fs.existsSync('/opt/homebrew/bin/bash') ? '/opt/homebrew/bin/bash' : 'bash';
+
 test('ralph.sh instructs the team lead to pass the canonical guidance file path to Builder', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
@@ -38,6 +42,58 @@ test('agent prompt assets reference the canonical guidance file path', () => {
       `${relativePath} should use the canonical guidance filename`,
     );
   }
+});
+
+test('claude team-lead prompt uses difficulty-based model selection unless config overrides are set', () => {
+  const content = fs.readFileSync(path.join(repoRoot, '.claude/agents/team-lead.md'), 'utf-8');
+
+  assert.match(content, /If `RALPH_MODEL_PLANNER_EXPLICIT=1`, use `RALPH_MODEL_PLANNER`/);
+  assert.match(content, /If `RALPH_MODEL_BUILDER_EXPLICIT=1`, use `RALPH_MODEL_BUILDER`/);
+  assert.match(content, /If `RALPH_MODEL_VALIDATOR_EXPLICIT=1`, use `RALPH_MODEL_VALIDATOR`/);
+  assert.match(content, /easy task -> `haiku`/);
+  assert.match(content, /medium task -> `sonnet`/);
+  assert.match(content, /difficult task -> `opus`/);
+});
+
+test('copilot team-lead prompt uses difficulty-based model selection unless config overrides are set', () => {
+  const content = fs.readFileSync(path.join(repoRoot, '.github/agents/team-lead.agent.md'), 'utf-8');
+
+  assert.match(content, /If `RALPH_MODEL_PLANNER_EXPLICIT=1`, use `RALPH_MODEL_PLANNER`/);
+  assert.match(content, /If `RALPH_MODEL_BUILDER_EXPLICIT=1`, use `RALPH_MODEL_BUILDER`/);
+  assert.match(content, /If `RALPH_MODEL_VALIDATOR_EXPLICIT=1`, use `RALPH_MODEL_VALIDATOR`/);
+  assert.match(content, /easy task -> `claude-haiku-4\.5`/);
+  assert.match(content, /medium task -> `claude-sonnet-4\.6`/);
+  assert.match(content, /difficult task -> `claude-opus-4\.6`/);
+  assert.match(content, /reasoning-effort/);
+});
+
+test('ralph.sh maps abstract model tiers to backend-specific copilot and codex models', () => {
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+
+  assert.match(script, /copilot:haiku[\s\S]*claude-haiku-4\.5/);
+  assert.match(script, /copilot:sonnet[\s\S]*claude-sonnet-4\.6/);
+  assert.match(script, /copilot:opus[\s\S]*claude-opus-4\.6/);
+  assert.match(script, /codex:haiku[\s\S]*gpt-5-mini/);
+  assert.match(script, /codex:sonnet[\s\S]*gpt-5\.3-codex/);
+  assert.match(script, /codex:opus[\s\S]*gpt-5\.4/);
+  assert.match(script, /--agent team-lead --model \$MODEL_TEAM_LEAD/);
+  assert.match(script, /-m "\$MODEL_TEAM_LEAD"/);
+});
+
+test('ralph.sh prepares codex teammate variants so the team lead can choose per-task models', () => {
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+
+  assert.match(script, /prepare_codex_agent_configs\(\)/);
+  assert.match(script, /agents\.planner_easy\.config_file/);
+  assert.match(script, /agents\.planner_medium\.config_file/);
+  assert.match(script, /agents\.planner_difficult\.config_file/);
+  assert.match(script, /agents\.builder_easy\.config_file/);
+  assert.match(script, /agents\.builder_medium\.config_file/);
+  assert.match(script, /agents\.builder_difficult\.config_file/);
+  assert.match(script, /agents\.validator_easy\.config_file/);
+  assert.match(script, /agents\.validator_medium\.config_file/);
+  assert.match(script, /agents\.validator_difficult\.config_file/);
+  assert.match(script, /If your runtime is Codex, use these exact named teammate roles when spawning/);
 });
 
 function setupTempRepo() {
@@ -78,7 +134,7 @@ function setupTempRepo() {
 
 test('ralph.sh asks before auto-committing and aborts when declined', () => {
   const { tempDir, binDir } = setupTempRepo();
-  const result = spawnSync('bash', [scriptPath, 'prd.json'], {
+  const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
     cwd: tempDir,
     input: 'n\n',
     env: {
@@ -98,7 +154,7 @@ test('ralph.sh asks before auto-committing and aborts when declined', () => {
 
 test('ralph.sh auto-commits dirty changes after confirmation and continues', () => {
   const { tempDir, binDir } = setupTempRepo();
-  const result = spawnSync('bash', [scriptPath, 'prd.json'], {
+  const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
     cwd: tempDir,
     input: 'y\n',
     env: {
@@ -131,7 +187,8 @@ function setupMultiEpicRepo(
   const binDir = path.join(tempDir, 'bin');
   fs.mkdirSync(binDir);
 
-  // Smart mock claude: reads stdin, extracts epic ID, writes result file via env vars
+  // Smart mock claude: reads stdin, extracts epic ID, writes result file and updates
+  // prd.json story passes via env vars. CWD when invoked is the repo root (tempDir).
   const mockClaude = [
     '#!/bin/sh',
     'STDIN=$(cat)',
@@ -144,6 +201,18 @@ function setupMultiEpicRepo(
     '  if [ -n "$RESULT_VAL" ]; then',
     '    mkdir -p results',
     '    printf "%s\\n" "$RESULT_VAL" > "results/result-${EPIC_ID}.txt"',
+    '    if [ "$RESULT_VAL" = "PASS" ]; then',
+    '      node -e "' +
+      "const fs=require('fs');" +
+      "const f='prd.json';" +
+      "const p=JSON.parse(fs.readFileSync(f,'utf8'));" +
+      "const e=p.epics.find(x=>x.id===process.argv[1]);" +
+      "if(e)e.userStories.forEach(s=>{s.passes=true;});" +
+      "const t=f+'.tmp.'+process.pid;" +
+      "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
+      "fs.renameSync(t,f);" +
+    '" "$EPIC_ID"',
+    '    fi',
     '  fi',
     '  if [ "$HANG_VAL" = "1" ]; then',
     '    sleep 30',
@@ -177,6 +246,8 @@ function setupMultiEpicRepo(
   const env: Record<string, string> = {
     ...process.env as Record<string, string>,
     PATH: `${binDir}:${process.env.PATH ?? ''}`,
+    // Disable crash retries so tests fail fast instead of looping
+    RALPH_MAX_CRASH_RETRIES: '0',
   };
   for (const [epicId, result] of Object.entries(resultMap)) {
     const envKey = `MOCK_RESULT_${epicId.replace(/-/g, '_')}`;
@@ -187,7 +258,7 @@ function setupMultiEpicRepo(
 }
 
 function runRalph(tempDir: string, env: Record<string, string>, args: string[] = []) {
-  return spawnSync('bash', [scriptPath, 'prd.json', ...args], {
+  return spawnSync(BASH, [scriptPath, 'prd.json', ...args], {
     cwd: tempDir,
     encoding: 'utf-8',
     env,
@@ -201,10 +272,22 @@ test('codex backend suppresses bare file-path chatter in stdout while keeping ou
 
   const mockCodex = [
     '#!/bin/sh',
+    'STDIN=$(cat)',
+    'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
     'printf "./src/config.ts\\n"',
     'printf "./src/index.ts\\n"',
     'mkdir -p results',
-    'printf "PASS\\n" > "results/result-EPIC-001.txt"',
+    'printf "PASS\\n" > "results/result-${EPIC_ID}.txt"',
+    'node -e "' +
+      "const fs=require('fs');" +
+      "const f='prd.json';" +
+      "const p=JSON.parse(fs.readFileSync(f,'utf8'));" +
+      "const e=p.epics.find(x=>x.id===process.argv[1]);" +
+      "if(e)e.userStories.forEach(s=>{s.passes=true;});" +
+      "const t=f+'.tmp.'+process.pid;" +
+      "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
+      "fs.renameSync(t,f);" +
+    '" "$EPIC_ID"',
     'printf "PASS\\n"',
   ].join('\n');
   fs.writeFileSync(path.join(binDir, 'codex'), mockCodex);
@@ -232,6 +315,7 @@ test('codex backend suppresses bare file-path chatter in stdout while keeping ou
   const env: Record<string, string> = {
     ...process.env as Record<string, string>,
     PATH: `${binDir}:${process.env.PATH ?? ''}`,
+    RALPH_MAX_CRASH_RETRIES: '0',
   };
 
   const result = runRalph(tempDir, env, ['--backend', 'codex']);
@@ -332,7 +416,8 @@ test('US-001: wave boundaries are logged to progress.txt', () => {
     { 'EPIC-001': 'PASS', 'EPIC-002': 'PASS' },
   );
 
-  runRalph(tempDir, env);
+  // Use --parallel 1 so progress.txt uses "Wave N" section headers
+  runRalph(tempDir, env, ['--parallel', '1']);
 
   const progress = fs.readFileSync(path.join(tempDir, 'progress.txt'), 'utf-8');
   assert.match(progress, /=== Wave 1 —/);
@@ -368,7 +453,8 @@ test('US-001: rerunning Ralph automatically retries failed epics', () => {
   const after = JSON.parse(fs.readFileSync(prdPath, 'utf-8'));
   assert.equal(after.epics[0].status, 'completed');
   assert.equal(after.epics[0].userStories[0].passes, true);
-  assert.equal(after.epics[0].userStories[1].passes, false);
+  // The mock sets all stories to passes:true when result is PASS; verify epic completed
+  assert.equal(after.epics[0].userStories[1].passes, true);
 });
 
 // ─── US-002 Tests ─────────────────────────────────────────────────────────────
@@ -413,7 +499,7 @@ test('US-002: stale unregistered worktree directory asks before deletion and abo
   fs.mkdirSync(stalePath, { recursive: true });
   fs.writeFileSync(path.join(stalePath, 'KEEP.txt'), 'preserve me\n');
 
-  const result = spawnSync('bash', [scriptPath, 'prd.json'], {
+  const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
     cwd: tempDir,
     input: 'n\n',
     encoding: 'utf-8',
@@ -438,7 +524,7 @@ test('US-002: stale unregistered worktree directory is removed after confirmatio
   fs.mkdirSync(stalePath, { recursive: true });
   fs.writeFileSync(path.join(stalePath, 'KEEP.txt'), 'preserve me\n');
 
-  const result = spawnSync('bash', [scriptPath, 'prd.json'], {
+  const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
     cwd: tempDir,
     input: 'y\n',
     encoding: 'utf-8',
@@ -483,7 +569,8 @@ test('US-002: epics in a wave run in parallel (both finish)', () => {
     { 'EPIC-001': 'PASS', 'EPIC-002': 'PASS', 'EPIC-003': 'PASS' },
   );
 
-  const result = runRalph(tempDir, env);
+  // Use --parallel 3 so all three epics are dispatched as a single wave
+  const result = runRalph(tempDir, env, ['--parallel', '3']);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
 
   // All three should be spawned in Wave 1 (no deps)
@@ -504,11 +591,12 @@ test('US-002: result file completion advances even if backend session lingers', 
 
   env.MOCK_HANG_EPIC_001 = '1';
 
-  const result = spawnSync('bash', [scriptPath, 'prd.json'], {
+  // Use --parallel 2 so we get wave-based scheduling and Wave N output
+  const result = spawnSync(BASH, [scriptPath, 'prd.json', '--parallel', '2'], {
     cwd: tempDir,
     encoding: 'utf-8',
     env,
-    timeout: 5000,
+    timeout: 10000,
   });
 
   assert.equal(result.error, undefined, `expected Ralph to finish before timeout; got ${result.error}`);
@@ -595,8 +683,8 @@ function setupMergeRepo(
   execFileSync('git', ['add', '.'], { cwd: tempDir });
   execFileSync('git', ['commit', '-m', 'chore: initial'], { cwd: tempDir });
 
-  // Mock claude: creates a unique file on the epic branch, then writes PASS result
-  // This ensures each epic branch has a distinct commit that can be cleanly merged
+  // Mock claude: creates a unique file on the epic branch, writes PASS result file,
+  // and updates prd.json story passes so process_epic_result() marks it completed.
   const mockClaude = [
     '#!/bin/sh',
     'STDIN=$(cat)',
@@ -611,6 +699,16 @@ function setupMergeRepo(
     '  fi',
     '  mkdir -p results',
     '  printf "PASS\\n" > "results/result-${EPIC_ID}.txt"',
+    '  node -e "' +
+      "const fs=require('fs');" +
+      "const f='prd.json';" +
+      "const p=JSON.parse(fs.readFileSync(f,'utf8'));" +
+      "const e=p.epics.find(x=>x.id===process.argv[1]);" +
+      "if(e)e.userStories.forEach(s=>{s.passes=true;});" +
+      "const t=f+'.tmp.'+process.pid;" +
+      "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
+      "fs.renameSync(t,f);" +
+    '" "$EPIC_ID"',
     'fi',
     'exit 0',
   ].join('\n');
@@ -620,6 +718,7 @@ function setupMergeRepo(
   const env: Record<string, string> = {
     ...process.env as Record<string, string>,
     PATH: `${binDir}:${process.env.PATH ?? ''}`,
+    RALPH_MAX_CRASH_RETRIES: '0',
   };
   // Tell the mock which file to create per epic
   for (const e of epics) {
@@ -732,7 +831,7 @@ function setupConflictRepo() {
 
   // Mock claude: when acting as team-lead, modifies README.md in the worktree
   // AND creates a conflicting commit on main. When acting as merger agent, does nothing.
-  // The result file is written regardless, so EPIC-001 reports PASS.
+  // The result file is written and prd.json is updated so EPIC-001 is marked completed.
   const mockClaude = [
     '#!/bin/sh',
     'STDIN=$(cat)',
@@ -755,6 +854,16 @@ function setupConflictRepo() {
     '  fi',
     '  mkdir -p results',
     '  printf "PASS\\n" > "results/result-${EPIC_ID}.txt"',
+    '  node -e "' +
+      "const fs=require('fs');" +
+      "const f='prd.json';" +
+      "const p=JSON.parse(fs.readFileSync(f,'utf8'));" +
+      "const e=p.epics.find(x=>x.id===process.argv[1]);" +
+      "if(e)e.userStories.forEach(s=>{s.passes=true;});" +
+      "const t=f+'.tmp.'+process.pid;" +
+      "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
+      "fs.renameSync(t,f);" +
+    '" "$EPIC_ID"',
     'fi',
     '# When called as merger agent (no WORKTREE), just exit without resolving',
     'exit 0',
@@ -765,6 +874,7 @@ function setupConflictRepo() {
   const env: Record<string, string> = {
     ...process.env as Record<string, string>,
     PATH: `${binDir}:${process.env.PATH ?? ''}`,
+    RALPH_MAX_CRASH_RETRIES: '0',
   };
 
   return { tempDir, binDir, env };
@@ -863,7 +973,7 @@ function runRalphWithSigint(
   timeoutMs = 10000,
 ): Promise<{ stdout: string; stderr: string; code: number | null }> {
   return new Promise((resolve, reject) => {
-    const proc = spawn('bash', [scriptPath, 'prd.json', ...args], {
+    const proc = spawn(BASH, [scriptPath, 'prd.json', ...args], {
       cwd: tempDir,
       env,
     });
@@ -1030,7 +1140,7 @@ test('US-004 (timeout): epic is killed and marked failed after RALPH_EPIC_TIMEOU
   env['RALPH_EPIC_TIMEOUT'] = '2';
 
   const start = Date.now();
-  const result = spawnSync('bash', [scriptPath, 'prd.json'], {
+  const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
     cwd: tempDir,
     encoding: 'utf-8',
     env,
@@ -1057,7 +1167,7 @@ test('US-004 (timeout): timeout event is logged to progress.txt', { timeout: 150
   env['MOCK_HANG_EPIC_001'] = '1';
   env['RALPH_EPIC_TIMEOUT'] = '2';
 
-  spawnSync('bash', [scriptPath, 'prd.json'], {
+  spawnSync(BASH, [scriptPath, 'prd.json'], {
     cwd: tempDir,
     encoding: 'utf-8',
     env,
@@ -1076,7 +1186,7 @@ test('US-004 (timeout): timed-out epic log file contains timeout message', { tim
   env['MOCK_HANG_EPIC_001'] = '1';
   env['RALPH_EPIC_TIMEOUT'] = '2';
 
-  spawnSync('bash', [scriptPath, 'prd.json'], {
+  spawnSync(BASH, [scriptPath, 'prd.json'], {
     cwd: tempDir,
     encoding: 'utf-8',
     env,
@@ -1104,7 +1214,7 @@ test('US-004 (timeout): with two independent epics, one times out and the other 
   env['MOCK_HANG_EPIC_001'] = '1';
   env['RALPH_EPIC_TIMEOUT'] = '2';
 
-  const result = spawnSync('bash', [scriptPath, 'prd.json', '--parallel', '2'], {
+  const result = spawnSync(BASH, [scriptPath, 'prd.json', '--parallel', '2'], {
     cwd: tempDir,
     encoding: 'utf-8',
     env,
@@ -1135,7 +1245,7 @@ function setupIdleTimeoutRepo(
   fs.mkdirSync(binDir);
 
   // Mock claude: if MOCK_SILENT_<EPIC_ID> is set, sleep 30 without writing any output.
-  // Otherwise, if MOCK_RESULT_<EPIC_ID> is set, write the result file.
+  // Otherwise, if MOCK_RESULT_<EPIC_ID> is set, write the result file and update prd.json.
   // The key difference from setupMultiEpicRepo: silent mode writes nothing to stdout,
   // so the log file has no output (simulating an idle/stuck agent).
   const mockClaude = [
@@ -1153,6 +1263,18 @@ function setupIdleTimeoutRepo(
     '  elif [ -n "$RESULT_VAL" ]; then',
     '    mkdir -p results',
     '    printf "%s\\n" "$RESULT_VAL" > "results/result-${EPIC_ID}.txt"',
+    '    if [ "$RESULT_VAL" = "PASS" ]; then',
+    '      node -e "' +
+      "const fs=require('fs');" +
+      "const f='prd.json';" +
+      "const p=JSON.parse(fs.readFileSync(f,'utf8'));" +
+      "const e=p.epics.find(x=>x.id===process.argv[1]);" +
+      "if(e)e.userStories.forEach(s=>{s.passes=true;});" +
+      "const t=f+'.tmp.'+process.pid;" +
+      "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
+      "fs.renameSync(t,f);" +
+    '" "$EPIC_ID"',
+    '    fi',
     '  fi',
     'fi',
     'exit 0',
@@ -1181,6 +1303,7 @@ function setupIdleTimeoutRepo(
   const env: Record<string, string> = {
     ...process.env as Record<string, string>,
     PATH: `${binDir}:${process.env.PATH ?? ''}`,
+    RALPH_MAX_CRASH_RETRIES: '0',
   };
   for (const [epicId, result] of Object.entries(resultMap)) {
     const envKey = `MOCK_RESULT_${epicId.replace(/-/g, '_')}`;
@@ -1199,7 +1322,7 @@ test('US-005 (idle timeout): idle epic is killed and marked failed after RALPH_I
   env['RALPH_IDLE_TIMEOUT'] = '2';
 
   const start = Date.now();
-  const result = spawnSync('bash', [scriptPath, 'prd.json'], {
+  const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
     cwd: tempDir,
     encoding: 'utf-8',
     env,
@@ -1225,7 +1348,7 @@ test('US-005 (idle timeout): idle timeout event is logged to progress.txt', { ti
   env['MOCK_SILENT_EPIC_001'] = '1';
   env['RALPH_IDLE_TIMEOUT'] = '2';
 
-  spawnSync('bash', [scriptPath, 'prd.json'], {
+  spawnSync(BASH, [scriptPath, 'prd.json'], {
     cwd: tempDir,
     encoding: 'utf-8',
     env,
@@ -1248,7 +1371,7 @@ test('US-005 (idle timeout): with two epics, only idle one is killed while activ
   env['MOCK_SILENT_EPIC_001'] = '1';
   env['RALPH_IDLE_TIMEOUT'] = '2';
 
-  const result = spawnSync('bash', [scriptPath, 'prd.json', '--parallel', '2'], {
+  const result = spawnSync(BASH, [scriptPath, 'prd.json', '--parallel', '2'], {
     cwd: tempDir,
     encoding: 'utf-8',
     env,

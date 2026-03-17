@@ -223,6 +223,7 @@ test('mergeCliOverrides with no overrides returns config unchanged', () => {
   const base: RalphConfig = {
     timeouts: { epicTimeout: 7200, idleTimeout: 600 },
     execution: { validatorMaxPushbacks: 2, parallel: 4, backend: 'copilot' },
+    agents: { teamLead: 'opus', planner: 'opus', builder: 'sonnet', validator: 'sonnet', merger: 'sonnet' },
     pricing: { inputTokenCostPer1k: 0.015, outputTokenCostPer1k: 0.075, cacheReadCostPer1k: 0.0015, cacheCreationCostPer1k: 0.01875 },
   };
 

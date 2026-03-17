@@ -7,22 +7,7 @@ deferred while the affected features were being disabled or reduced in scope.
 
 ## Deferred Items
 
-### 1. Dashboard mode is not production-ready
-
-Status:
-- Temporarily disabled in `ralph-teams run --dashboard`
-
-Reasons:
-- the dashboard path had backend-specific correctness issues
-- the wrapper can currently collapse signal exits into success on child close handling
-- the overall path needs another validation pass before being re-enabled
-
-Suggested follow-up:
-- audit the async child lifecycle in `src/commands/run.ts`
-- re-validate dashboard polling against all supported backends
-- run the failing shell integration scenarios before re-enabling
-
-### 2. Statistics model is misleading
+### 1. Statistics model is misleading
 
 Status:
 - temporarily disabled for both `stats` and `update-stats`
@@ -37,7 +22,7 @@ Suggested follow-up:
 - align `ralph.sh`, `update-stats`, and `run-stats` around one consistent unit
 - re-enable only after the telemetry contract is covered by tests
 
-### 3. Shell integration wave tests are failing
+### 2. Shell integration wave tests are failing
 
 Observed failing tests:
 - `US-001: two independent epics run in the same wave`

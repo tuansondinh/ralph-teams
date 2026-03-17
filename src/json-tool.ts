@@ -234,10 +234,6 @@ function cmdSet(args: string[]): void {
     process.exit(1);
   }
 
-  const obj = readJson(file);
-  const segments = parsePath(pathStr);
-
-  // Try to parse value as JSON, fall back to string
   let parsedValue: unknown;
   try {
     parsedValue = JSON.parse(rawValue);
@@ -245,8 +241,58 @@ function cmdSet(args: string[]): void {
     parsedValue = rawValue;
   }
 
-  const updated = setAtPath(obj, segments, parsedValue);
-  writeJson(file, updated);
+  const lockFile = file + '.lock';
+  const maxAttempts = 50;
+  const retryDelay = 100; // ms
+  let lockFd: number | undefined;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      lockFd = fs.openSync(lockFile, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY);
+      break;
+    } catch (e: unknown) {
+      if ((e as NodeJS.ErrnoException).code === 'EEXIST') {
+        // Check if lock is stale (older than 10 seconds)
+        try {
+          const stat = fs.statSync(lockFile);
+          if (Date.now() - stat.mtimeMs > 10000) {
+            fs.unlinkSync(lockFile);
+            continue;
+          }
+        } catch {
+          // Lock file disappeared — retry
+          continue;
+        }
+        // Busy-wait with jitter
+        const jitter = Math.floor(Math.random() * 50);
+        const start = Date.now();
+        while (Date.now() - start < retryDelay + jitter) {
+          // spin
+        }
+        continue;
+      }
+      throw e;
+    }
+  }
+
+  if (lockFd === undefined) {
+    process.stderr.write(`rjq set: could not acquire lock on ${file} after ${maxAttempts} attempts\n`);
+    process.exit(1);
+  }
+
+  try {
+    // Read-modify-write under lock
+    const obj = readJson(file);
+    const segments = parsePath(pathStr);
+    const updated = setAtPath(obj, segments, parsedValue);
+    // Write to temp file then rename for atomicity
+    const tmpFile = file + '.tmp.' + process.pid;
+    fs.writeFileSync(tmpFile, JSON.stringify(updated, null, 2) + '\n');
+    fs.renameSync(tmpFile, file);
+  } finally {
+    fs.closeSync(lockFd);
+    try { fs.unlinkSync(lockFile); } catch { /* ignore */ }
+  }
 }
 
 function cmdLength(args: string[]): void {
