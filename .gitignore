@@ -27,3 +27,4 @@ ralph-teams/state/
 
 # OS files
 .DS_Store
+.ralph-teams/

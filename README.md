@@ -55,7 +55,7 @@ The system has two layers:
   - `builder` makes changes and runs tests
   - `validator` verifies the result independently
 
-Across all backends, `builder` and `validator` are one-shot story-scoped workers. The Team Lead must spawn a fresh Builder for each story attempt, spawn a fresh Validator when verification needs an independent agent, and never treat idle/task-lifecycle output as completion. A build attempt only counts when the Builder returns a concrete commit SHA and the Team Lead persists the story result to `prd.json`.
+Across all backends, `builder` and `validator` are one-shot story-scoped workers. The Team Lead must spawn a fresh Builder for each story attempt, spawn a fresh Validator when verification needs an independent agent, and never treat idle/task-lifecycle output as completion. A build attempt only counts when the Builder returns a concrete commit SHA and the Team Lead persists the story result to the epic state file at `.ralph-teams/state/{epic-id}.json`.
 
 Default Team Lead policy by backend:
 - Claude: keep `team-lead` on `opus`; for spawned work use `haiku` for easy tasks, `sonnet` for medium tasks, `opus` for difficult tasks
@@ -74,7 +74,8 @@ Current backends:
 
 The runtime is file-based. During a run, Ralph treats these files as the working state of the system:
 
-- `prd.json`: source of truth for epic and story status
+- `prd.json`: source of truth for epic dependencies and status
+- `.ralph-teams/state/`: per-epic story pass/fail state files
 - `.ralph-teams/plans/`: implementation plans for epics that were explicitly planned
 - `.ralph-teams/progress.txt`: narrative progress log
 - `.ralph-teams/logs/`: raw backend logs
@@ -457,12 +458,13 @@ The `init` command uses `prd.json.example` as schema and style guidance when gen
 During a run, Ralph writes:
 
 - `.ralph-teams/progress.txt`: high-level run log
+- `.ralph-teams/state/EPIC-xxx.json`: per-epic story pass/fail state (Team Lead reads/writes)
 - `.ralph-teams/plans/plan-EPIC-xxx.md`: planner output for an epic
 - planned epics are expected to use these files as their implementation contract
 - `.ralph-teams/logs/epic-EPIC-xxx-<timestamp>.log`: raw backend session log
 - `.ralph-teams/ralph-state.json`: saved interrupt/resume state
 
-Ralph also updates the original `prd.json` in place as story and epic state changes.
+Ralph also updates the original `prd.json` in place as epic status changes.
 
 The team lead agent log for each epic is written to `.ralph-teams/logs/` regardless of backend.
 
@@ -485,8 +487,8 @@ The current execution contract is:
 - Builder and Validator are one-shot story-scoped workers, never long-lived mailboxes shared across stories
 - a Builder attempt only counts when the Team Lead receives a concrete commit SHA for that story attempt
 - the validator checks output independently from the builder's reasoning
-- `DONE: X/Y stories passed` is a required session footer, but the durable completion signal is the `prd.json` story state updated by the Team Lead
-- after updating `prd.json` for all attempted stories, the team lead must print `DONE: X/Y stories passed` and exit the session immediately
+- `DONE: X/Y stories passed` is a required session footer, but the durable completion signal is the epic state file updated by the Team Lead
+- after updating the epic state file for all attempted stories, the team lead must print `DONE: X/Y stories passed` and exit the session immediately
 - pressing `Ctrl-C` writes `.ralph-teams/ralph-state.json` so the run can be resumed later with `ralph-teams resume`
 
 ## Troubleshooting

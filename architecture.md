@@ -310,9 +310,11 @@ This makes failure modes inspectable after the fact because evidence is left on 
 
 ### Planning and retry guidance
 
-- `src/commands/plan.ts`
-- `src/discuss.ts`
-- `src/guidance.ts`
+- `src/commands/plan.ts` — interactive planning sessions
+- `src/discuss.ts` — internal module for discuss sessions (used by plan command)
+- `src/guidance.ts` — persisted guidance file helpers
+
+- `src/runtime-paths.ts` — runtime directory constants
 
 ### Backend role definitions
 
