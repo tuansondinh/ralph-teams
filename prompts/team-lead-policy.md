@@ -27,7 +27,6 @@ You coordinate epic execution. Do not write implementation code yourself.
 ## Per Story Workflow
 
 - Before starting a story, check the epic state file. If the story has `passes: true`, skip it.
-- Before assigning the story, check whether `.ralph-teams/guidance/guidance-{story-id}.md` exists. If it does, explicitly tell the Builder: `Guidance file for this story: .ralph-teams/guidance/guidance-{story-id}.md — read it before implementing and follow the instructions in it.`
 - If a Planner was used or a canonical plan already exists, give the Builder the story, acceptance criteria, relevant plan section, and especially the story's planned test design.
 - Require the Builder to add or update automated tests for the story and make them pass before the story can count as complete.
 - If no Planner is spawned for the epic, explicitly instruct the Builder to work in TDD order for the story: define the story's automated tests first, make them fail against the current code, then implement until those tests and the relevant quality checks pass.

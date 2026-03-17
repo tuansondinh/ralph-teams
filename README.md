@@ -26,14 +26,25 @@ ralph-teams plan
 ```mermaid
 flowchart TB
     A[User runs Ralph] --> B[Validate PRD and tools]
-    B --> C[Pick next ready epic]
-    C --> D[Spawns Team Lead for that epic]
-    D --> E[Spawns Epic Planner, if necessary]
-    E --> F[Spawns Builder and Validator, if necessary]
-    F --> G[Update PRD and progress]
-    G --> H{More ready epics?}
-    H -->|Yes| C
-    H -->|No| I[Finish run]
+    B --> C[Create loop branch]
+    C --> D[Pick next ready epic]
+    D --> E[Create epic worktree & branch]
+    E --> F[Start one agent team for that epic]
+    F --> G[Plan if needed]
+    G --> H[Build and validate each story]
+    H --> I{Story result?}
+    I -->|Pass| J[Update PRD state]
+    I -->|Fail| K[Log failure, continue]
+    J --> L{More stories in epic?}
+    L -->|Yes| H
+    L -->|No| M[Merge epic branch back to loop]
+    M --> N{Merge conflict?}
+    N -->|Yes| O[Spawn merger agent to resolve]
+    N -->|No| P[Epic complete]
+    O --> P
+    P --> Q{More ready epics?}
+    Q -->|Yes| D
+    Q -->|No| R[Finish run]
 ```
 
 ## What It Does
@@ -47,11 +58,11 @@ The system has two layers:
   - `builder` makes changes and runs tests
   - `validator` verifies the result independently, pushes backes (by default: 1 pushback max )
 
-Across all backends, `builder` and `validator` are one-shot story-scoped workers. The Team Lead must spawn a fresh Builder for each story attempt, spawn a fresh Validator when verification needs an independent agent, and never treat idle/task-lifecycle output as completion. A build attempt only counts when the Builder returns a concrete commit SHA and the Team Lead persists the story result to `prd.json`.
+Across all backends, `builder` and `validator` are one-shot story-scoped workers. The Team Lead must spawn a fresh Builder for each story attempt, spawn a fresh Validator when verification needs an independent agent, and never treat idle/task-lifecycle output as completion. A build attempt only counts when the Builder returns a concrete commit SHA and the Team Lead persists the story result to the epic state file at `.ralph-teams/state/{epic-id}.json`.
 
 Default Team Lead policy by backend:
 - Claude: keep `team-lead` on `opus`; for spawned work use `haiku` for easy tasks, `sonnet` for medium tasks, `opus` for difficult tasks
-- Copilot: resolve those same tiers to `claude-haiku-4.5`, `claude-sonnet-4.6`, and `claude-opus-4.6`
+- Copilot: resolve those same tiers to `gpt-5-mini`, `gpt-5.3-codex`, and `gpt-5.4`
 - Codex: resolve those same tiers to `gpt-5-mini`, `gpt-5.3-codex`, and `gpt-5.4`
 
 If `ralph.config.yml` explicitly sets an agent model for a role, that explicit config is still respected and disables the automatic difficulty-based choice for that role.
@@ -66,7 +77,8 @@ Current backends:
 
 The runtime is file-based. During a run, Ralph treats these files as the working state of the system:
 
-- `prd.json`: source of truth for epic and story status
+- `prd.json`: source of truth for epic dependencies and status
+- `.ralph-teams/state/`: per-epic story pass/fail state files
 - `.ralph-teams/plans/`: implementation plans for epics that were explicitly planned
 - `.ralph-teams/progress.txt`: narrative progress log
 - `.ralph-teams/logs/`: raw backend logs
@@ -159,7 +171,7 @@ Run `ralph.sh` directly when you want shell-level flags:
 
 ### `ralph-teams init`
 
-Creates a new `prd.json` interactively in the current directory by launching an AI PRD-creator session.
+Creates a new `prd.json` interactively in the current directory by launching an AI PRD-creator session. If `ralph.config.yml` does not already exist, `init` also creates it as a commented default template.
 
 ```bash
 ralph-teams init
@@ -174,12 +186,14 @@ Flow:
 2. the agent discusses the product with you directly
 3. the agent asks follow-up questions until the requirements are clear
 4. the agent generates the full `prd.json` with project metadata, epics, and user stories
-5. the agent writes `./prd.json`
-6. after writing the PRD, the init agent can either continue into implementation planning with you or stop there if you want to skip planning for now
+5. `init` bootstraps `./ralph.config.yml` with the default commented configuration if the file is missing
+6. the agent writes `./prd.json`
+7. after writing the PRD, the init agent can either continue into implementation planning with you or stop there if you want to skip planning for now
 
 Notes:
 
 - `init` is grounded by `prd.json.example`
+- `init` does not overwrite an existing `ralph.config.yml`
 - the agent generates epics and user stories automatically
 - the agent should aim for about 5 user stories per epic when the scope supports it
 - `--backend` controls whether the interview/generation uses `claude`, `copilot`, or `codex`
@@ -370,6 +384,7 @@ Notes:
 
 - Copilot live output is routed through a PTY wrapper in `ralph.sh`
 - without the PTY wrapper, `gh copilot` may not show incremental output in pipe mode
+- Copilot difficulty-based defaults now use GPT-family models: `gpt-5-mini`, `gpt-5.3-codex`, and `gpt-5.4`
 
 ### Codex Backend
 
@@ -448,12 +463,13 @@ The `init` command uses `prd.json.example` as schema and style guidance when gen
 During a run, Ralph writes:
 
 - `.ralph-teams/progress.txt`: high-level run log
+- `.ralph-teams/state/EPIC-xxx.json`: per-epic story pass/fail state (Team Lead reads/writes)
 - `.ralph-teams/plans/plan-EPIC-xxx.md`: planner output for an epic
 - planned epics are expected to use these files as their implementation contract
 - `.ralph-teams/logs/epic-EPIC-xxx-<timestamp>.log`: raw backend session log
 - `.ralph-teams/ralph-state.json`: saved interrupt/resume state
 
-Ralph also updates the original `prd.json` in place as story and epic state changes.
+Ralph also updates the original `prd.json` in place as epic status changes.
 
 The team lead agent log for each epic is written to `.ralph-teams/logs/` regardless of backend.
 
@@ -476,8 +492,8 @@ The current execution contract is:
 - Builder and Validator are one-shot story-scoped workers, never long-lived mailboxes shared across stories
 - a Builder attempt only counts when the Team Lead receives a concrete commit SHA for that story attempt
 - the validator checks output independently from the builder's reasoning
-- `DONE: X/Y stories passed` is a required session footer, but the durable completion signal is the `prd.json` story state updated by the Team Lead
-- after updating `prd.json` for all attempted stories, the team lead must print `DONE: X/Y stories passed` and exit the session immediately
+- `DONE: X/Y stories passed` is a required session footer, but the durable completion signal is the epic state file updated by the Team Lead
+- after updating the epic state file for all attempted stories, the team lead must print `DONE: X/Y stories passed` and exit the session immediately
 - pressing `Ctrl-C` writes `.ralph-teams/ralph-state.json` so the run can be resumed later with `ralph-teams resume`
 
 ## Troubleshooting

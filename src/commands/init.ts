@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawn, spawnSync } from 'child_process';
 import chalk from 'chalk';
+import { renderCommentedConfigTemplate } from '../config';
 
 interface InitOptions {
   backend?: string;
@@ -140,6 +141,16 @@ function ensureBackendAvailable(backend: string): void {
   process.exit(1);
 }
 
+export function ensureDefaultConfigFile(projectRoot: string): { configPath: string; created: boolean } {
+  const configPath = path.join(projectRoot, 'ralph.config.yml');
+  if (fs.existsSync(configPath)) {
+    return { configPath, created: false };
+  }
+
+  fs.writeFileSync(configPath, renderCommentedConfigTemplate(), 'utf-8');
+  return { configPath, created: true };
+}
+
 export async function initCommand(options: InitOptions = {}): Promise<void> {
   const backend = options.backend || 'claude';
   const examplePath = findPrdExample();
@@ -159,6 +170,12 @@ export async function initCommand(options: InitOptions = {}): Promise<void> {
   console.log(chalk.dim('The agent will discuss design decisions and dependencies before generating.\n'));
 
   ensureBackendAvailable(backend);
+  const { configPath, created } = ensureDefaultConfigFile(process.cwd());
+  if (created) {
+    console.log(chalk.dim(`Bootstrapped ${configPath} with the default commented template.\n`));
+  } else {
+    console.log(chalk.dim(`Using existing ${configPath}.\n`));
+  }
 
   let child;
   if (backend === 'claude') {

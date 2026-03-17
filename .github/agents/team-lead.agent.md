@@ -23,7 +23,7 @@ Start by reading `prompts/team-lead-policy.md`. That file is the canonical Team 
 - If `RALPH_MODEL_VALIDATOR_EXPLICIT=1`, use `RALPH_MODEL_VALIDATOR`.
 - If `RALPH_MODEL_MERGER_EXPLICIT=1`, use `RALPH_MODEL_MERGER`.
 - Otherwise choose by difficulty:
-  - easy task -> `claude-haiku-4.5`
-  - medium task -> `claude-sonnet-4.6`
-  - difficult task -> `claude-opus-4.6`
+  - easy task -> `gpt-5-mini`
+  - medium task -> `gpt-5.3-codex`
+  - difficult task -> `gpt-5.4`
 - If the task tool supports `--reasoning-effort`, use `low` for easy tasks, `medium` for normal tasks, `high` for difficult tasks, and `xhigh` only for exceptionally hard analysis.

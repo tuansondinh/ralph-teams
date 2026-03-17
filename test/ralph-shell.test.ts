@@ -13,34 +13,6 @@ const scriptPath = path.join(repoRoot, 'ralph.sh');
 // so we use the Homebrew bash 5 if available, otherwise fall back to PATH resolution.
 const BASH = fs.existsSync('/opt/homebrew/bin/bash') ? '/opt/homebrew/bin/bash' : 'bash';
 
-test('ralph.sh instructs the team lead to pass the canonical guidance file path to Builder', () => {
-  const script = fs.readFileSync(scriptPath, 'utf-8');
-  const policy = fs.readFileSync(path.join(repoRoot, 'prompts/team-lead-policy.md'), 'utf-8');
-
-  assert.match(
-    script,
-    /When the policy refers to guidance files, use this runtime path pattern: .*GUIDANCE_DIR.*guidance-\{story-id\}\.md/,
-  );
-  assert.match(policy, /read it before implementing and follow the instructions in it/);
-});
-
-test('agent prompt assets reference the canonical guidance file path', () => {
-  const promptFiles = [
-    '.github/agents/builder.agent.md',
-    '.claude/agents/builder.md',
-    'prompts/team-lead-policy.md',
-  ];
-
-  for (const relativePath of promptFiles) {
-    const content = fs.readFileSync(path.join(repoRoot, relativePath), 'utf-8');
-    assert.match(
-      content,
-      /\.ralph-teams\/guidance\/guidance-\{story-id\}\.md|\.ralph-teams\/guidance\/guidance-US-003\.md|guidance\/guidance-US-003\.md/,
-      `${relativePath} should use the canonical guidance filename`,
-    );
-  }
-});
-
 test('planner prompt assets require writing the epic plan markdown file', () => {
   const promptFiles = [
     '.codex/agents/planner.toml',
@@ -183,7 +155,6 @@ test('canonical Team Lead policy covers planner and validator heuristics', () =>
   assert.match(content, /verify that the plan file exists at the required path/i);
   assert.match(content, /may include function signatures.*should not include full functions/i);
   assert.match(content, /Planner must design the automated tests for each story/i);
-  assert.match(content, /Guidance file for this story: \.ralph-teams\/guidance\/guidance-\{story-id\}\.md/);
   assert.match(content, /If no Planner is spawned.*TDD order/i);
   assert.match(content, /Default to spawning the Validator for any medium- or high-complexity story/i);
   assert.match(content, /If you are unsure, spawn the Validator/i);
@@ -218,9 +189,9 @@ test('copilot team-lead prompt uses difficulty-based model selection unless conf
   assert.match(content, /If `RALPH_MODEL_PLANNER_EXPLICIT=1`, use `RALPH_MODEL_PLANNER`/);
   assert.match(content, /If `RALPH_MODEL_BUILDER_EXPLICIT=1`, use `RALPH_MODEL_BUILDER`/);
   assert.match(content, /If `RALPH_MODEL_VALIDATOR_EXPLICIT=1`, use `RALPH_MODEL_VALIDATOR`/);
-  assert.match(content, /easy task -> `claude-haiku-4\.5`/);
-  assert.match(content, /medium task -> `claude-sonnet-4\.6`/);
-  assert.match(content, /difficult task -> `claude-opus-4\.6`/);
+  assert.match(content, /easy task -> `gpt-5-mini`/);
+  assert.match(content, /medium task -> `gpt-5\.3-codex`/);
+  assert.match(content, /difficult task -> `gpt-5\.4`/);
   assert.match(content, /reasoning-effort/);
 });
 
@@ -236,9 +207,9 @@ test('copilot team-lead prompt requires one-shot builder spawns instead of reusi
 test('ralph.sh maps abstract model tiers to backend-specific copilot and codex models', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
-  assert.match(script, /copilot:haiku[\s\S]*claude-haiku-4\.5/);
-  assert.match(script, /copilot:sonnet[\s\S]*claude-sonnet-4\.6/);
-  assert.match(script, /copilot:opus[\s\S]*claude-opus-4\.6/);
+  assert.match(script, /copilot:haiku[\s\S]*gpt-5-mini/);
+  assert.match(script, /copilot:sonnet[\s\S]*gpt-5\.3-codex/);
+  assert.match(script, /copilot:opus[\s\S]*gpt-5\.4/);
   assert.match(script, /codex:haiku[\s\S]*gpt-5-mini/);
   assert.match(script, /codex:sonnet[\s\S]*gpt-5\.3-codex/);
   assert.match(script, /codex:opus[\s\S]*gpt-5\.4/);

@@ -79,11 +79,11 @@ function getCurrentBranch(): string | null {
 function mapModelForBackend(backend: SupportedBackend, model: string): string {
   switch (`${backend}:${model}`) {
     case 'copilot:haiku':
-      return 'claude-haiku-4.5';
+      return 'gpt-5-mini';
     case 'copilot:sonnet':
-      return 'claude-sonnet-4.6';
+      return 'gpt-5.3-codex';
     case 'copilot:opus':
-      return 'claude-opus-4.6';
+      return 'gpt-5.4';
     case 'codex:haiku':
       return 'gpt-5-mini';
     case 'codex:sonnet':

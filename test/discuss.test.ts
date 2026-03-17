@@ -6,7 +6,7 @@
  *  - extractPlanSection: extracts the relevant heading from a plan markdown file
  *  - findEpicForStory: looks up the epic ID for a given story in prd.json
  *  - gatherDiscussContext: integration of the above (with mocked file paths)
- *  - runDiscussSession: session loop collects user messages and returns guidance
+ *  - runDiscussSession: session loop collects user messages and returns discussion output
  */
 
 import { describe, it, before, after } from 'node:test';
@@ -414,7 +414,7 @@ describe('buildContextPrompt', () => {
 
 describe('runDiscussSession', () => {
   /**
-   * Creates a mock AgentSpawner that resolves immediately with the given guidance string.
+   * Creates a mock AgentSpawner that resolves immediately with the given response string.
    * Captures the context prompt passed to it for assertions.
    */
   function makeMockSpawner(guidance: string = ''): {
@@ -498,38 +498,11 @@ describe('runDiscussSession', () => {
     );
   });
 
-  it('prompt instructs the agent to write the guidance file when guidanceDir is provided', async () => {
-    const tmpDir = makeTempDir();
-    const guidanceDir = path.join(tmpDir, 'guidance');
+  it('prompt keeps the discussion in chat instead of instructing file writes', async () => {
     const { spawner, capturedPrompts } = makeMockSpawner('');
-
-    try {
-      await runDiscussSession(baseContext, { spawnAgent: spawner, guidanceDir });
-      const prompt = capturedPrompts[0];
-      assert.ok(prompt.includes(path.resolve(guidanceDir, 'guidance-US-018.md')));
-      assert.ok(prompt.includes('write the final guidance file yourself'));
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('persists guidance to guidance/guidance-<storyId>.md when guidanceDir is provided', async () => {
-    const tmpDir = makeTempDir();
-    const guidanceDir = path.join(tmpDir, 'guidance');
-    const { spawner } = makeMockSpawner('Follow the validator report');
-
-    try {
-      await runDiscussSession(baseContext, { spawnAgent: spawner, guidanceDir });
-
-      const savedPath = path.join(guidanceDir, 'guidance-US-018.md');
-      assert.equal(fs.existsSync(savedPath), true);
-
-      const content = fs.readFileSync(savedPath, 'utf-8');
-      assert.match(content, /## Failure Context/);
-      assert.match(content, /## User Instructions/);
-      assert.match(content, /Follow the validator report/);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
+    await runDiscussSession(baseContext, { spawnAgent: spawner });
+    const prompt = capturedPrompts[0];
+    assert.ok(prompt.includes('summarize the agreed next steps clearly in chat'));
+    assert.ok(!prompt.includes('write the final guidance file yourself'));
   });
 });

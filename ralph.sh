@@ -61,13 +61,13 @@ map_model_for_backend() {
       echo "$model"
       ;;
     copilot:haiku)
-      echo "claude-haiku-4.5"
+      echo "gpt-5-mini"
       ;;
     copilot:sonnet)
-      echo "claude-sonnet-4.6"
+      echo "gpt-5.3-codex"
       ;;
     copilot:opus)
-      echo "claude-opus-4.6"
+      echo "gpt-5.4"
       ;;
     codex:haiku)
       echo "gpt-5-mini"
@@ -217,10 +217,9 @@ RALPH_RUNTIME_DIR="${ROOT_DIR}/${RALPH_RUNTIME_DIRNAME}"
 PROGRESS_FILE="${RALPH_RUNTIME_DIR}/progress.txt"
 PLANS_DIR="${RALPH_RUNTIME_DIR}/plans"
 LOGS_DIR="${RALPH_RUNTIME_DIR}/logs"
-GUIDANCE_DIR="${RALPH_RUNTIME_DIR}/guidance"
 STATE_DIR="${RALPH_RUNTIME_DIR}/state"
 WORKTREES_DIR="${RALPH_RUNTIME_DIR}/.worktrees"
-mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$GUIDANCE_DIR" "$STATE_DIR" "$WORKTREES_DIR"
+mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$STATE_DIR" "$WORKTREES_DIR"
 
 # --- Validate PRD structure ---
 echo "Validating PRD structure..."
@@ -448,7 +447,7 @@ prompt_to_remove_stale_worktree_dir() {
 # --- Ensure loop branch exists and is checked out ---
 ensure_runtime_gitignore_entries
 
-mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$GUIDANCE_DIR" "$STATE_DIR" "$WORKTREES_DIR"
+mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$STATE_DIR" "$WORKTREES_DIR"
 
 if [ "$CURRENT_BRANCH" != "$LOOP_BRANCH" ]; then
   if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
@@ -1061,8 +1060,8 @@ $TEAM_LEAD_POLICY
   - If RALPH_MODEL_MERGER_EXPLICIT=1, use RALPH_MODEL_MERGER for merger work.
 - If there is no explicit override for that role, choose the model by task difficulty.
 - Default difficulty policy by backend:
-  - Claude / Copilot-Claude: easy -> haiku, medium -> sonnet, difficult -> opus
-  - Codex: easy -> gpt-5-mini, medium -> gpt-5.3-codex, difficult -> gpt-5.4
+  - Claude: easy -> haiku, medium -> sonnet, difficult -> opus
+  - Copilot / Codex: easy -> gpt-5-mini, medium -> gpt-5.3-codex, difficult -> gpt-5.4
 - If your runtime supports setting reasoning effort per spawned task, use low for easy tasks, medium for normal tasks, high for difficult tasks, and xhigh only for unusually hard analysis or verification.
 - If your runtime is Codex, use these exact named teammate roles when spawning:
   - planners: planner_easy, planner_medium, planner_difficult
@@ -1071,7 +1070,6 @@ $TEAM_LEAD_POLICY
 
 ## Runtime-Specific Notes
 - Use the exact plan path shown above when the policy refers to the canonical epic plan file.
-- When the policy refers to guidance files, use this runtime path pattern: ${GUIDANCE_DIR}/guidance-{story-id}.md
 - Use the exact epic state file path shown above for every story update. The PRD path is read-only context.
 - If your runtime supports named sub-agents, use the dedicated planner, builder, and validator roles and choose their models using the policy above.
 - If a story fails validation and still has retries left, spawn a new Builder for the retry instead of reusing the previous Builder run.

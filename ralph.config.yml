@@ -8,8 +8,8 @@ execution:
   validatorMaxPushbacks: 1
 
 agents:
-  teamLead: opus
-  planner: opus
-  builder: sonnet
-  validator: sonnet
-  merger: sonnet
+  teamLead: haiku
+  planner: haiku
+  builder: haiku
+  validator: haiku
+  merger: haiku

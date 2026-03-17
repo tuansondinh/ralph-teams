@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildInitPrompt } from '../src/commands/init';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { buildInitPrompt, ensureDefaultConfigFile } from '../src/commands/init';
+import { DEFAULT_CONFIG, loadConfig } from '../src/config';
 
 const SAMPLE_EXAMPLE = '{"project": "example", "epics": []}';
 const SAMPLE_OUTPUT = '/tmp/prd.json';
@@ -74,4 +78,34 @@ test('buildInitPrompt asks whether to move into planning or skip', () => {
   assert.ok(prompt.includes('planned=true'));
   assert.ok(prompt.includes('Do NOT tell the user to run `ralph-teams plan`'));
   assert.ok(prompt.includes('Do NOT ask for permission to "kick off" planning as a separate command'));
+});
+
+test('ensureDefaultConfigFile creates a commented default ralph.config.yml template', () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-init-'));
+
+  const result = ensureDefaultConfigFile(projectRoot);
+
+  assert.equal(result.created, true);
+  assert.equal(path.basename(result.configPath), 'ralph.config.yml');
+
+  const contents = fs.readFileSync(result.configPath, 'utf-8');
+  assert.ok(contents.includes('# Ralph Teams configuration'));
+  assert.ok(contents.includes('# execution:'));
+  assert.ok(contents.includes('#   backend: claude'));
+  assert.ok(!contents.includes('inputTokenCostPer1k'));
+  assert.ok(!contents.includes('outputTokenCostPer1k'));
+  assert.deepEqual(loadConfig(projectRoot), DEFAULT_CONFIG);
+});
+
+test('ensureDefaultConfigFile preserves an existing ralph.config.yml', () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-init-'));
+  const configPath = path.join(projectRoot, 'ralph.config.yml');
+  const existing = 'execution:\n  backend: codex\n';
+
+  fs.writeFileSync(configPath, existing, 'utf-8');
+
+  const result = ensureDefaultConfigFile(projectRoot);
+
+  assert.equal(result.created, false);
+  assert.equal(fs.readFileSync(configPath, 'utf-8'), existing);
 });

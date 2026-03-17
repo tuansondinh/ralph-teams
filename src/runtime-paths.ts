@@ -18,10 +18,6 @@ export function getRalphLogsDir(projectRoot: string): string {
   return path.join(getRalphRuntimeDir(projectRoot), 'logs');
 }
 
-export function getRalphGuidanceDir(projectRoot: string): string {
-  return path.join(getRalphRuntimeDir(projectRoot), 'guidance');
-}
-
 export function getRalphWorktreesDir(projectRoot: string): string {
   return path.join(getRalphRuntimeDir(projectRoot), '.worktrees');
 }
