@@ -24,14 +24,25 @@ ralph-teams run
 ```mermaid
 flowchart TB
     A[User runs Ralph] --> B[Validate PRD and tools]
-    B --> C[Pick next ready epic]
-    C --> D[Start one agent team for that epic]
-    D --> E[Plan if needed]
-    E --> F[Build and validate each story]
-    F --> G[Update PRD and progress]
-    G --> H{More ready epics?}
-    H -->|Yes| C
-    H -->|No| I[Finish run]
+    B --> C[Create loop branch]
+    C --> D[Pick next ready epic]
+    D --> E[Create epic worktree & branch]
+    E --> F[Start one agent team for that epic]
+    F --> G[Plan if needed]
+    G --> H[Build and validate each story]
+    H --> I{Story result?}
+    I -->|Pass| J[Update PRD state]
+    I -->|Fail| K[Log failure, continue]
+    J --> L{More stories in epic?}
+    L -->|Yes| H
+    L -->|No| M[Merge epic branch back to loop]
+    M --> N{Merge conflict?}
+    N -->|Yes| O[Spawn merger agent to resolve]
+    N -->|No| P[Epic complete]
+    O --> P
+    P --> Q{More ready epics?}
+    Q -->|Yes| D
+    Q -->|No| R[Finish run]
 ```
 
 # Quick Start:
@@ -169,7 +180,7 @@ Run `ralph.sh` directly when you want shell-level flags:
 
 ### `ralph-teams init`
 
-Creates a new `prd.json` interactively in the current directory by launching an AI PRD-creator session.
+Creates a new `prd.json` interactively in the current directory by launching an AI PRD-creator session. If `ralph.config.yml` does not already exist, `init` also creates it as a commented default template.
 
 ```bash
 ralph-teams init
@@ -184,12 +195,14 @@ Flow:
 2. the agent discusses the product with you directly
 3. the agent asks follow-up questions until the requirements are clear
 4. the agent generates the full `prd.json` with project metadata, epics, and user stories
-5. the agent writes `./prd.json`
-6. after writing the PRD, the init agent can either continue into implementation planning with you or stop there if you want to skip planning for now
+5. `init` bootstraps `./ralph.config.yml` with the default commented configuration if the file is missing
+6. the agent writes `./prd.json`
+7. after writing the PRD, the init agent can either continue into implementation planning with you or stop there if you want to skip planning for now
 
 Notes:
 
 - `init` is grounded by `prd.json.example`
+- `init` does not overwrite an existing `ralph.config.yml`
 - the agent generates epics and user stories automatically
 - the agent should aim for about 5 user stories per epic when the scope supports it
 - `--backend` controls whether the interview/generation uses `claude`, `copilot`, or `codex`

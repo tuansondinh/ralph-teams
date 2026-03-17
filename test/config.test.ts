@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { loadConfig, mergeCliOverrides, validateConfig, DEFAULT_CONFIG, RalphConfig } from '../src/config';
+import { loadConfig, mergeCliOverrides, validateConfig, DEFAULT_CONFIG, RalphConfig, renderCommentedConfigTemplate } from '../src/config';
 
 // Helper: create a temp directory and write a ralph.config.yml file there
 function makeTempDir(): string {
@@ -97,6 +97,15 @@ execution:
   const config = loadConfig(dir);
 
   assert.equal(config.execution.backend, 'codex');
+});
+
+test('loadConfig returns defaults when ralph.config.yml only contains comments', () => {
+  const dir = makeTempDir();
+  writeConfig(dir, renderCommentedConfigTemplate());
+
+  const config = loadConfig(dir);
+
+  assert.deepEqual(config, DEFAULT_CONFIG);
 });
 
 // -------------------------------------------------------------------

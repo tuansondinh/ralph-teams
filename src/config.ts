@@ -72,6 +72,35 @@ export const DEFAULT_CONFIG: RalphConfig = {
   },
 };
 
+function cloneConfig(config: RalphConfig): RalphConfig {
+  return {
+    timeouts: { ...config.timeouts },
+    execution: { ...config.execution },
+    agents: { ...config.agents },
+    pricing: { ...config.pricing },
+  };
+}
+
+export function renderConfigYaml(config: RalphConfig = DEFAULT_CONFIG): string {
+  return `${yaml.dump(config, { noRefs: true, lineWidth: -1 }).trimEnd()}\n`;
+}
+
+export function renderCommentedConfigTemplate(config: RalphConfig = DEFAULT_CONFIG): string {
+  const header = [
+    '# Ralph Teams configuration',
+    '# Uncomment and edit values as needed.',
+    '# A fully commented or empty file means "use built-in defaults".',
+    '#',
+  ];
+
+  const commentedBody = renderConfigYaml(config)
+    .trimEnd()
+    .split('\n')
+    .map(line => `# ${line}`);
+
+  return `${[...header, ...commentedBody].join('\n')}\n`;
+}
+
 /**
  * Validates a raw parsed YAML object against the RalphConfig schema.
  * Returns the validated config (with defaults for missing fields) and a list
@@ -224,16 +253,24 @@ export function loadConfig(projectRoot: string): RalphConfig {
   const configPath = path.join(projectRoot, 'ralph.config.yml');
 
   if (!fs.existsSync(configPath)) {
-    return { ...DEFAULT_CONFIG, timeouts: { ...DEFAULT_CONFIG.timeouts }, execution: { ...DEFAULT_CONFIG.execution }, agents: { ...DEFAULT_CONFIG.agents }, pricing: { ...DEFAULT_CONFIG.pricing } };
+    return cloneConfig(DEFAULT_CONFIG);
+  }
+
+  const contents = fs.readFileSync(configPath, 'utf-8');
+  if (contents.trim() === '') {
+    return cloneConfig(DEFAULT_CONFIG);
   }
 
   let raw: unknown;
   try {
-    const contents = fs.readFileSync(configPath, 'utf-8');
     raw = yaml.load(contents);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`Invalid YAML in ralph.config.yml: ${msg}`);
+  }
+
+  if (raw == null) {
+    return cloneConfig(DEFAULT_CONFIG);
   }
 
   const { config, errors } = validateConfig(raw);
