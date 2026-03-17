@@ -217,10 +217,9 @@ RALPH_RUNTIME_DIR="${ROOT_DIR}/${RALPH_RUNTIME_DIRNAME}"
 PROGRESS_FILE="${RALPH_RUNTIME_DIR}/progress.txt"
 PLANS_DIR="${RALPH_RUNTIME_DIR}/plans"
 LOGS_DIR="${RALPH_RUNTIME_DIR}/logs"
-GUIDANCE_DIR="${RALPH_RUNTIME_DIR}/guidance"
 STATE_DIR="${RALPH_RUNTIME_DIR}/state"
 WORKTREES_DIR="${RALPH_RUNTIME_DIR}/.worktrees"
-mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$GUIDANCE_DIR" "$STATE_DIR" "$WORKTREES_DIR"
+mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$STATE_DIR" "$WORKTREES_DIR"
 
 # --- Validate PRD structure ---
 echo "Validating PRD structure..."
@@ -1071,7 +1070,6 @@ $TEAM_LEAD_POLICY
 
 ## Runtime-Specific Notes
 - Use the exact plan path shown above when the policy refers to the canonical epic plan file.
-- When the policy refers to guidance files, use this runtime path pattern: ${GUIDANCE_DIR}/guidance-{story-id}.md
 - Use the exact epic state file path shown above for every story update. The PRD path is read-only context.
 - If your runtime supports named sub-agents, use the dedicated planner, builder, and validator roles and choose their models using the policy above.
 - If a story fails validation and still has retries left, spawn a new Builder for the retry instead of reusing the previous Builder run.
