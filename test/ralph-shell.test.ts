@@ -189,9 +189,9 @@ test('copilot team-lead prompt uses difficulty-based model selection unless conf
   assert.match(content, /If `RALPH_MODEL_PLANNER_EXPLICIT=1`, use `RALPH_MODEL_PLANNER`/);
   assert.match(content, /If `RALPH_MODEL_BUILDER_EXPLICIT=1`, use `RALPH_MODEL_BUILDER`/);
   assert.match(content, /If `RALPH_MODEL_VALIDATOR_EXPLICIT=1`, use `RALPH_MODEL_VALIDATOR`/);
-  assert.match(content, /easy task -> `claude-haiku-4\.5`/);
-  assert.match(content, /medium task -> `claude-sonnet-4\.6`/);
-  assert.match(content, /difficult task -> `claude-opus-4\.6`/);
+  assert.match(content, /easy task -> `gpt-5-mini`/);
+  assert.match(content, /medium task -> `gpt-5\.3-codex`/);
+  assert.match(content, /difficult task -> `gpt-5\.4`/);
   assert.match(content, /reasoning-effort/);
 });
 
@@ -207,9 +207,9 @@ test('copilot team-lead prompt requires one-shot builder spawns instead of reusi
 test('ralph.sh maps abstract model tiers to backend-specific copilot and codex models', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
-  assert.match(script, /copilot:haiku[\s\S]*claude-haiku-4\.5/);
-  assert.match(script, /copilot:sonnet[\s\S]*claude-sonnet-4\.6/);
-  assert.match(script, /copilot:opus[\s\S]*claude-opus-4\.6/);
+  assert.match(script, /copilot:haiku[\s\S]*gpt-5-mini/);
+  assert.match(script, /copilot:sonnet[\s\S]*gpt-5\.3-codex/);
+  assert.match(script, /copilot:opus[\s\S]*gpt-5\.4/);
   assert.match(script, /codex:haiku[\s\S]*gpt-5-mini/);
   assert.match(script, /codex:sonnet[\s\S]*gpt-5\.3-codex/);
   assert.match(script, /codex:opus[\s\S]*gpt-5\.4/);

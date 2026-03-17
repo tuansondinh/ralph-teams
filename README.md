@@ -70,7 +70,7 @@ Across all backends, `builder` and `validator` are one-shot story-scoped workers
 
 Default Team Lead policy by backend:
 - Claude: keep `team-lead` on `opus`; for spawned work use `haiku` for easy tasks, `sonnet` for medium tasks, `opus` for difficult tasks
-- Copilot: resolve those same tiers to `claude-haiku-4.5`, `claude-sonnet-4.6`, and `claude-opus-4.6`
+- Copilot: resolve those same tiers to `gpt-5-mini`, `gpt-5.3-codex`, and `gpt-5.4`
 - Codex: resolve those same tiers to `gpt-5-mini`, `gpt-5.3-codex`, and `gpt-5.4`
 
 If `ralph.config.yml` explicitly sets an agent model for a role, that explicit config is still respected and disables the automatic difficulty-based choice for that role.
@@ -393,6 +393,7 @@ Notes:
 
 - Copilot live output is routed through a PTY wrapper in `ralph.sh`
 - without the PTY wrapper, `gh copilot` may not show incremental output in pipe mode
+- Copilot difficulty-based defaults now use GPT-family models: `gpt-5-mini`, `gpt-5.3-codex`, and `gpt-5.4`
 
 ### Codex Backend
 

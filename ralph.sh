@@ -61,13 +61,13 @@ map_model_for_backend() {
       echo "$model"
       ;;
     copilot:haiku)
-      echo "claude-haiku-4.5"
+      echo "gpt-5-mini"
       ;;
     copilot:sonnet)
-      echo "claude-sonnet-4.6"
+      echo "gpt-5.3-codex"
       ;;
     copilot:opus)
-      echo "claude-opus-4.6"
+      echo "gpt-5.4"
       ;;
     codex:haiku)
       echo "gpt-5-mini"
@@ -1060,8 +1060,8 @@ $TEAM_LEAD_POLICY
   - If RALPH_MODEL_MERGER_EXPLICIT=1, use RALPH_MODEL_MERGER for merger work.
 - If there is no explicit override for that role, choose the model by task difficulty.
 - Default difficulty policy by backend:
-  - Claude / Copilot-Claude: easy -> haiku, medium -> sonnet, difficult -> opus
-  - Codex: easy -> gpt-5-mini, medium -> gpt-5.3-codex, difficult -> gpt-5.4
+  - Claude: easy -> haiku, medium -> sonnet, difficult -> opus
+  - Copilot / Codex: easy -> gpt-5-mini, medium -> gpt-5.3-codex, difficult -> gpt-5.4
 - If your runtime supports setting reasoning effort per spawned task, use low for easy tasks, medium for normal tasks, high for difficult tasks, and xhigh only for unusually hard analysis or verification.
 - If your runtime is Codex, use these exact named teammate roles when spawning:
   - planners: planner_easy, planner_medium, planner_difficult
