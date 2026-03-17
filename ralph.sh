@@ -411,25 +411,34 @@ prompt_to_commit_dirty_worktree() {
   git commit -m "chore: auto-commit changes before ralph run"
 }
 
-prompt_to_remove_stale_worktree_dir() {
+auto_remove_stale_worktree_dir() {
   local worktree_path="$1"
   local branch_name="$2"
 
   echo "Found a stale worktree directory at '$worktree_path' for branch '$branch_name'." >&2
   echo "Git does not recognize it as an active worktree, but the directory still exists on disk." >&2
-  printf "Delete the stale directory and recreate the worktree? [y/N]: " >&2
+  echo "Removing the stale directory so Ralph can recreate the worktree." >&2
+  rm -rf "$worktree_path"
+}
 
-  local response
-  IFS= read -r response || response=""
-  case "$response" in
-    y|Y|yes|YES)
-      rm -rf "$worktree_path"
-      ;;
-    *)
-      echo "Aborted: user declined stale worktree directory removal." >&2
-      exit 1
-      ;;
-  esac
+cleanup_epic_worktree_artifacts() {
+  local worktree_path="$1"
+  local branch_name="$2"
+
+  # Prune stale git worktree metadata before cleanup.
+  git worktree prune >/dev/null 2>&1 || true
+
+  # Remove stale worktree entry if it exists.
+  git worktree remove "$worktree_path" --force >/dev/null 2>&1 || true
+
+  # If Git no longer knows about the worktree but the directory is still on disk,
+  # remove the stale directory so a fresh worktree can be created.
+  if [ -d "$worktree_path" ]; then
+    auto_remove_stale_worktree_dir "$worktree_path" "$branch_name"
+  fi
+
+  # Remove a leftover branch from a partial worktree-add attempt.
+  git branch -D "$branch_name" >/dev/null 2>&1 || true
 }
 
 # --- Ensure loop branch exists and is checked out ---
@@ -460,28 +469,30 @@ create_epic_worktree() {
   local epic_id="$1"
   local branch_name="ralph/${epic_id}"
   local worktree_path="${RALPH_RUNTIME_DIRNAME}/.worktrees/${epic_id}"
+  local add_output
+  local retry_output
 
   # Reuse existing worktree if it is already registered and present on disk
-  if [ -d "$worktree_path" ] && git worktree list | grep -q "$worktree_path"; then
+  if [ -d "$worktree_path" ] && git worktree list | grep -Fq "$worktree_path"; then
     echo "$worktree_path"
     return
   fi
 
-  # Prune stale git worktree metadata before cleanup.
-  git worktree prune >/dev/null 2>&1 || true
+  cleanup_epic_worktree_artifacts "$worktree_path" "$branch_name"
 
-  # Remove stale worktree entry if it exists
-  git worktree remove "$worktree_path" --force >/dev/null 2>&1 || true
-  # If Git no longer knows about the worktree but the directory is still on disk,
-  # ask before removing the stale directory so a fresh worktree can be created.
-  if [ -d "$worktree_path" ]; then
-    prompt_to_remove_stale_worktree_dir "$worktree_path" "$branch_name"
+  if add_output=$(git worktree add "$worktree_path" -b "$branch_name" "$LOOP_BRANCH" 2>&1 >/dev/null); then
+    echo "$worktree_path"
+    return
   fi
-  # Remove stale branch if it exists
-  git branch -D "$branch_name" >/dev/null 2>&1 || true
 
-  if ! git worktree add "$worktree_path" -b "$branch_name" "$LOOP_BRANCH" >/dev/null 2>&1; then
+  echo "Worktree creation for '$branch_name' failed on the first attempt; pruning stale state and retrying once." >&2
+  [ -n "$add_output" ] && echo "$add_output" >&2
+
+  cleanup_epic_worktree_artifacts "$worktree_path" "$branch_name"
+
+  if ! retry_output=$(git worktree add "$worktree_path" -b "$branch_name" "$LOOP_BRANCH" 2>&1 >/dev/null); then
     echo "Error: failed to create worktree $worktree_path for $branch_name" >&2
+    [ -n "$retry_output" ] && echo "$retry_output" >&2
     exit 1
   fi
   echo "$worktree_path"

@@ -643,7 +643,7 @@ test('US-002: worktrees are cleaned up after wave completes', () => {
   assert.equal(fs.existsSync(path.join(tempDir, '.ralph-teams', '.worktrees', 'EPIC-001')), false);
 });
 
-test('US-002: stale unregistered worktree directory asks before deletion and aborts when declined', () => {
+test('US-002: stale unregistered worktree directory is removed automatically', () => {
   const { tempDir, env } = setupMultiEpicRepo(
     [{ id: 'EPIC-001', title: 'Alpha' }],
     { 'EPIC-001': 'PASS' },
@@ -655,32 +655,6 @@ test('US-002: stale unregistered worktree directory asks before deletion and abo
 
   const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
     cwd: tempDir,
-    input: 'n\n',
-    encoding: 'utf-8',
-    env,
-  });
-
-  const combined = `${result.stdout}\n${result.stderr}`;
-  assert.equal(result.status, 1, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
-  assert.match(combined, /Found a stale worktree directory/);
-  assert.match(combined, /Delete the stale directory and recreate the worktree\? \[y\/N\]: /);
-  assert.match(combined, /Aborted: user declined stale worktree directory removal\./);
-  assert.equal(fs.existsSync(path.join(stalePath, 'KEEP.txt')), true);
-});
-
-test('US-002: stale unregistered worktree directory is removed after confirmation', () => {
-  const { tempDir, env } = setupMultiEpicRepo(
-    [{ id: 'EPIC-001', title: 'Alpha' }],
-    { 'EPIC-001': 'PASS' },
-  );
-
-  const stalePath = path.join(tempDir, '.ralph-teams', '.worktrees', 'EPIC-001');
-  fs.mkdirSync(stalePath, { recursive: true });
-  fs.writeFileSync(path.join(stalePath, 'KEEP.txt'), 'preserve me\n');
-
-  const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
-    cwd: tempDir,
-    input: 'y\n',
     encoding: 'utf-8',
     env,
   });
@@ -688,8 +662,42 @@ test('US-002: stale unregistered worktree directory is removed after confirmatio
   const combined = `${result.stdout}\n${result.stderr}`;
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
   assert.match(combined, /Found a stale worktree directory/);
+  assert.match(combined, /Removing the stale directory so Ralph can recreate the worktree\./);
   assert.match(result.stdout, /\[EPIC-001\] PASSED/);
   assert.equal(fs.existsSync(path.join(stalePath, 'KEEP.txt')), false);
+});
+
+test('US-002: a transient worktree creation failure is retried automatically', () => {
+  const { tempDir, binDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+    { 'EPIC-001': 'PASS' },
+  );
+
+  const realGit = execFileSync('which', ['git'], { encoding: 'utf-8' }).trim();
+  const stateFile = path.join(tempDir, '.git-worktree-add-failed-once');
+  const mockGit = [
+    '#!/bin/sh',
+    `REAL_GIT='${realGit}'`,
+    `STATE_FILE='${stateFile}'`,
+    'if [ "$1" = "worktree" ] && [ "$2" = "add" ] && [ "${3#*.ralph-teams/.worktrees/EPIC-001}" != "$3" ]; then',
+    '  if [ ! -f "$STATE_FILE" ]; then',
+    '    : > "$STATE_FILE"',
+    '    echo "fatal: simulated worktree add failure" >&2',
+    '    exit 1',
+    '  fi',
+    'fi',
+    'exec "$REAL_GIT" "$@"',
+  ].join('\n');
+  fs.writeFileSync(path.join(binDir, 'git'), `${mockGit}\n`);
+  fs.chmodSync(path.join(binDir, 'git'), 0o755);
+
+  const result = runRalph(tempDir, env);
+  const combined = `${result.stdout}\n${result.stderr}`;
+
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.match(combined, /Worktree creation for 'ralph\/EPIC-001' failed on the first attempt; pruning stale state and retrying once\./);
+  assert.match(combined, /fatal: simulated worktree add failure/);
+  assert.match(result.stdout, /\[EPIC-001\] PASSED/);
 });
 
 test('US-002: two independent epics each get separate log files', () => {
