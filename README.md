@@ -1,17 +1,16 @@
 # ralph-teams
 
-Ralph-Teams loops epics not User stories! It leverages the inbuilt Agent Teams of Claude/Codex/Copilot. Each epic gets tackled by a Team with in a new Session (Iteration). 
 
-`ralph-teams` is a CLI for running Ralph Teams: a shell-based orchestrator that reads a `prd.json`, loops through epics, and spawns AI coding agent teams to implement work story by story.
-
-Experimental: Ralph-Teams can work on epic in parallel for epics, which are not interdependent 
+`ralph-teams` is a CLI for running Ralph Teams: a shell-based orchestrator that initializes and reads a `prd.json`, loops through epics (not user stories), and spawns AI coding agent teams to implement work story by story. One Agent Team per Epic with fresh context. Ralph-Teams can even work on multiple epics in parallel, if there are no dependencies
 ```bash
-ralph-teams run --parallel=3
+ralph-teams run --parallel={max_parallel_epics}
 ```
 
 ## Quickest Start
 
 ```bash
+npm install -g ralph-teams
+
 # create the prd.json with the agent, optionally create an implementation plan for each epic
 ralph-teams init 
 
@@ -25,25 +24,15 @@ ralph-teams run
 flowchart TB
     A[User runs Ralph] --> B[Validate PRD and tools]
     B --> C[Pick next ready epic]
-    C --> D[Start one agent team for that epic]
-    D --> E[Plan if needed]
-    E --> F[Build and validate each story]
+    C --> D[Spawns Team Lead for that epic]
+    D --> E[Spawns Epic Planner (if necessary)]
+    E --> F[Spawns Builder and Validator (if necessary)]
     F --> G[Update PRD and progress]
     G --> H{More ready epics?}
     H -->|Yes| C
     H -->|No| I[Finish run]
 ```
 
-# Quick Start:
-```bash
-npm install -g ralph-teams
-
-ralph-teams init
-
-ralph-teams run --backend claude
-ralph-teams run --backend codex
-ralph-teams run --backend copilot
-```
 ## What It Does
 
 The system has two layers:
@@ -53,7 +42,7 @@ The system has two layers:
   - `team-lead` coordinates the epic
   - `planner` creates the implementation plan
   - `builder` makes changes and runs tests
-  - `validator` verifies the result independently
+  - `validator` verifies the result independently, pushes backes (by default: 1 pushback max )
 
 Across all backends, `builder` and `validator` are one-shot story-scoped workers. The Team Lead must spawn a fresh Builder for each story attempt, spawn a fresh Validator when verification needs an independent agent, and never treat idle/task-lifecycle output as completion. A build attempt only counts when the Builder returns a concrete commit SHA and the Team Lead persists the story result to `prd.json`.
 
@@ -79,7 +68,6 @@ The runtime is file-based. During a run, Ralph treats these files as the working
 - `.ralph-teams/progress.txt`: narrative progress log
 - `.ralph-teams/logs/`: raw backend logs
 - `.ralph-teams/ralph-state.json`: interrupt/resume state
-
 
 
 ## Requirements
