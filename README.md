@@ -37,7 +37,6 @@ The runtime is file-based. During a run, Ralph treats these files as the working
 - `plans/`: implementation plans for epics that were explicitly planned
 - `progress.txt`: narrative progress log
 - `logs/`: raw backend logs
-- `results/`: per-epic final result markers
 - `ralph-state.json`: interrupt/resume state
 
 ## Flow
@@ -74,7 +73,7 @@ flowchart TB
         SP[Mark story passed in PRD]
         F[Record failure]
         M{More stories}
-        RF[Write result file]
+        RF[Print DONE summary]
 
         TL --> PP
         PP -->|Yes| Q
@@ -440,7 +439,7 @@ Example:
 Notes:
 
 - Ralph enables Codex multi-agent mode per run, so no global `~/.codex/config.toml` edits are required
-- Codex runs from each epic worktree and is granted write access to the repo root so it can update the shared PRD and result files
+- Codex runs from each epic worktree and is granted write access to the repo root so it can update the shared PRD
 - Codex does not use a separate repo-local Team Lead role file; the Team Lead policy comes from the runtime prompt assembled in `ralph.sh`, while `.codex/agents/*.toml` define the spawned planner, builder, validator, and merger roles
 
 ## PRD Format
@@ -501,7 +500,6 @@ During a run, Ralph writes:
 - `progress.txt`: high-level run log
 - `plans/plan-EPIC-xxx.md`: planner output for an epic
 - planned epics are expected to use these files as their implementation contract
-- `results/result-EPIC-xxx.txt`: final pass/partial/fail result per epic
 - `logs/epic-EPIC-xxx-<timestamp>.log`: raw backend session log
 - `ralph-state.json`: saved interrupt/resume state
 - `guidance/guidance-US-xxx.md`: retry guidance captured from discuss flows
@@ -527,7 +525,7 @@ The current execution contract is:
 - rerunning Ralph automatically resets `failed` and `partial` epics back to `pending` so only unfinished work is retried
 - each story gets at most two build/validate cycles
 - the validator checks output independently from the builder's reasoning
-- after writing `results/result-EPIC-xxx.txt`, the team lead must print the same result and exit the session immediately
+- after updating `prd.json` for all attempted stories, the team lead must print `DONE: X/Y stories passed` and exit the session immediately
 - pressing `Ctrl-C` writes `ralph-state.json` so the run can be resumed later with `ralph-teams resume`
 
 ## Troubleshooting

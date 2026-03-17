@@ -871,10 +871,8 @@ spawn_epic_bg() {
   PENDING_STORIES_JSON=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].userStories" | \
     node -e 'const fs=require("fs"); const stories=JSON.parse(fs.readFileSync(0,"utf8")); process.stdout.write(JSON.stringify(stories.filter(s => s.passes !== true)));')
 
-  local RESULT_FILE="${ROOT_DIR}/results/result-${EPIC_ID}.txt"
   local EPIC_LOG="${ROOT_DIR}/logs/epic-${EPIC_ID}-$(date +%s).log"
-  mkdir -p "${ROOT_DIR}/results" "${ROOT_DIR}/logs"
-  rm -f "$RESULT_FILE"
+  mkdir -p "${ROOT_DIR}/logs"
 
   # Create isolated worktree for this epic
   local WORKTREE_PATH
@@ -950,7 +948,7 @@ $PENDING_STORIES_JSON
 ## Critical Rules
 - Do NOT stop after the first story — process ALL stories before exiting
 - Idle or waiting messages from teammates are NORMAL — they do not mean the session should end
-- Once the final result is written, end the session immediately. Do not wait for more input.
+- Once the final PRD updates are complete and you have printed the DONE summary, end the session immediately. Do not wait for more input.
 - Process stories sequentially: build → validate → next. Do not stop early.
 - After each story result (pass or fail), update $PRD_ABS_PATH to keep both passes and failureReason accurate for that story
 
@@ -1220,7 +1218,6 @@ while true; do
       for slot in "${!active_pids[@]}"; do
         local finished_epic_id
         finished_epic_id=$(rjq read "$PRD_FILE" ".epics[${active_indices[$slot]}].id")
-        local result_file="${ROOT_DIR}/results/result-${finished_epic_id}.txt"
         local process_finished=false
 
         emit_new_log_output "$finished_epic_id" "${active_logs[$slot]}" "${active_log_lines[$slot]:-0}"
@@ -1326,22 +1323,23 @@ while true; do
           process_finished=true
         fi
 
-        if [ "$process_finished" = true ] || [ -f "$result_file" ]; then
-          # If the result file exists, the epic is complete even if the backend
-          # session is still idling. Terminate the lingering job and advance.
+        local total_s passed_s
+        total_s=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories")
+        passed_s=$(rjq count-where "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories" "passes=true")
+        local all_done=false
+        [ "$passed_s" -eq "$total_s" ] && [ "$total_s" -gt 0 ] && all_done=true
+
+        if [ "$process_finished" = true ] || [ "$all_done" = true ]; then
+          # Treat fully-passed stories in the PRD as the authoritative completion
+          # signal, even if the backend session is still idling.
           if [ "$process_finished" = false ]; then
             terminate_process_tree "${active_pids[$slot]}"
           fi
           wait "${active_pids[$slot]}" 2>/dev/null || true
 
-          # Check if this was a crash (process exited, no result file, not all stories done)
-          local total_s passed_s
-          total_s=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories")
-          passed_s=$(rjq count-where "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories" "passes=true")
-          local all_done=false
-          [ "$passed_s" -eq "$total_s" ] && [ "$total_s" -gt 0 ] && all_done=true
-
-          if [ ! -f "$result_file" ] && [ "$all_done" = false ]; then
+          # If the process exited before the epic reached all stories passed,
+          # consider it a crash and retry when possible.
+          if [ "$all_done" = false ]; then
             local retry_count
             retry_count="$(get_crash_retry_count "$finished_epic_id")"
             if [ "$retry_count" -lt "$MAX_CRASH_RETRIES" ]; then

@@ -30,7 +30,6 @@ flowchart LR
     SH --> WT[Git worktrees]
     SH --> AGENTS[Backend agent CLI]
     AGENTS --> LOGS[logs/*.log]
-    AGENTS --> RESULT[results/result-EPIC.txt]
     SH --> PRD[prd.json]
     SH --> PROGRESS[progress.txt]
     SH --> STATE[ralph-state.json]
@@ -71,7 +70,7 @@ This is the operational core of the project. It is responsible for:
 - creating one git worktree per active epic
 - spawning the team lead agent for each epic
 - enforcing epic timeout and idle timeout
-- reading result files and mutating `prd.json`
+- reading and mutating `prd.json`
 - writing progress and resume artifacts
 - merging completed epic branches back into the loop branch
 
@@ -80,7 +79,7 @@ The Bash layer is stateful and process-oriented. That is why it owns:
 - PID tracking
 - trap handlers
 - child process cleanup
-- polling for log output and result files
+- polling for log output and PRD progress
 - merge conflict handling
 
 ### 3. Domain and utility modules
@@ -128,7 +127,7 @@ The shell runtime then:
 4. Normalizes retryable PRD state.
 5. Repeatedly computes the next wave of runnable epics.
 6. Spawns each epic in its own worktree and backend process.
-7. Watches logs, timeout thresholds, and result files.
+7. Watches logs, timeout thresholds, and PRD progress.
 8. Updates `prd.json`, `progress.txt`, and stats after completion.
 9. Merges completed epic branches back into the loop branch.
 10. Repeats until no runnable epics remain.
@@ -145,15 +144,14 @@ The team lead is instructed to:
 - plan only the pending stories for that epic
 - process stories sequentially
 - use builder then validator per story
-- update `prd.json` after each story
-- write a single-line result file at the end
+- update `prd.json` after each attempted story and finish with a DONE summary
 
 The shell contract is simple and important:
 
 - agents communicate progress by writing logs
-- agents communicate final epic outcome by writing `results/result-<EPIC_ID>.txt`
+- agents communicate completion by updating story pass state in `prd.json`
 
-The shell never tries to infer completion from agent intent. It trusts the result file.
+The shell never tries to infer completion from agent intent alone. It trusts the PRD state.
 
 ## Persistence Model
 
@@ -195,16 +193,6 @@ Log format depends on backend:
 
 - Claude: stream-json
 - Copilot/Codex: text
-
-### `results/`
-
-One result file per epic run, written by the team lead.
-
-Expected values:
-
-- `PASS`
-- `PARTIAL: ...`
-- `FAIL: ...`
 
 ### `ralph-state.json`
 
@@ -284,7 +272,7 @@ Key mechanisms:
 
 - epic timeout kills long-running work
 - idle timeout kills silent work
-- missing result file marks the epic failed
+- process exit before PRD completion triggers crash handling
 - dependency failure blocks downstream epics
 - merge failure is tracked separately from implementation failure
 - `SIGINT` writes `ralph-state.json` and preserves worktrees for resume

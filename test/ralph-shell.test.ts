@@ -254,8 +254,8 @@ test('ralph.sh auto-commits dirty changes after confirmation and continues', () 
 
 /**
  * Create a temp git repo with a smart mock claude binary.
- * resultMap maps epic ID -> result string (e.g. 'PASS', 'FAIL: ...')
- * Epics not in the map get no result file (treated as failure by ralph).
+ * resultMap maps epic ID -> completion string (currently only 'PASS' matters).
+ * Epics not in the map make no PRD progress and are treated as failed/crashed by Ralph.
  */
 function setupMultiEpicRepo(
   epics: Array<{ id: string; title: string; status?: string; dependsOn?: string[] }>,
@@ -265,8 +265,8 @@ function setupMultiEpicRepo(
   const binDir = path.join(tempDir, 'bin');
   fs.mkdirSync(binDir);
 
-  // Smart mock claude: reads stdin, extracts epic ID, writes result file and updates
-  // prd.json story passes via env vars. CWD when invoked is the repo root (tempDir).
+  // Smart mock claude: reads stdin, extracts epic ID, and updates prd.json story
+  // passes via env vars. CWD when invoked is the repo root (tempDir).
   const mockClaude = [
     '#!/bin/sh',
     'STDIN=$(cat)',
@@ -277,8 +277,6 @@ function setupMultiEpicRepo(
     '  HANG_KEY="MOCK_HANG_$(printf "%s" "$EPIC_ID" | tr - _)"',
     '  HANG_VAL=$(printenv "$HANG_KEY" 2>/dev/null || true)',
     '  if [ -n "$RESULT_VAL" ]; then',
-    '    mkdir -p results',
-    '    printf "%s\\n" "$RESULT_VAL" > "results/result-${EPIC_ID}.txt"',
     '    if [ "$RESULT_VAL" = "PASS" ]; then',
     '      node -e "' +
       "const fs=require('fs');" +
@@ -354,8 +352,6 @@ test('codex backend suppresses bare file-path chatter in stdout while keeping ou
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
     'printf "./src/config.ts\\n"',
     'printf "./src/index.ts\\n"',
-    'mkdir -p results',
-    'printf "PASS\\n" > "results/result-${EPIC_ID}.txt"',
     'node -e "' +
       "const fs=require('fs');" +
       "const f='prd.json';" +
@@ -471,11 +467,11 @@ test('US-001: circular dependency detected — exits with code 1', () => {
 test('US-001: failed dependency causes dependent to be skipped, independent still runs', () => {
   const { tempDir, env } = setupMultiEpicRepo(
     [
-      { id: 'EPIC-001', title: 'Alpha' },          // will fail (no result file)
+      { id: 'EPIC-001', title: 'Alpha' },          // will fail (no PRD progress)
       { id: 'EPIC-002', title: 'Beta', dependsOn: ['EPIC-001'] },  // should be skipped
       { id: 'EPIC-003', title: 'Gamma' },           // independent — should pass
     ],
-    { 'EPIC-003': 'PASS' },  // EPIC-001 gets no result → fails; EPIC-002 skipped; EPIC-003 passes
+    { 'EPIC-003': 'PASS' },  // EPIC-001 makes no progress → fails; EPIC-002 skipped; EPIC-003 passes
   );
 
   const result = runRalph(tempDir, env);
@@ -658,7 +654,7 @@ test('US-002: epics in a wave run in parallel (both finish)', () => {
   assert.match(result.stdout, /\[EPIC-003\] PASSED/);
 });
 
-test('US-002: result file completion advances even if backend session lingers', () => {
+test('US-002: PRD completion advances even if backend session lingers', () => {
   const { tempDir, env } = setupMultiEpicRepo(
     [
       { id: 'EPIC-001', title: 'Alpha' },
@@ -732,8 +728,8 @@ test('US-003: --parallel 1 runs all epics in wave sequentially and all pass', ()
 
 /**
  * Sets up a repo where epic branches have actual commits (different files),
- * so they can be cleanly merged back to main. Uses a mock claude that writes
- * result files AND creates a commit on the epic branch before reporting.
+ * so they can be cleanly merged back to main. Uses a mock claude that creates
+ * a commit on the epic branch and updates PRD story passes before reporting.
  */
 function setupMergeRepo(
   epics: Array<{ id: string; title: string; fileName: string }>,
@@ -761,8 +757,8 @@ function setupMergeRepo(
   execFileSync('git', ['add', '.'], { cwd: tempDir });
   execFileSync('git', ['commit', '-m', 'chore: initial'], { cwd: tempDir });
 
-  // Mock claude: creates a unique file on the epic branch, writes PASS result file,
-  // and updates prd.json story passes so process_epic_result() marks it completed.
+  // Mock claude: creates a unique file on the epic branch and updates prd.json
+  // story passes so process_epic_result() marks it completed.
   const mockClaude = [
     '#!/bin/sh',
     'STDIN=$(cat)',
@@ -775,8 +771,6 @@ function setupMergeRepo(
     '    git add "$FILE_NAME"',
     '    git commit -m "feat: add $FILE_NAME for $EPIC_ID"',
     '  fi',
-    '  mkdir -p results',
-    '  printf "PASS\\n" > "results/result-${EPIC_ID}.txt"',
     '  node -e "' +
       "const fs=require('fs');" +
       "const f='prd.json';" +
@@ -909,7 +903,7 @@ function setupConflictRepo() {
 
   // Mock claude: when acting as team-lead, modifies README.md in the worktree
   // AND creates a conflicting commit on main. When acting as merger agent, does nothing.
-  // The result file is written and prd.json is updated so EPIC-001 is marked completed.
+  // prd.json is updated so EPIC-001 is marked completed.
   const mockClaude = [
     '#!/bin/sh',
     'STDIN=$(cat)',
@@ -930,8 +924,6 @@ function setupConflictRepo() {
     '    git -C "$MAIN_ROOT" add README.md',
     '    git -C "$MAIN_ROOT" -c user.name="Ralph Test" -c user.email="ralph@example.com" commit -m "chore: main change to README"',
     '  fi',
-    '  mkdir -p results',
-    '  printf "PASS\\n" > "results/result-${EPIC_ID}.txt"',
     '  node -e "' +
       "const fs=require('fs');" +
       "const f='prd.json';" +
@@ -1211,7 +1203,7 @@ test('US-008: ralph-state.json includes interruptedStoryId field', { timeout: 15
 test('US-004 (timeout): epic is killed and marked failed after RALPH_EPIC_TIMEOUT seconds', { timeout: 15000 }, () => {
   const { tempDir, env } = setupMultiEpicRepo(
     [{ id: 'EPIC-001', title: 'Alpha' }],
-    {},  // No result file — mock will hang
+    {},  // No PRD progress — mock will hang
   );
   // Make mock agent hang (sleep 30) and set a very short timeout (2s)
   env['MOCK_HANG_EPIC_001'] = '1';
@@ -1323,7 +1315,7 @@ function setupIdleTimeoutRepo(
   fs.mkdirSync(binDir);
 
   // Mock claude: if MOCK_SILENT_<EPIC_ID> is set, sleep 30 without writing any output.
-  // Otherwise, if MOCK_RESULT_<EPIC_ID> is set, write the result file and update prd.json.
+  // Otherwise, if MOCK_RESULT_<EPIC_ID> is set, update prd.json.
   // The key difference from setupMultiEpicRepo: silent mode writes nothing to stdout,
   // so the log file has no output (simulating an idle/stuck agent).
   const mockClaude = [
@@ -1339,8 +1331,6 @@ function setupIdleTimeoutRepo(
     '    # Sleep without writing any output — simulates idle/stuck agent',
     '    sleep 30',
     '  elif [ -n "$RESULT_VAL" ]; then',
-    '    mkdir -p results',
-    '    printf "%s\\n" "$RESULT_VAL" > "results/result-${EPIC_ID}.txt"',
     '    if [ "$RESULT_VAL" = "PASS" ]; then',
     '      node -e "' +
       "const fs=require('fs');" +
