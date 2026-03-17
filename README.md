@@ -5,6 +5,16 @@
 For a deeper codebase walkthrough, see [architecture.md](./architecture.md).
 Deferred review notes are tracked in [docs/review-findings-2026-03-16.md](./docs/review-findings-2026-03-16.md).
 
+# Quick Start:
+```bash
+npm install -g ralph-teams
+
+ralph-teams init
+
+ralph-teams run --backend claude
+ralph-teams run --backend codex
+ralph-teams run --backend copilot
+```
 ## What It Does
 
 The system has two layers:
@@ -142,7 +152,7 @@ ralph-teams --help
 rjq --help
 ```
 
-## Quick Start
+## Start
 
 1. Create a PRD:
 
