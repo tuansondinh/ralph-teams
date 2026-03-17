@@ -1,9 +1,38 @@
 # ralph-teams
 
+Ralph-Teams loops epics not User stories! It leverages the inbuilt Agent Teams of Claude/Codex/Copilot. Each epic gets tackled by a Team with in a new Session (Iteration). 
+
 `ralph-teams` is a CLI for running Ralph Teams: a shell-based orchestrator that reads a `prd.json`, loops through epics, and spawns AI coding agent teams to implement work story by story.
 
-For a deeper codebase walkthrough, see [architecture.md](./architecture.md).
-Deferred review notes are tracked in [docs/review-findings-2026-03-16.md](./docs/review-findings-2026-03-16.md).
+Experimental: Ralph-Teams can work on epic in parallel for epics, which are not interdependent 
+```bash
+ralph-teams run --parallel=3
+```
+
+## Quickest Start
+
+```bash
+# discuss with agent to create the prd.json, optionally create an implementation plan for each epic
+ralph-teams init 
+
+# start the loop, by default uses claude
+ralph-teams run
+```
+
+## Flow
+
+```mermaid
+flowchart TB
+    A[User runs Ralph] --> B[Validate PRD and tools]
+    B --> C[Pick next ready epic]
+    C --> D[Start one agent team for that epic]
+    D --> E[Plan if needed]
+    E --> F[Build and validate each story]
+    F --> G[Update PRD and progress]
+    G --> H{More ready epics?}
+    H -->|Yes| C
+    H -->|No| I[Finish run]
+```
 
 # Quick Start:
 ```bash
@@ -51,67 +80,7 @@ The runtime is file-based. During a run, Ralph treats these files as the working
 - `logs/`: raw backend logs
 - `ralph-state.json`: interrupt/resume state
 
-## Flow
 
-```mermaid
-flowchart TB
-    U[User runs CLI] --> I[init command]
-    I --> P0{Plan now?}
-    P0 -->|Yes| PC[plan command]
-    P0 -->|No| C[run command]
-    PC --> C
-    C --> S[ralph.sh]
-    S --> V[Validate PRD, backend, and rjq]
-    V --> PF{Parallel flag set?}
-    PF -->|No| M1[Sequential mode]
-    PF -->|Yes| M2[Wave mode]
-    M1 --> E[Find next runnable epic]
-    M2 --> E
-    E --> B{Ready epics found?}
-    B -->|No| D[Finish run]
-    B -->|Yes| X{Dependency failed?}
-    X -->|Yes| K[Mark blocked epic failed]
-    X -->|No| T[Create epic worktree from loop branch and start team lead]
-
-    subgraph CS[Agent session: team agents for one epic]
-        direction TB
-        TL[Team lead]
-        PP{Epic planned?}
-        P[Planner creates plan]
-        Q{Story already passed}
-        BU[Fresh Builder implements one story attempt]
-        VA[Fresh Validator checks one story attempt]
-        R{Validation passed}
-        SP[Mark story passed in PRD]
-        F[Record failure]
-        M{More stories}
-        RF[Print DONE summary]
-
-        TL --> PP
-        PP -->|Yes| Q
-        PP -->|No| P
-        P --> Q
-        Q -->|Yes| M
-        Q -->|No| BU
-        BU --> VA
-        VA --> R
-        R -->|Yes| SP
-        R -->|Retry left| BU
-        R -->|No retry left| F
-        SP --> M
-        F --> M
-        M -->|Yes| Q
-        M -->|No| RF
-    end
-
-    T --> TL
-    K --> E
-    RF --> P2[Update PRD status and progress log]
-    P2 --> G{Epic completed?}
-    G -->|No| E
-    G -->|Yes| H[Merge epic branch back into the run loop branch]
-    H --> E
-```
 
 ## Requirements
 
