@@ -1,7 +1,7 @@
-const { add } = require('./utils');
+const { add, capitalize } = require('./utils');
 
 // Test cases for add function
-const tests = [
+const addTests = [
   { a: 2, b: 3, expected: 5, description: 'add(2, 3) returns 5' },
   { a: -1, b: 1, expected: 0, description: 'add(-1, 1) returns 0' },
   { a: 0, b: 0, expected: 0, description: 'add(0, 0) returns 0' },
@@ -12,7 +12,7 @@ const tests = [
 let passedTests = 0;
 let failedTests = 0;
 
-tests.forEach(test => {
+addTests.forEach(test => {
   const result = add(test.a, test.b);
   if (result === test.expected) {
     console.log(`✓ ${test.description}`);
@@ -23,7 +23,28 @@ tests.forEach(test => {
   }
 });
 
-console.log(`\nTests passed: ${passedTests}/${tests.length}`);
+// Test cases for capitalize function
+const capitalizeTests = [
+  { input: 'hello', expected: 'Hello', description: 'capitalize("hello") returns "Hello"' },
+  { input: 'hELLO', expected: 'Hello', description: 'capitalize("hELLO") returns "Hello"' },
+  { input: 'Hello', expected: 'Hello', description: 'capitalize("Hello") returns "Hello"' },
+  { input: 'a', expected: 'A', description: 'capitalize("a") returns "A"' },
+  { input: '', expected: '', description: 'capitalize("") returns ""' },
+];
+
+capitalizeTests.forEach(test => {
+  const result = capitalize(test.input);
+  if (result === test.expected) {
+    console.log(`✓ ${test.description}`);
+    passedTests++;
+  } else {
+    console.log(`✗ ${test.description} - got ${result}, expected ${test.expected}`);
+    failedTests++;
+  }
+});
+
+const totalTests = addTests.length + capitalizeTests.length;
+console.log(`\nTests passed: ${passedTests}/${totalTests}`);
 
 if (failedTests > 0) {
   process.exit(1);
