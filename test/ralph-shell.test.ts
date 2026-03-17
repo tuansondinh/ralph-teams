@@ -133,6 +133,17 @@ test('claude team-lead prompt uses difficulty-based model selection unless confi
   assert.match(content, /difficult task -> `opus`/);
 });
 
+test('claude team-lead prompt requires one-shot builder spawns instead of a persistent mailbox', () => {
+  const content = fs.readFileSync(path.join(repoRoot, '.claude/agents/team-lead.md'), 'utf-8');
+
+  assert.match(content, /Do NOT create a long-lived Builder mailbox/);
+  assert.match(content, /spawn a fresh Builder/i);
+  assert.match(content, /subagent_type: "builder"/);
+  assert.match(content, /Do NOT use `SendMessage` or `shutdown_request`/);
+  assert.doesNotMatch(content, /wait for story assignments from you via direct messages/i);
+  assert.doesNotMatch(content, /Send Builder a direct message/i);
+});
+
 test('copilot team-lead prompt uses difficulty-based model selection unless config overrides are set', () => {
   const content = fs.readFileSync(path.join(repoRoot, '.github/agents/team-lead.agent.md'), 'utf-8');
 
@@ -143,6 +154,16 @@ test('copilot team-lead prompt uses difficulty-based model selection unless conf
   assert.match(content, /medium task -> `claude-sonnet-4\.6`/);
   assert.match(content, /difficult task -> `claude-opus-4\.6`/);
   assert.match(content, /reasoning-effort/);
+});
+
+test('copilot team-lead prompt requires one-shot builder spawns instead of reusing teammates across stories', () => {
+  const content = fs.readFileSync(path.join(repoRoot, '.github/agents/team-lead.agent.md'), 'utf-8');
+
+  assert.match(content, /Do NOT create a long-lived Builder or Validator mailbox/);
+  assert.match(content, /spawn a fresh `builder` agent/i);
+  assert.match(content, /spawn a fresh Validator/i);
+  assert.match(content, /A Builder result only counts if it includes a concrete commit SHA/i);
+  assert.match(content, /Do NOT keep them alive across stories/i);
 });
 
 test('ralph.sh maps abstract model tiers to backend-specific copilot and codex models', () => {
@@ -172,6 +193,16 @@ test('ralph.sh prepares codex teammate variants so the team lead can choose per-
   assert.match(script, /agents\.validator_medium\.config_file/);
   assert.match(script, /agents\.validator_difficult\.config_file/);
   assert.match(script, /If your runtime is Codex, use these exact named teammate roles when spawning/);
+});
+
+test('ralph.sh requires one-shot builder and validator runs for shared team-lead prompt backends', () => {
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+
+  assert.match(script, /Do NOT create long-lived Builder or Validator mailboxes/);
+  assert.match(script, /Spawn a fresh Builder for each story attempt/);
+  assert.match(script, /spawn a fresh Validator for that one story attempt/i);
+  assert.match(script, /A Builder result only counts if it includes a concrete commit SHA/i);
+  assert.match(script, /spawn a new Builder for the retry instead of reusing the previous Builder run/i);
 });
 
 function setupTempRepo() {

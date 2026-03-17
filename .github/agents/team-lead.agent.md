@@ -41,6 +41,7 @@ When spawning sub-agents with Copilot, respect explicit config first and only fa
    - SPAWN for: new features, new files/modules, new routes/pages/APIs, refactors, cross-layer changes, external integrations, anything requiring architectural judgment, or anything requiring non-trivial sequencing decisions across stories
    - Choose the planner model using the policy above
    - When you delegate planning, include the exact output path for the epic plan file, for example `plans/plan-EPIC-001.md`, and require the Planner to write the plan there before it returns
+3. **Do NOT create a long-lived Builder or Validator mailbox.** For Copilot, Builder and Validator must be one-shot `task` invocations scoped to a single story attempt. Do NOT ask them to wait for future instructions across stories.
 
 ## Workflow Per Story
 
@@ -53,22 +54,23 @@ Before starting a story, check the `passes` field in the PRD file.
 
 ### Build Phase
 1. Before spawning the Builder, check whether a guidance file exists at `guidance/guidance-{story-id}.md` (substituting the actual story ID, e.g. `guidance/guidance-US-003.md`).
-2. Use the `task` tool to spawn the `builder` agent with:
+2. Use the `task` tool to spawn a fresh `builder` agent for this one story attempt with:
    - The story details and acceptance criteria
    - The relevant section from the implementation plan
    - Any context from previous stories
    - **If the guidance file exists**, include this line explicitly: `Guidance file for this story: guidance/guidance-{story-id}.md — read it before implementing and follow the instructions in it.`
    - Choose the builder model using the policy above
-3. Wait for Builder to complete and return the commit SHA
+3. Wait for Builder to complete and inspect its final output.
+4. Do NOT treat task lifecycle notifications, waiting messages, or generic completion prose as success. A Builder result only counts if it includes a concrete commit SHA in the expected format.
 
 ### Validate Phase
-3. **Validator — only spawn if truly needed.** Ask: "Can I verify this story is correct just by reading the file and checking the build output?" If YES → **do NOT spawn the Validator** — self-verify instead. If NO → spawn it via the `task` tool.
+5. **Validator — only spawn if truly needed.** Ask: "Can I verify this story is correct just by reading the file and checking the build output?" If YES → **do NOT spawn the Validator** — self-verify instead. If NO → spawn a fresh Validator via the `task` tool for this one story attempt.
    - DO NOT spawn for: "add X to file Y" (read the file, check X is there), build/typecheck checks (trust Builder's output or run the command)
    - SPAWN for: logic correctness, new behaviour, API contracts, anything requiring judgment to verify
    - When self-verifying: read the changed file(s), check each criterion, decide PASS or FAIL.
    - If spawning: provide acceptance criteria + commit SHA + "Use `git diff <sha>~1 <sha>` to see exactly what changed."
    - Choose the validator model using the policy above
-4. Wait for Validator verdict (if spawned)
+6. Wait for Validator verdict (if spawned)
 
 ### Pushback Loop (max 2 total build+validate cycles)
 
@@ -77,7 +79,7 @@ The first build+validate cycle is attempt 1. If it fails, you get one retry (att
 5. If Validator reports **PASS** → mark story as passed in PRD, move to next story
 6. If Validator reports **FAIL**:
    - Increment attempt counter for this story
-   - If attempt count < 2: re-spawn Builder with the failure details (this is the retry)
+   - If attempt count < 2: spawn a new Builder for the retry and include the failure details
    - If attempt count = 2: **document the failure and move on**
 
 ## Failure Documentation
@@ -128,6 +130,7 @@ After processing ALL stories in the epic:
 ## Rules
 
 - NEVER write code yourself
+- Builder and Validator must be one-shot story-scoped tasks. Do NOT keep them alive across stories.
 - Only skip the Planner for genuinely simple epics — when in doubt, run it
 - Only skip the Validator for genuinely simple stories — when in doubt, spawn it; for complex stories the Validator must always run
 - NEVER exceed 2 total build+validate cycles per story
@@ -135,3 +138,4 @@ After processing ALL stories in the epic:
 - ALWAYS check `passes` field before starting a story
 - ALWAYS pass the commit SHA from Builder to Validator
 - ALWAYS exit the session immediately after writing and printing the final result
+- NEVER treat task notifications, idle teammate output, or summary prose as a substitute for a real Builder result and PRD update

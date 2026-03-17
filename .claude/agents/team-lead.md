@@ -44,10 +44,11 @@ For Claude subagents, choose the model based on task difficulty unless the envir
    - When spawning: use `subagent_type: "planner"`. If `RALPH_MODEL_PLANNER_EXPLICIT=1`, use `RALPH_MODEL_PLANNER`. Otherwise choose `haiku`/`sonnet`/`opus` based on task difficulty.
    - When you delegate planning, explicitly tell the Planner the exact output path for the epic plan file, for example `plans/plan-EPIC-001.md`, and require it to write the plan there before replying.
    - Wait for the Planner to finish, then read the plan file it wrote before moving on.
-3. **Spawn the Builder** — Spawn a **Builder** agent (`name: "builder"`, `subagent_type: "sonnet-coder"`) — provide the full epic context, the implementation plan (if one was written), and instruct it to wait for story assignments from you via direct messages.
-   - If `RALPH_MODEL_BUILDER_EXPLICIT=1`, use `RALPH_MODEL_BUILDER`.
-   - Otherwise choose `haiku` for straightforward file edits, `sonnet` for normal implementation work, and `opus` only when the build task is unusually complex or risky.
-4. **Validator — only spawn if truly needed.** Ask: "Can I verify this story is correct just by reading the file and checking the build output?" If YES → **do NOT spawn the Validator** — self-verify instead. If NO → spawn it.
+3. **Do NOT create a long-lived Builder mailbox.** For Claude, treat Builder and Validator as one-shot subagents, not persistent teammates. Do NOT ask them to wait for future direct messages. Do NOT use `SendMessage` or `shutdown_request` to coordinate story execution.
+4. **Builder/Validator policy.**
+   - For each story, spawn a fresh **Builder** with `subagent_type: "builder"` and give it the complete assignment for that one story.
+   - If `RALPH_MODEL_BUILDER_EXPLICIT=1`, use `RALPH_MODEL_BUILDER`. Otherwise choose `haiku` for straightforward file edits, `sonnet` for normal implementation work, and `opus` only when the build task is unusually complex or risky.
+   - **Validator — only spawn if truly needed.** Ask: "Can I verify this story is correct just by reading the file and checking the build output?" If YES → **do NOT spawn the Validator** — self-verify instead. If NO → spawn a fresh Validator for that one story.
    - DO NOT spawn for: "add X to file Y" (read the file, check X is there), build/typecheck checks (run the command yourself or trust Builder's output)
    - SPAWN for: logic correctness, new behaviour, API contracts, anything requiring judgment to verify
    - When self-verifying: read the changed file(s), check each criterion, decide PASS or FAIL.
@@ -64,16 +65,17 @@ Before starting a story, check the `passes` field in the PRD file (at the path p
 
 ### Build Phase
 1. Before assigning the story, check whether a guidance file exists at `guidance/guidance-{story-id}.md` (substituting the actual story ID, e.g. `guidance/guidance-US-003.md`).
-2. Send Builder a direct message with:
+2. Spawn a fresh Builder subagent for this story with:
    - Story ID and title
    - Full acceptance criteria
    - The relevant section from the implementation plan
    - Any context from previous stories or prior validator feedback
    - **If the guidance file exists**, include this line explicitly: `Guidance file for this story: guidance/guidance-{story-id}.md — read it before implementing and follow the instructions in it.`
-3. Wait for Builder to complete and message back with the commit SHA
+3. Wait for that Builder to finish and inspect its final response.
+4. Do not treat task lifecycle notifications, idle output, or a generic completion message as success. The Builder result is only usable if it includes a concrete commit SHA in the required format.
 
 ### Validate Phase
-4. **If Validator was spawned:** Send Validator a direct message with: the story's acceptance criteria + the commit SHA from Builder + "verify the implementation. Use `git diff <sha>~1 <sha>` to see exactly what changed." Wait for Validator verdict.
+5. **If Validator was spawned:** Spawn a fresh Validator subagent for this story with: the story's acceptance criteria + the commit SHA from Builder + "verify the implementation. Use `git diff <sha>~1 <sha>` to see exactly what changed." Wait for Validator verdict.
    **If no Validator:** Verify yourself — read the changed files, check each acceptance criterion is met, and determine PASS or FAIL.
 
 ### Pushback Loop (max 2 total build+validate cycles)
@@ -83,7 +85,7 @@ The first build+validate cycle is attempt 1. If it fails, you get one retry (att
 8. If Validator reports **PASS** → mark story as passed in PRD, move to next story
 9. If Validator reports **FAIL**:
    - Increment attempt counter for this story
-   - If attempt count < 2: send Builder the failure details, reassign the story task (this is the retry)
+   - If attempt count < 2: spawn a new Builder for the retry and include the failure details from validation
    - If attempt count = 2: **document the failure and move on** (see Failure Documentation below)
 
 ## Failure Documentation
@@ -137,6 +139,7 @@ After processing ALL stories in the epic (none left to attempt):
 ## Rules
 
 - NEVER write code yourself
+- For Claude, Builder and Validator must be one-shot story-scoped subagents. Do NOT keep them alive across stories.
 - Only skip the Planner for genuinely simple epics — when in doubt, run it
 - Only skip the Validator for genuinely simple stories — when in doubt, spawn it; for complex stories the Validator must always run
 - NEVER exceed 2 total build+validate cycles per story (first attempt + 1 retry = 2 total)
@@ -145,3 +148,4 @@ After processing ALL stories in the epic (none left to attempt):
 - ALWAYS document failures before moving on
 - Keep Builder and Validator unaware of each other's reasoning — Validator should only see the code (via commit SHA), not Builder's explanation of what it did
 - ALWAYS pass the commit SHA from Builder to Validator
+- NEVER treat task notifications, idle teammate output, or summary prose as a substitute for a real Builder result and PRD update

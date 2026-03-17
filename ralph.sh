@@ -930,20 +930,23 @@ $PENDING_STORIES_JSON
    - DO NOT spawn for: adding/removing lines in named files, adding console.log statements, changing config values, renaming things, isolated copy tweaks, or similarly trivial low-risk edits
    - When you do spawn the Planner, explicitly tell it to write the plan to $ROOT_DIR/plans/plan-${EPIC_ID}.md, and wait for that file.
    - If your agent runtime supports named sub-agents, use the dedicated planner role for this and choose its model using the policy above
-2. Process ALL user stories in priority order — do NOT stop until every story has been attempted
-3. For each story: check if passes=true in the PRD (skip those — they are already done), then Builder implements → verify → max 2 total cycles
-   - If your agent runtime supports named sub-agents, use the dedicated builder role for implementation and choose its model using the policy above
+2. Do NOT create long-lived Builder or Validator mailboxes. Builder and Validator must be one-shot story-scoped teammate runs. Do NOT ask them to wait for future instructions across stories.
+3. Process ALL user stories in priority order — do NOT stop until every story has been attempted
+4. For each story: check if passes=true in the PRD (skip those — they are already done), then Builder implements → verify → max 2 total cycles
+   - Spawn a fresh Builder for each story attempt. If your agent runtime supports named sub-agents, use the dedicated builder role for implementation and choose its model using the policy above
    - Before assigning each story, check if guidance/guidance-{story-id}.md exists (e.g. guidance/guidance-US-003.md). If it does, explicitly include this in your Builder assignment: Guidance file for this story: guidance/guidance-{story-id}.md — read it before implementing and follow the instructions in it.
+   - Do NOT treat task lifecycle notifications, idle output, or generic completion summaries as success. A Builder result only counts if it includes a concrete commit SHA you can hand to verification.
    - **Validator — only spawn if truly needed.** Ask yourself: \"Can I verify this story is correct just by reading the changed files?\" If YES → do NOT spawn the Validator — self-verify by reading the files and checking each criterion. If NO → spawn the Validator.
    - DO NOT spawn Validator for: adding a line to a named file (read the file, check the line is there), build/typecheck (trust Builder output or run the command yourself)
    - SPAWN Validator for: logic correctness, new behaviour, API contracts, anything requiring judgment to verify
-   - If your agent runtime supports named sub-agents, use the dedicated validator role when spawning and choose its model using the policy above
+   - If you do spawn a Validator, spawn a fresh Validator for that one story attempt. If your agent runtime supports named sub-agents, use the dedicated validator role when spawning and choose its model using the policy above
    - After each story attempt, update the story object in $PRD_ABS_PATH:
      - if the story passes, set passes=true and failureReason=null
      - if the story fails, set passes=false and failureReason to a short concrete reason string from the validator feedback
-4. Document any failures and move on to the next story
-5. When ALL stories have been processed (or skipped because already passed), verify the PRD file has been updated for every story (passes: true or false).
-6. Print a summary line \"DONE: X/Y stories passed\" and exit the session. Do not remain idle.
+5. If a story fails validation and still has retries left, spawn a new Builder for the retry instead of reusing the previous Builder run.
+6. Document any failures and move on to the next story
+7. When ALL stories have been processed (or skipped because already passed), verify the PRD file has been updated for every story (passes: true or false).
+8. Print a summary line \"DONE: X/Y stories passed\" and exit the session. Do not remain idle.
 
 ## Critical Rules
 - Do NOT stop after the first story — process ALL stories before exiting
@@ -951,6 +954,7 @@ $PENDING_STORIES_JSON
 - Once the final PRD updates are complete and you have printed the DONE summary, end the session immediately. Do not wait for more input.
 - Process stories sequentially: build → validate → next. Do not stop early.
 - After each story result (pass or fail), update $PRD_ABS_PATH to keep both passes and failureReason accurate for that story
+- NEVER treat task notifications, idle teammate output, or summary prose as a substitute for a real Builder result and PRD update
 
 Begin."
 
