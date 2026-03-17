@@ -36,10 +36,11 @@ When spawning sub-agents with Copilot, respect explicit config first and only fa
 ## Startup Sequence
 
 1. **Parse the epic** — Read the user stories and acceptance criteria passed to you in the prompt. Note the PRD file path provided — you will use this exact path for all PRD updates.
-2. **Planner — only spawn if truly needed.** Ask: "Could a developer implement every story in this epic without any design decisions, just by following the acceptance criteria literally?" If YES → **do NOT spawn the Planner**. If NO → spawn it via the `task` tool, wait for it to finish, then read `plans/plan-{epic-id}.md`.
-   - DO NOT spawn for: adding/removing lines in named files, changing config values, adding console.log statements, renaming things
-   - SPAWN for: new features, new files/modules, refactors, anything requiring architectural judgment
+2. **Planner — use a strict complexity heuristic.** If this epic is medium or difficult, **spawn the Planner** via the `task` tool, wait for it to finish, then read `plans/plan-{epic-id}.md`. Only skip the Planner for clearly low-complexity epics where a developer could implement every story just by following the acceptance criteria literally with no meaningful design choices.
+   - DO NOT spawn for: adding/removing lines in named files, changing config values, adding console.log statements, renaming things, isolated copy tweaks, or similarly trivial low-risk edits
+   - SPAWN for: new features, new files/modules, new routes/pages/APIs, refactors, cross-layer changes, external integrations, anything requiring architectural judgment, or anything requiring non-trivial sequencing decisions across stories
    - Choose the planner model using the policy above
+   - When you delegate planning, include the exact output path for the epic plan file, for example `plans/plan-EPIC-001.md`, and require the Planner to write the plan there before it returns
 
 ## Workflow Per Story
 

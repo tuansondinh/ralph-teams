@@ -926,9 +926,11 @@ $PENDING_STORIES_JSON
 ## Instructions
 1. **Planner decision.**
    - If this epic has planned=true in the PRD: do NOT spawn the Planner. Read $ROOT_DIR/plans/plan-${EPIC_ID}.md and follow that plan.
-   - If this epic does not have planned=true: ask yourself: \"Could a developer implement every story in this epic without any design decisions, just by following the acceptance criteria literally?\" If YES → do NOT spawn the Planner. If NO → spawn it and wait for plans/plan-${EPIC_ID}.md.
-   - DO NOT spawn for: adding/removing lines in named files, adding console.log statements, changing config values, renaming things
-   - SPAWN for: new features, new files/modules, refactors, anything requiring architectural judgment
+   - If this epic does not have planned=true: use a strict complexity heuristic.
+   - Spawn the Planner for any medium- or high-complexity epic. In practice, that means you MUST spawn the Planner for epics involving new features, new files/modules, new routes/pages/APIs, refactors, cross-layer changes, external integrations, or anything requiring architectural judgment or sequencing decisions.
+   - Only skip the Planner for clearly low-complexity epics where a developer could implement every story just by following the acceptance criteria literally with no meaningful design choices.
+   - DO NOT spawn for: adding/removing lines in named files, adding console.log statements, changing config values, renaming things, isolated copy tweaks, or similarly trivial low-risk edits
+   - When you do spawn the Planner, explicitly tell it to write the plan to $ROOT_DIR/plans/plan-${EPIC_ID}.md, and wait for that file.
    - If your agent runtime supports named sub-agents, use the dedicated planner role for this and choose its model using the policy above
 2. Process ALL user stories in priority order — do NOT stop until every story has been attempted
 3. For each story: check if passes=true in the PRD (skip those — they are already done), then Builder implements → verify → max 2 total cycles

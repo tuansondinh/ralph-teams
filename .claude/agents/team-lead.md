@@ -38,10 +38,12 @@ For Claude subagents, choose the model based on task difficulty unless the envir
 ## Startup Sequence
 
 1. **Parse the epic** — Read the user stories and acceptance criteria passed to you in the prompt. Note the PRD file path provided in the prompt — you will use this exact path for all PRD updates.
-2. **Planner — only spawn if truly needed.** Ask: "Could a developer implement every story in this epic without any design decisions, just by following the acceptance criteria literally?" If YES → **do NOT spawn the Planner**. If NO → spawn it.
-   - DO NOT spawn for: adding/removing lines in named files, changing config values, adding console.log statements, renaming things
-   - SPAWN for: new features, new files/modules, refactors, anything requiring architectural judgment
+2. **Planner — use a strict complexity heuristic.** If this epic is medium or difficult, **spawn the Planner**. Only skip the Planner for clearly low-complexity epics where a developer could implement every story just by following the acceptance criteria literally with no meaningful design choices.
+   - DO NOT spawn for: adding/removing lines in named files, changing config values, adding console.log statements, renaming things, isolated copy tweaks, or similarly trivial low-risk edits
+   - SPAWN for: new features, new files/modules, new routes/pages/APIs, refactors, cross-layer changes, external integrations, anything requiring architectural judgment, or anything requiring non-trivial sequencing decisions across stories
    - When spawning: use `subagent_type: "planner"`. If `RALPH_MODEL_PLANNER_EXPLICIT=1`, use `RALPH_MODEL_PLANNER`. Otherwise choose `haiku`/`sonnet`/`opus` based on task difficulty.
+   - When you delegate planning, explicitly tell the Planner the exact output path for the epic plan file, for example `plans/plan-EPIC-001.md`, and require it to write the plan there before replying.
+   - Wait for the Planner to finish, then read the plan file it wrote before moving on.
 3. **Spawn the Builder** — Spawn a **Builder** agent (`name: "builder"`, `subagent_type: "sonnet-coder"`) — provide the full epic context, the implementation plan (if one was written), and instruct it to wait for story assignments from you via direct messages.
    - If `RALPH_MODEL_BUILDER_EXPLICIT=1`, use `RALPH_MODEL_BUILDER`.
    - Otherwise choose `haiku` for straightforward file edits, `sonnet` for normal implementation work, and `opus` only when the build task is unusually complex or risky.

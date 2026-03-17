@@ -44,6 +44,84 @@ test('agent prompt assets reference the canonical guidance file path', () => {
   }
 });
 
+test('planner prompt assets require writing the epic plan markdown file', () => {
+  const promptFiles = [
+    '.codex/agents/planner.toml',
+    '.github/agents/planner.agent.md',
+    '.claude/agents/planner.md',
+  ];
+
+  for (const relativePath of promptFiles) {
+    const content = fs.readFileSync(path.join(repoRoot, relativePath), 'utf-8');
+    assert.match(
+      content,
+      /write.*plan.*(path|disk)|persist.*disk/i,
+      `${relativePath} should require persisting the plan file`,
+    );
+    assert.match(
+      content,
+      /plans\/plan-\{?epic-id\}?\.md|plans\/plan-<epic-id>\.md/i,
+      `${relativePath} should reference the epic markdown plan path`,
+    );
+  }
+});
+
+test('builder prompt assets require reading the epic plan markdown file', () => {
+  const promptFiles = [
+    '.codex/agents/builder.toml',
+    '.github/agents/builder.agent.md',
+    '.claude/agents/builder.md',
+  ];
+
+  for (const relativePath of promptFiles) {
+    const content = fs.readFileSync(path.join(repoRoot, relativePath), 'utf-8');
+    assert.match(
+      content,
+      /read .*plan|check .*plan/i,
+      `${relativePath} should require reading the plan file`,
+    );
+    assert.match(
+      content,
+      /plans\/plan-\{?epic-id\}?\.md|plans\/plan-<epic-id>\.md/i,
+      `${relativePath} should reference the epic markdown plan path`,
+    );
+  }
+});
+
+test('team lead prompts require passing the exact plan file path to the planner', () => {
+  const promptFiles = [
+    'ralph.sh',
+    '.github/agents/team-lead.agent.md',
+    '.claude/agents/team-lead.md',
+  ];
+
+  for (const relativePath of promptFiles) {
+    const content = fs.readFileSync(path.join(repoRoot, relativePath), 'utf-8');
+    assert.match(
+      content,
+      /exact output path|write the plan to .*plan-|explicitly tell it to write the plan to/i,
+      `${relativePath} should require telling the planner where to write the plan`,
+    );
+  }
+});
+
+test('team lead prompts require planning for medium or difficult epics', () => {
+  const promptFiles = [
+    'ralph.sh',
+    '.github/agents/team-lead.agent.md',
+    '.claude/agents/team-lead.md',
+  ];
+
+  for (const relativePath of promptFiles) {
+    const content = fs.readFileSync(path.join(repoRoot, relativePath), 'utf-8');
+    assert.match(
+      content,
+      /medium.*spawn the Planner|difficult.*spawn the Planner|spawn the Planner.*medium|spawn the Planner.*difficult/i,
+      `${relativePath} should require a planner for medium/high-complexity epics`,
+    );
+  }
+});
+
 test('claude team-lead prompt uses difficulty-based model selection unless config overrides are set', () => {
   const content = fs.readFileSync(path.join(repoRoot, '.claude/agents/team-lead.md'), 'utf-8');
 
