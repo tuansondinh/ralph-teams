@@ -16,6 +16,8 @@ The system has two layers:
   - `builder` makes changes and runs tests
   - `validator` verifies the result independently
 
+Across all backends, `builder` and `validator` are one-shot story-scoped workers. The Team Lead must spawn a fresh Builder for each story attempt, spawn a fresh Validator when verification needs an independent agent, and never treat idle/task-lifecycle output as completion. A build attempt only counts when the Builder returns a concrete commit SHA and the Team Lead persists the story result to `prd.json`.
+
 Default Team Lead policy by backend:
 - Claude: keep `team-lead` on `opus`; for spawned work use `haiku` for easy tasks, `sonnet` for medium tasks, `opus` for difficult tasks
 - Copilot: resolve those same tiers to `claude-haiku-4.5`, `claude-sonnet-4.6`, and `claude-opus-4.6`
@@ -67,8 +69,8 @@ flowchart TB
         PP{Epic planned?}
         P[Planner creates plan]
         Q{Story already passed}
-        BU[Builder implements]
-        VA[Validator checks]
+        BU[Fresh Builder implements one story attempt]
+        VA[Fresh Validator checks one story attempt]
         R{Validation passed}
         SP[Mark story passed in PRD]
         F[Record failure]
@@ -441,6 +443,7 @@ Notes:
 - Ralph enables Codex multi-agent mode per run, so no global `~/.codex/config.toml` edits are required
 - Codex runs from each epic worktree and is granted write access to the repo root so it can update the shared PRD
 - Codex does not use a separate repo-local Team Lead role file; the Team Lead policy comes from the runtime prompt assembled in `ralph.sh`, while `.codex/agents/*.toml` define the spawned planner, builder, validator, and merger roles
+- Codex follows the same one-shot story-scoped Builder/Validator contract as Claude and Copilot; the runtime prompt in `ralph.sh` enforces that policy for Codex Team Leads
 
 ## PRD Format
 
@@ -524,7 +527,10 @@ The current execution contract is:
 - already-passed stories are skipped
 - rerunning Ralph automatically resets `failed` and `partial` epics back to `pending` so only unfinished work is retried
 - each story gets at most two build/validate cycles
+- Builder and Validator are one-shot story-scoped workers, never long-lived mailboxes shared across stories
+- a Builder attempt only counts when the Team Lead receives a concrete commit SHA for that story attempt
 - the validator checks output independently from the builder's reasoning
+- `DONE: X/Y stories passed` is a required session footer, but the durable completion signal is the `prd.json` story state updated by the Team Lead
 - after updating `prd.json` for all attempted stories, the team lead must print `DONE: X/Y stories passed` and exit the session immediately
 - pressing `Ctrl-C` writes `ralph-state.json` so the run can be resumed later with `ralph-teams resume`
 

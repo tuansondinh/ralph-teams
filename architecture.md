@@ -143,13 +143,16 @@ The team lead is instructed to:
 - skip planner only for clearly low-complexity unplanned epics
 - plan only the pending stories for that epic
 - process stories sequentially
-- use builder then validator per story
+- spawn a fresh Builder for each story attempt
+- spawn a fresh Validator only when independent verification is needed, and only for that single story attempt
+- require a concrete Builder commit SHA before a build attempt can advance to verification
 - update `prd.json` after each attempted story and finish with a DONE summary
 
 The shell contract is simple and important:
 
 - agents communicate progress by writing logs
-- agents communicate completion by updating story pass state in `prd.json`
+- agents communicate durable completion by updating story pass state in `prd.json`
+- `DONE: X/Y stories passed` is treated as a required footer, not as authoritative state on its own
 
 The shell never tries to infer completion from agent intent alone. It trusts the PRD state.
 
@@ -309,6 +312,8 @@ This makes failure modes inspectable after the fact because evidence is left on 
 - `.codex/agents/`
 
 For Codex specifically, `.codex/agents/` defines the spawned teammate roles. The Codex Team Lead policy itself is injected by `ralph.sh` at runtime rather than coming from a separate `.codex/agents/team-lead.toml` file.
+
+For Claude and Copilot, the Team Lead contract lives in `.claude/agents/team-lead.md` and `.github/agents/team-lead.agent.md`. All three backends now share the same coordination rule: Builder and Validator are one-shot story-scoped workers, not persistent teammates reused across stories.
 
 ### Tests
 
