@@ -11,11 +11,14 @@ ralph-teams run --parallel={max_parallel_epics}
 ```bash
 npm install -g ralph-teams
 
-# create the prd.json with the agent, optionally create an implementation plan for each epic
+# discuss with an agent and create the prd.json (epics and user stories)
 ralph-teams init 
 
 # start the loop, by default uses claude
 ralph-teams run
+
+# optionally before run, you can also plan epics before hand, otherwise this will be done automatically by the planner:
+ralph-teams plan
 ```
 
 ## Flow
