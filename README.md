@@ -25,8 +25,8 @@ flowchart TB
     A[User runs Ralph] --> B[Validate PRD and tools]
     B --> C[Pick next ready epic]
     C --> D[Spawns Team Lead for that epic]
-    D --> E[Spawns Epic Planner (if necessary)]
-    E --> F[Spawns Builder and Validator (if necessary)]
+    D --> E[Spawns Epic Planner, if necessary]
+    E --> F[Spawns Builder and Validator, if necessary]
     F --> G[Update PRD and progress]
     G --> H{More ready epics?}
     H -->|Yes| C
