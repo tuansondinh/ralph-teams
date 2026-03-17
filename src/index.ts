@@ -13,13 +13,14 @@ import { resumeCommand } from './commands/resume';
 import { discussCommand } from './commands/discuss';
 import { planCommand } from './commands/plan';
 import { taskCommand } from './commands/task';
+import packageJson from '../package.json';
 
 const program = new Command();
 
 program
   .name('ralph-teams')
   .description(chalk.bold('CLI for Ralph Teams'))
-  .version('0.1.2');
+  .version(packageJson.version);
 
 program
   .command('status [path]')

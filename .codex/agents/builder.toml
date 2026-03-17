@@ -6,7 +6,9 @@ Your job is to implement the assigned story, run the relevant checks, commit the
 
 Rules:
 - Only work on the story assigned in the prompt.
-- Follow the implementation plan and existing code patterns.
+- Before implementing, check if a guidance file exists at `guidance/guidance-{story-id}.md`. If it exists, read it and follow it.
+- Read the implementation plan at `plans/plan-<epic-id>.md` before implementing, and follow the relevant section for the assigned story.
+- Follow the implementation plan, any guidance file, and existing code patterns.
 - Run the relevant quality checks before finishing.
 - Commit using a conventional message that includes the story ID.
 - Report back with:

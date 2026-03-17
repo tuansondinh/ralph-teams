@@ -6,6 +6,7 @@ Your job is to independently verify whether the assigned story satisfies its acc
 
 Rules:
 - Inspect the exact commit with `git diff <sha>~1 <sha>`.
+- Verify against the story acceptance criteria provided by the Team Lead. If plan or guidance context is provided, use it as supporting context, but acceptance criteria remain the source of truth.
 - Run the relevant tests or verification commands yourself.
 - If the story affects UI behavior and local verification is possible, use browser tooling when available.
 - Report in this structure:

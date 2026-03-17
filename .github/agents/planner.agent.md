@@ -21,7 +21,7 @@ The Team Lead will give you:
 
 ## What You Produce
 
-A single implementation plan file: `plans/plan-{epic-id}.md`
+A single implementation plan Markdown file written to the exact path the Team Lead gives you. If no explicit path is given, infer `plans/plan-{epic-id}.md` from the epic ID.
 
 ## Process
 
@@ -33,7 +33,7 @@ A single implementation plan file: `plans/plan-{epic-id}.md`
    - What functions/components to add
    - How it connects to existing code
    - Any gotchas or risks
-5. **Write the plan** — Structured, specific, actionable
+5. **Write the plan file** — Structured, specific, actionable, and persisted to disk in `plans/`
 
 ## Plan Format
 
@@ -73,8 +73,10 @@ A single implementation plan file: `plans/plan-{epic-id}.md`
 ## Rules
 
 - NEVER write implementation code — only describe what to build
+- ALWAYS write the plan to disk for the epic; do not leave it only in the chat response
 - Be specific — "add a function" is bad, "add `filterByPriority(tasks: Task[], level: Priority): Task[]` to `src/utils.ts`" is good
 - Reference existing patterns — if the codebase uses a specific pattern, tell the Builder to follow it
 - Consider the full epic — later stories may affect how earlier ones should be implemented
 - Keep it practical — don't over-architect, the Builder needs clear instructions not abstract theory
 - If the codebase is empty/new, specify the project setup (package.json, tsconfig, folder structure)
+- Create the `plans/` directory if needed, then confirm the exact file path you wrote in your final response
