@@ -447,7 +447,7 @@ prompt_to_remove_stale_worktree_dir() {
 # --- Ensure loop branch exists and is checked out ---
 ensure_runtime_gitignore_entries
 
-mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$GUIDANCE_DIR" "$STATE_DIR" "$WORKTREES_DIR"
+mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$STATE_DIR" "$WORKTREES_DIR"
 
 if [ "$CURRENT_BRANCH" != "$LOOP_BRANCH" ]; then
   if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then

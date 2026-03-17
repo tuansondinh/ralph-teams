@@ -89,8 +89,7 @@ Core shared modules:
 - `src/config.ts`: `ralph.config.yml` parsing, validation, defaults, CLI override merge
 - `src/token-parser.ts`: backend log token extraction
 - `src/commands/plan.ts`: guided epic planning entrypoint and prompt builder
-- `src/discuss.ts`: shared agent spawning and retry-guidance helpers
-- `src/guidance.ts`: persisted guidance file helpers
+- `src/discuss.ts`: shared agent spawning and discussion helpers
 
 These modules are mostly synchronous and file-oriented. That matches the rest of the codebase, which prefers simple filesystem contracts over in-memory services.
 
@@ -308,11 +307,10 @@ This makes failure modes inspectable after the fact because evidence is left on 
 - `src/config.ts`
 - `prd.json.example`
 
-### Planning and retry guidance
+### Planning and discussion helpers
 
 - `src/commands/plan.ts` — interactive planning sessions
 - `src/discuss.ts` — internal module for discuss sessions (used by plan command)
-- `src/guidance.ts` — persisted guidance file helpers
 
 - `src/runtime-paths.ts` — runtime directory constants
 
