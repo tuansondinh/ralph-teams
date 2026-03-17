@@ -15,30 +15,27 @@ const BASH = fs.existsSync('/opt/homebrew/bin/bash') ? '/opt/homebrew/bin/bash' 
 
 test('ralph.sh instructs the team lead to pass the canonical guidance file path to Builder', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
+  const policy = fs.readFileSync(path.join(repoRoot, 'prompts/team-lead-policy.md'), 'utf-8');
 
   assert.match(
     script,
-    /Guidance file for this story: guidance\/guidance-\{story-id\}\.md/,
+    /When the policy refers to guidance files, use this runtime path pattern: .*GUIDANCE_DIR.*guidance-\{story-id\}\.md/,
   );
-  assert.match(
-    script,
-    /read it before implementing and follow the instructions in it/,
-  );
+  assert.match(policy, /read it before implementing and follow the instructions in it/);
 });
 
 test('agent prompt assets reference the canonical guidance file path', () => {
   const promptFiles = [
-    '.github/agents/team-lead.agent.md',
     '.github/agents/builder.agent.md',
-    '.claude/agents/team-lead.md',
     '.claude/agents/builder.md',
+    'prompts/team-lead-policy.md',
   ];
 
   for (const relativePath of promptFiles) {
     const content = fs.readFileSync(path.join(repoRoot, relativePath), 'utf-8');
     assert.match(
       content,
-      /guidance\/guidance-\{story-id\}\.md|guidance\/guidance-US-003\.md/,
+      /ralph-teams\/guidance\/guidance-\{story-id\}\.md|ralph-teams\/guidance\/guidance-US-003\.md|guidance\/guidance-US-003\.md/,
       `${relativePath} should use the canonical guidance filename`,
     );
   }
@@ -88,38 +85,35 @@ test('builder prompt assets require reading the epic plan markdown file', () => 
   }
 });
 
-test('team lead prompts require passing the exact plan file path to the planner', () => {
+test('team lead wrappers reference the canonical Team Lead policy file', () => {
   const promptFiles = [
-    'ralph.sh',
     '.github/agents/team-lead.agent.md',
     '.claude/agents/team-lead.md',
   ];
 
   for (const relativePath of promptFiles) {
     const content = fs.readFileSync(path.join(repoRoot, relativePath), 'utf-8');
-    assert.match(
-      content,
-      /exact output path|write the plan to .*plan-|explicitly tell it to write the plan to/i,
-      `${relativePath} should require telling the planner where to write the plan`,
-    );
+    assert.match(content, /prompts\/team-lead-policy\.md/);
   }
 });
 
-test('team lead prompts require planning for medium or difficult epics', () => {
-  const promptFiles = [
-    'ralph.sh',
-    '.github/agents/team-lead.agent.md',
-    '.claude/agents/team-lead.md',
-  ];
+test('ralph.sh loads the canonical Team Lead policy for runtime prompts', () => {
+  const script = fs.readFileSync(scriptPath, 'utf-8');
 
-  for (const relativePath of promptFiles) {
-    const content = fs.readFileSync(path.join(repoRoot, relativePath), 'utf-8');
-    assert.match(
-      content,
-      /medium.*spawn the Planner|difficult.*spawn the Planner|spawn the Planner.*medium|spawn the Planner.*difficult/i,
-      `${relativePath} should require a planner for medium/high-complexity epics`,
-    );
-  }
+  assert.match(script, /TEAM_LEAD_POLICY_FILE=.*prompts\/team-lead-policy\.md/);
+  assert.match(script, /TEAM_LEAD_POLICY="\$\(cat \"\$TEAM_LEAD_POLICY_FILE\"\)"/);
+  assert.match(script, /## Canonical Team Lead Policy/);
+});
+
+test('canonical Team Lead policy covers planner and validator heuristics', () => {
+  const content = fs.readFileSync(path.join(repoRoot, 'prompts/team-lead-policy.md'), 'utf-8');
+
+  assert.match(content, /spawn the Planner for any medium- or high-complexity epic/i);
+  assert.match(content, /explicitly tell the Planner the exact output path/i);
+  assert.match(content, /Guidance file for this story: ralph-teams\/guidance\/guidance-\{story-id\}\.md/);
+  assert.match(content, /Default to spawning the Validator for any medium- or high-complexity story/i);
+  assert.match(content, /If you are unsure, spawn the Validator/i);
+  assert.match(content, /Print `DONE: X\/Y stories passed` and exit immediately/i);
 });
 
 test('claude team-lead prompt uses difficulty-based model selection unless config overrides are set', () => {
@@ -136,7 +130,7 @@ test('claude team-lead prompt uses difficulty-based model selection unless confi
 test('claude team-lead prompt requires one-shot builder spawns instead of a persistent mailbox', () => {
   const content = fs.readFileSync(path.join(repoRoot, '.claude/agents/team-lead.md'), 'utf-8');
 
-  assert.match(content, /Do NOT create a long-lived Builder mailbox/);
+  assert.match(content, /prompts\/team-lead-policy\.md/);
   assert.match(content, /spawn a fresh Builder/i);
   assert.match(content, /subagent_type: "builder"/);
   assert.match(content, /Do NOT use `SendMessage` or `shutdown_request`/);
@@ -159,11 +153,10 @@ test('copilot team-lead prompt uses difficulty-based model selection unless conf
 test('copilot team-lead prompt requires one-shot builder spawns instead of reusing teammates across stories', () => {
   const content = fs.readFileSync(path.join(repoRoot, '.github/agents/team-lead.agent.md'), 'utf-8');
 
-  assert.match(content, /Do NOT create a long-lived Builder or Validator mailbox/);
+  assert.match(content, /prompts\/team-lead-policy\.md/);
   assert.match(content, /spawn a fresh `builder` agent/i);
   assert.match(content, /spawn a fresh Validator/i);
-  assert.match(content, /A Builder result only counts if it includes a concrete commit SHA/i);
-  assert.match(content, /Do NOT keep them alive across stories/i);
+  assert.match(content, /Do NOT keep Builder or Validator alive across stories/i);
 });
 
 test('ralph.sh maps abstract model tiers to backend-specific copilot and codex models', () => {
@@ -198,10 +191,9 @@ test('ralph.sh prepares codex teammate variants so the team lead can choose per-
 test('ralph.sh requires one-shot builder and validator runs for shared team-lead prompt backends', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
-  assert.match(script, /Do NOT create long-lived Builder or Validator mailboxes/);
-  assert.match(script, /Spawn a fresh Builder for each story attempt/);
-  assert.match(script, /spawn a fresh Validator for that one story attempt/i);
-  assert.match(script, /A Builder result only counts if it includes a concrete commit SHA/i);
+  assert.match(script, /TEAM_LEAD_POLICY="\$\(cat \"\$TEAM_LEAD_POLICY_FILE\"\)"/);
+  assert.match(script, /## Runtime-Specific Notes/);
+  assert.match(script, /If your runtime supports named sub-agents, use the dedicated planner, builder, and validator roles/i);
   assert.match(script, /spawn a new Builder for the retry instead of reusing the previous Builder run/i);
 });
 
@@ -302,6 +294,7 @@ function setupMultiEpicRepo(
     '#!/bin/sh',
     'STDIN=$(cat)',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
+    'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path$/ {found=1}\')',
     'if [ -n "$EPIC_ID" ]; then',
     '  ENV_KEY="MOCK_RESULT_$(printf "%s" "$EPIC_ID" | tr - _)"',
     '  RESULT_VAL=$(printenv "$ENV_KEY" 2>/dev/null || true)',
@@ -311,14 +304,14 @@ function setupMultiEpicRepo(
     '    if [ "$RESULT_VAL" = "PASS" ]; then',
     '      node -e "' +
       "const fs=require('fs');" +
-      "const f='prd.json';" +
+      "const f=process.argv[2];" +
       "const p=JSON.parse(fs.readFileSync(f,'utf8'));" +
       "const e=p.epics.find(x=>x.id===process.argv[1]);" +
       "if(e)e.userStories.forEach(s=>{s.passes=true;});" +
       "const t=f+'.tmp.'+process.pid;" +
       "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
       "fs.renameSync(t,f);" +
-    '" "$EPIC_ID"',
+    '" "$EPIC_ID" "$PRD_PATH"',
     '    fi',
     '  fi',
     '  if [ "$HANG_VAL" = "1" ]; then',
@@ -381,18 +374,19 @@ test('codex backend suppresses bare file-path chatter in stdout while keeping ou
     '#!/bin/sh',
     'STDIN=$(cat)',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
+    'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path$/ {found=1}\')',
     'printf "./src/config.ts\\n"',
     'printf "./src/index.ts\\n"',
     'node -e "' +
       "const fs=require('fs');" +
-      "const f='prd.json';" +
+      "const f=process.argv[2];" +
       "const p=JSON.parse(fs.readFileSync(f,'utf8'));" +
       "const e=p.epics.find(x=>x.id===process.argv[1]);" +
       "if(e)e.userStories.forEach(s=>{s.passes=true;});" +
       "const t=f+'.tmp.'+process.pid;" +
       "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
       "fs.renameSync(t,f);" +
-    '" "$EPIC_ID"',
+    '" "$EPIC_ID" "$PRD_PATH"',
     'printf "PASS\\n"',
   ].join('\n');
   fs.writeFileSync(path.join(binDir, 'codex'), mockCodex);
@@ -524,7 +518,7 @@ test('US-001: wave boundaries are logged to progress.txt', () => {
   // Use --parallel 1 so progress.txt uses "Wave N" section headers
   runRalph(tempDir, env, ['--parallel', '1']);
 
-  const progress = fs.readFileSync(path.join(tempDir, 'progress.txt'), 'utf-8');
+  const progress = fs.readFileSync(path.join(tempDir, 'ralph-teams', 'progress.txt'), 'utf-8');
   assert.match(progress, /=== Wave 1 —/);
   assert.match(progress, /=== Wave 2 —/);
   assert.match(progress, /EPIC-001/);
@@ -591,7 +585,7 @@ test('US-002: worktrees are cleaned up after wave completes', () => {
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
 
   // .worktrees/EPIC-001 should NOT exist after cleanup
-  assert.equal(fs.existsSync(path.join(tempDir, '.worktrees', 'EPIC-001')), false);
+  assert.equal(fs.existsSync(path.join(tempDir, 'ralph-teams', '.worktrees', 'EPIC-001')), false);
 });
 
 test('US-002: stale unregistered worktree directory asks before deletion and aborts when declined', () => {
@@ -600,7 +594,7 @@ test('US-002: stale unregistered worktree directory asks before deletion and abo
     { 'EPIC-001': 'PASS' },
   );
 
-  const stalePath = path.join(tempDir, '.worktrees', 'EPIC-001');
+  const stalePath = path.join(tempDir, 'ralph-teams', '.worktrees', 'EPIC-001');
   fs.mkdirSync(stalePath, { recursive: true });
   fs.writeFileSync(path.join(stalePath, 'KEEP.txt'), 'preserve me\n');
 
@@ -625,7 +619,7 @@ test('US-002: stale unregistered worktree directory is removed after confirmatio
     { 'EPIC-001': 'PASS' },
   );
 
-  const stalePath = path.join(tempDir, '.worktrees', 'EPIC-001');
+  const stalePath = path.join(tempDir, 'ralph-teams', '.worktrees', 'EPIC-001');
   fs.mkdirSync(stalePath, { recursive: true });
   fs.writeFileSync(path.join(stalePath, 'KEEP.txt'), 'preserve me\n');
 
@@ -655,7 +649,7 @@ test('US-002: two independent epics each get separate log files', () => {
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
 
-  const logsDir = path.join(tempDir, 'logs');
+  const logsDir = path.join(tempDir, 'ralph-teams', 'logs');
   assert.ok(fs.existsSync(logsDir), 'logs/ directory should exist');
   const logFiles = fs.readdirSync(logsDir);
   const epic1Logs = logFiles.filter((f) => f.includes('EPIC-001'));
@@ -764,10 +758,12 @@ test('US-003: --parallel 1 runs all epics in wave sequentially and all pass', ()
  */
 function setupMergeRepo(
   epics: Array<{ id: string; title: string; fileName: string }>,
+  options?: { dirtyLoopBranchBeforeMerge?: boolean },
 ) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-merge-'));
   const binDir = path.join(tempDir, 'bin');
   fs.mkdirSync(binDir);
+  const dirtyLoopBranchBeforeMerge = options?.dirtyLoopBranchBeforeMerge === true;
 
   execFileSync('git', ['init', '-b', 'main'], { cwd: tempDir });
   execFileSync('git', ['config', 'user.name', 'Ralph Test'], { cwd: tempDir });
@@ -792,8 +788,10 @@ function setupMergeRepo(
   // story passes so process_epic_result() marks it completed.
   const mockClaude = [
     '#!/bin/sh',
+    `DIRTY_LOOP_BEFORE_MERGE="${dirtyLoopBranchBeforeMerge ? '1' : '0'}"`,
     'STDIN=$(cat)',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
+    'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path$/ {found=1}\')',
     'if [ -n "$EPIC_ID" ]; then',
     '  ENV_KEY="MOCK_FILE_$(printf "%s" "$EPIC_ID" | tr - _)"',
     '  FILE_NAME=$(printenv "$ENV_KEY" 2>/dev/null || true)',
@@ -802,16 +800,30 @@ function setupMergeRepo(
     '    git add "$FILE_NAME"',
     '    git commit -m "feat: add $FILE_NAME for $EPIC_ID"',
     '  fi',
+    '  if [ "$DIRTY_LOOP_BEFORE_MERGE" = "1" ]; then',
+    '    MAIN_ROOT=$(git worktree list --porcelain | awk \'/^worktree / {print $2; exit}\')',
+    '    if [ -n "$MAIN_ROOT" ] && [ -f "$MAIN_ROOT/prd.json" ]; then',
+    '      node -e "' +
+      "const fs=require('fs');" +
+      "const f=process.argv[1];" +
+      "const p=JSON.parse(fs.readFileSync(f,'utf8'));" +
+      "p.project=String(p.project)+' dirty';" +
+      "const t=f+'.tmp.'+process.pid;" +
+      "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
+      "fs.renameSync(t,f);" +
+      '" "$MAIN_ROOT/prd.json"',
+    '    fi',
+    '  fi',
     '  node -e "' +
       "const fs=require('fs');" +
-      "const f='prd.json';" +
+      "const f=process.argv[2];" +
       "const p=JSON.parse(fs.readFileSync(f,'utf8'));" +
       "const e=p.epics.find(x=>x.id===process.argv[1]);" +
       "if(e)e.userStories.forEach(s=>{s.passes=true;});" +
       "const t=f+'.tmp.'+process.pid;" +
       "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
       "fs.renameSync(t,f);" +
-    '" "$EPIC_ID"',
+    '" "$EPIC_ID" "$PRD_PATH"',
     'fi',
     'exit 0',
   ].join('\n');
@@ -840,8 +852,97 @@ test('US-004: merge is attempted after wave completes — progress.txt contains 
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
 
-  const progress = fs.readFileSync(path.join(tempDir, 'progress.txt'), 'utf-8');
+  const progress = fs.readFileSync(path.join(tempDir, 'ralph-teams', 'progress.txt'), 'utf-8');
   assert.match(progress, /\[EPIC-001\] MERGED/);
+});
+
+test('US-004: epic success is preserved when only the worktree PRD is updated', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-worktree-prd-'));
+  const binDir = path.join(tempDir, 'bin');
+  fs.mkdirSync(binDir);
+
+  execFileSync('git', ['init', '-b', 'main'], { cwd: tempDir });
+  execFileSync('git', ['config', 'user.name', 'Ralph Test'], { cwd: tempDir });
+  execFileSync('git', ['config', 'user.email', 'ralph@example.com'], { cwd: tempDir });
+
+  const prd = {
+    project: 'Worktree PRD Test',
+    epics: [
+      {
+        id: 'EPIC-001',
+        title: 'Alpha',
+        status: 'pending',
+        userStories: [{ id: 'US-001', title: 'Story', passes: false }],
+      },
+    ],
+  };
+  fs.writeFileSync(path.join(tempDir, 'prd.json'), JSON.stringify(prd, null, 2));
+  fs.writeFileSync(path.join(tempDir, 'README.md'), 'initial\n');
+  execFileSync('git', ['add', '.'], { cwd: tempDir });
+  execFileSync('git', ['commit', '-m', 'chore: initial'], { cwd: tempDir });
+
+  const mockClaude = [
+    '#!/bin/sh',
+    'STDIN=$(cat)',
+    'WORKTREE=$(printf "%s" "$STDIN" | awk \'/ALL work for this epic MUST happen in this directory:/ {sub(/^.*directory: /, ""); print; exit}\')',
+    'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path$/ {found=1}\')',
+    'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
+    'cd "$WORKTREE" || exit 1',
+    'node -e "' +
+      "const fs=require('fs');" +
+      "const f=process.argv[1];" +
+      "const epicId=process.argv[2];" +
+      "const p=JSON.parse(fs.readFileSync(f,'utf8'));" +
+      "const e=p.epics.find(x=>x.id===epicId);" +
+      "if(e)e.userStories.forEach(s=>{s.passes=true;});" +
+      "const t=f+'.tmp.'+process.pid;" +
+      "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
+      "fs.renameSync(t,f);" +
+    '" "$PRD_PATH" "$EPIC_ID"',
+    'git add prd.json',
+    'git commit -m "feat: mark story passed in worktree PRD"',
+    'exit 0',
+  ].join('\n');
+  fs.writeFileSync(path.join(binDir, 'claude'), mockClaude);
+  fs.chmodSync(path.join(binDir, 'claude'), 0o755);
+
+  const env: Record<string, string> = {
+    ...process.env as Record<string, string>,
+    PATH: `${binDir}:${process.env.PATH ?? ''}`,
+    RALPH_MAX_CRASH_RETRIES: '0',
+  };
+
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.match(result.stdout, /\[EPIC-001\] PASSED/);
+
+  const progress = fs.readFileSync(path.join(tempDir, 'ralph-teams', 'progress.txt'), 'utf-8');
+  assert.match(progress, /\[EPIC-001\] MERGED/);
+
+  const finalPrd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8')) as {
+    epics: Array<{ status: string; userStories: Array<{ passes: boolean }> }>;
+  };
+  assert.equal(finalPrd.epics[0]?.status, 'completed');
+  assert.equal(finalPrd.epics[0]?.userStories[0]?.passes, true);
+});
+
+test('ralph.sh auto-adds runtime artifacts to the repo .gitignore', () => {
+  const { tempDir, env } = setupMergeRepo([
+    { id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' },
+  ]);
+
+  const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
+    cwd: tempDir,
+    encoding: 'utf-8',
+    env,
+    input: 'y\n',
+  });
+
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.match(result.stdout, /Updated \.gitignore with Ralph runtime directory/);
+
+  const gitignore = fs.readFileSync(path.join(tempDir, '.gitignore'), 'utf-8');
+  assert.match(gitignore, /^ralph-teams\/$/m);
 });
 
 test('US-004: clean merge succeeds without spawning merger agent', () => {
@@ -856,11 +957,28 @@ test('US-004: clean merge succeeds without spawning merger agent', () => {
   assert.match(result.stdout, /\[EPIC-001\] Merge successful \(clean\)/);
 
   // No merger agent log should exist (clean merge doesn't spawn agent)
-  const logsDir = path.join(tempDir, 'logs');
+  const logsDir = path.join(tempDir, 'ralph-teams', 'logs');
   if (fs.existsSync(logsDir)) {
     const mergeLogs = fs.readdirSync(logsDir).filter((f) => f.startsWith('merge-'));
     assert.equal(mergeLogs.length, 0, 'clean merge should not create a merge agent log');
   }
+});
+
+test('US-004: dirty loop branch is auto-committed before merge', () => {
+  const { tempDir, env } = setupMergeRepo([
+    { id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' },
+  ], { dirtyLoopBranchBeforeMerge: true });
+
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.match(result.stdout, /\[EPIC-001\] Auto-committed dirty worktree before merge/);
+  assert.match(result.stdout, /\[EPIC-001\] Merge successful \(clean\)/);
+
+  const progress = fs.readFileSync(path.join(tempDir, 'ralph-teams', 'progress.txt'), 'utf-8');
+  assert.match(progress, /\[EPIC-001\] AUTO-COMMIT before merge wave/);
+
+  const subjects = execFileSync('git', ['log', '--pretty=%s', '-n', '5'], { cwd: tempDir, encoding: 'utf-8' });
+  assert.match(subjects, /chore: checkpoint loop branch before merge wave/);
 });
 
 test('US-004: epic branch is deleted after successful merge', () => {
@@ -885,7 +1003,7 @@ test('US-004: two independent epics both merge cleanly after wave', () => {
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
 
-  const progress = fs.readFileSync(path.join(tempDir, 'progress.txt'), 'utf-8');
+  const progress = fs.readFileSync(path.join(tempDir, 'ralph-teams', 'progress.txt'), 'utf-8');
   assert.match(progress, /\[EPIC-001\] MERGED/);
   assert.match(progress, /\[EPIC-002\] MERGED/);
 
@@ -906,10 +1024,11 @@ test('US-004: two independent epics both merge cleanly after wave', () => {
  * - The mock claude (when called as merger agent) exits 0 without resolving conflicts
  * - This simulates a failed AI merge resolution
  */
-function setupConflictRepo() {
+function setupConflictRepo(options?: { resolveWithMerger?: boolean }) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-conflict-'));
   const binDir = path.join(tempDir, 'bin');
   fs.mkdirSync(binDir);
+  const resolveWithMerger = options?.resolveWithMerger === true;
 
   execFileSync('git', ['init', '-b', 'main'], { cwd: tempDir });
   execFileSync('git', ['config', 'user.name', 'Ralph Test'], { cwd: tempDir });
@@ -933,12 +1052,16 @@ function setupConflictRepo() {
   execFileSync('git', ['commit', '-m', 'chore: initial'], { cwd: tempDir });
 
   // Mock claude: when acting as team-lead, modifies README.md in the worktree
-  // AND creates a conflicting commit on main. When acting as merger agent, does nothing.
+  // AND creates a conflicting commit on main. When acting as merger agent, either
+  // resolves the conflict or exits without doing so depending on options.
   // prd.json is updated so EPIC-001 is marked completed.
   const mockClaude = [
     '#!/bin/sh',
+    `RESOLVE_WITH_MERGER="${resolveWithMerger ? '1' : '0'}"`,
     'STDIN=$(cat)',
+    'ARGS="$*"',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
+    'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path$/ {found=1}\')',
     '# Only act as team-lead (prompt contains Working Directory)',
     'WORKTREE=$(printf "%s" "$STDIN" | grep -oE "[^ ]*\\.worktrees/[^ ]*" | head -1)',
     'if [ -n "$EPIC_ID" ] && [ -n "$WORKTREE" ] && [ -d "$WORKTREE" ]; then',
@@ -957,16 +1080,26 @@ function setupConflictRepo() {
     '  fi',
     '  node -e "' +
       "const fs=require('fs');" +
-      "const f='prd.json';" +
+      "const f=process.argv[2];" +
       "const p=JSON.parse(fs.readFileSync(f,'utf8'));" +
       "const e=p.epics.find(x=>x.id===process.argv[1]);" +
       "if(e)e.userStories.forEach(s=>{s.passes=true;});" +
       "const t=f+'.tmp.'+process.pid;" +
       "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
       "fs.renameSync(t,f);" +
-    '" "$EPIC_ID"',
+    '" "$EPIC_ID" "$PRD_PATH"',
+    '  exit 0',
     'fi',
-    '# When called as merger agent (no WORKTREE), just exit without resolving',
+    '# When called as merger agent, optionally resolve the conflict in the repo root',
+    'if printf "%s" "$ARGS" | grep -q -- "--agent merger"; then',
+    '  touch merger-agent-invoked.txt',
+    '  if [ "$RESOLVE_WITH_MERGER" = "1" ]; then',
+    '    printf "main version\\nepic version\\n" > README.md',
+    '    git add README.md',
+    '    echo MERGE_SUCCESS',
+    '    exit 0',
+    '  fi',
+    'fi',
     'exit 0',
   ].join('\n');
   fs.writeFileSync(path.join(binDir, 'claude'), mockClaude);
@@ -997,7 +1130,7 @@ test('US-005: conflict resolution attempt is logged to progress.txt', () => {
 
   runRalph(tempDir, env);
 
-  const progress = fs.readFileSync(path.join(tempDir, 'progress.txt'), 'utf-8');
+  const progress = fs.readFileSync(path.join(tempDir, 'ralph-teams', 'progress.txt'), 'utf-8');
   assert.match(progress, /\[EPIC-001\] merge conflicts/);
   assert.match(progress, /\[EPIC-001\] MERGE FAILED/);
 });
@@ -1027,10 +1160,36 @@ test('US-005: merge log file created when merger agent is spawned', () => {
 
   runRalph(tempDir, env);
 
-  const logsDir = path.join(tempDir, 'logs');
+  const logsDir = path.join(tempDir, 'ralph-teams', 'logs');
   assert.ok(fs.existsSync(logsDir), 'logs/ directory should exist');
   const mergeLogs = fs.readdirSync(logsDir).filter((f) => f.startsWith('merge-EPIC-001'));
   assert.ok(mergeLogs.length > 0, 'merge log file should be created when agent is spawned');
+});
+
+test('US-005: merger agent is spawned and can resolve a simple conflict end to end', () => {
+  const { tempDir, env } = setupConflictRepo({ resolveWithMerger: true });
+
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.match(result.stdout, /\[EPIC-001\] merged \(AI-resolved conflicts\)/);
+
+  const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
+  assert.equal(prd.epics[0].status, 'completed');
+
+  assert.ok(
+    fs.existsSync(path.join(tempDir, 'merger-agent-invoked.txt')),
+    'expected merger agent marker file to prove the merger agent process ran',
+  );
+
+  const readme = fs.readFileSync(path.join(tempDir, 'README.md'), 'utf-8');
+  assert.equal(readme, 'main version\nepic version\n');
+
+  const logsDir = path.join(tempDir, 'ralph-teams', 'logs');
+  const mergeLogs = fs.readdirSync(logsDir).filter((f) => f.startsWith('merge-EPIC-001'));
+  assert.ok(mergeLogs.length > 0, 'merge log file should exist for AI-resolved merge');
+
+  const mergeLog = fs.readFileSync(path.join(logsDir, mergeLogs[0]), 'utf-8');
+  assert.match(mergeLog, /MERGE_SUCCESS/);
 });
 
 test('US-003: --max-epics with --parallel both respected', () => {
@@ -1125,7 +1284,7 @@ test('US-008: SIGINT writes ralph-state.json with expected fields', { timeout: 1
 
   await runRalphWithSigint(tempDir, env);
 
-  const stateFile = path.join(tempDir, 'ralph-state.json');
+  const stateFile = path.join(tempDir, 'ralph-teams', 'ralph-state.json');
   assert.ok(fs.existsSync(stateFile), 'ralph-state.json should exist after SIGINT');
 
   const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as Record<string, unknown>;
@@ -1169,7 +1328,7 @@ test('US-008: worktrees are preserved after SIGINT (not cleaned up)', { timeout:
   await runRalphWithSigint(tempDir, env);
 
   // Worktree should still exist (not cleaned up so resume is possible)
-  const worktreeDir = path.join(tempDir, '.worktrees', 'EPIC-001');
+  const worktreeDir = path.join(tempDir, 'ralph-teams', '.worktrees', 'EPIC-001');
   assert.ok(fs.existsSync(worktreeDir), 'worktree should be preserved after SIGINT');
 });
 
@@ -1182,7 +1341,7 @@ test('US-008: ralph-state.json includes the active epic ID', { timeout: 15000 },
 
   await runRalphWithSigint(tempDir, env);
 
-  const stateFile = path.join(tempDir, 'ralph-state.json');
+  const stateFile = path.join(tempDir, 'ralph-teams', 'ralph-state.json');
   const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as Record<string, unknown>;
   const activeEpics = state['activeEpics'] as string[];
   assert.ok(activeEpics.includes('EPIC-001'), `activeEpics should include EPIC-001, got: ${JSON.stringify(activeEpics)}`);
@@ -1197,7 +1356,7 @@ test('US-008: ralph-state.json includes storyProgress field', { timeout: 15000 }
 
   await runRalphWithSigint(tempDir, env);
 
-  const stateFile = path.join(tempDir, 'ralph-state.json');
+  const stateFile = path.join(tempDir, 'ralph-teams', 'ralph-state.json');
   const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as Record<string, unknown>;
 
   assert.ok('storyProgress' in state, 'state should have storyProgress field');
@@ -1220,7 +1379,7 @@ test('US-008: ralph-state.json includes interruptedStoryId field', { timeout: 15
 
   await runRalphWithSigint(tempDir, env);
 
-  const stateFile = path.join(tempDir, 'ralph-state.json');
+  const stateFile = path.join(tempDir, 'ralph-teams', 'ralph-state.json');
   const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as Record<string, unknown>;
 
   // interruptedStoryId must exist as a key (value may be null since ralph.sh doesn't
@@ -1275,7 +1434,7 @@ test('US-004 (timeout): timeout event is logged to progress.txt', { timeout: 150
     timeout: 12000,
   });
 
-  const progress = fs.readFileSync(path.join(tempDir, 'progress.txt'), 'utf-8');
+  const progress = fs.readFileSync(path.join(tempDir, 'ralph-teams', 'progress.txt'), 'utf-8');
   assert.match(progress, /\[EPIC-001\] FAILED \(epic timeout after 2s\)/);
 });
 
@@ -1294,7 +1453,7 @@ test('US-004 (timeout): timed-out epic log file contains timeout message', { tim
     timeout: 12000,
   });
 
-  const logsDir = path.join(tempDir, 'logs');
+  const logsDir = path.join(tempDir, 'ralph-teams', 'logs');
   assert.ok(fs.existsSync(logsDir), 'logs/ directory should exist');
   const logFiles = fs.readdirSync(logsDir).filter((f) => f.includes('EPIC-001'));
   assert.ok(logFiles.length > 0, 'should have a log file for EPIC-001');
@@ -1353,6 +1512,7 @@ function setupIdleTimeoutRepo(
     '#!/bin/sh',
     'STDIN=$(cat)',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
+    'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path$/ {found=1}\')',
     'if [ -n "$EPIC_ID" ]; then',
     '  SILENT_KEY="MOCK_SILENT_$(printf "%s" "$EPIC_ID" | tr - _)"',
     '  SILENT_VAL=$(printenv "$SILENT_KEY" 2>/dev/null || true)',
@@ -1365,14 +1525,14 @@ function setupIdleTimeoutRepo(
     '    if [ "$RESULT_VAL" = "PASS" ]; then',
     '      node -e "' +
       "const fs=require('fs');" +
-      "const f='prd.json';" +
+      "const f=process.argv[2];" +
       "const p=JSON.parse(fs.readFileSync(f,'utf8'));" +
       "const e=p.epics.find(x=>x.id===process.argv[1]);" +
       "if(e)e.userStories.forEach(s=>{s.passes=true;});" +
       "const t=f+'.tmp.'+process.pid;" +
       "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
       "fs.renameSync(t,f);" +
-    '" "$EPIC_ID"',
+    '" "$EPIC_ID" "$PRD_PATH"',
     '    fi',
     '  fi',
     'fi',
@@ -1454,7 +1614,7 @@ test('US-005 (idle timeout): idle timeout event is logged to progress.txt', { ti
     timeout: 12000,
   });
 
-  const progress = fs.readFileSync(path.join(tempDir, 'progress.txt'), 'utf-8');
+  const progress = fs.readFileSync(path.join(tempDir, 'ralph-teams', 'progress.txt'), 'utf-8');
   assert.match(progress, /\[EPIC-001\] FAILED \(idle timeout — no output for 2s\)/);
 });
 

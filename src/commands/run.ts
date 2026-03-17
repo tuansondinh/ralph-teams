@@ -3,6 +3,7 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import chalk from 'chalk';
 import { loadConfig, loadExplicitAgentModelOverrides, mergeCliOverrides } from '../config';
+import { getRalphStatePath } from '../runtime-paths';
 
 interface RunDeps {
   existsSync: typeof fs.existsSync;
@@ -63,7 +64,7 @@ export async function runCommand(
   deps: RunDeps = defaultDeps,
 ): Promise<void> {
   const resolved = path.resolve(prdPath);
-  const stateFile = path.join(path.dirname(resolved), 'ralph-state.json');
+  const stateFile = getRalphStatePath(path.dirname(resolved));
   const parallel = options.parallel;
 
   if (!deps.existsSync(resolved)) {
@@ -183,7 +184,7 @@ export async function runCommand(
       console.log(chalk.dim(`Removed stale resume state: ${stateFile}`));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(chalk.red(`Error: failed to remove stale ralph-state.json: ${msg}`));
+      console.error(chalk.red(`Error: failed to remove stale Ralph resume state: ${msg}`));
       deps.exit(1);
     }
   }

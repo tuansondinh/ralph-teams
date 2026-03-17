@@ -75,10 +75,10 @@ Current backends:
 The runtime is file-based. During a run, Ralph treats these files as the working state of the system:
 
 - `prd.json`: source of truth for epic and story status
-- `plans/`: implementation plans for epics that were explicitly planned
-- `progress.txt`: narrative progress log
-- `logs/`: raw backend logs
-- `ralph-state.json`: interrupt/resume state
+- `ralph-teams/plans/`: implementation plans for epics that were explicitly planned
+- `ralph-teams/progress.txt`: narrative progress log
+- `ralph-teams/logs/`: raw backend logs
+- `ralph-teams/ralph-state.json`: interrupt/resume state
 
 
 
@@ -221,7 +221,7 @@ Notes:
 
 Planning behavior:
 
-- if an epic has `planned: true`, the Team Lead is expected to read `plans/plan-EPIC-xxx.md` and follow it
+- if an epic has `planned: true`, the Team Lead is expected to read `ralph-teams/plans/plan-EPIC-xxx.md` and follow it
 - if an epic is still unplanned, medium- and high-complexity epics should spawn a planner before implementation
 - only clearly low-complexity epics should skip planning during execution
 
@@ -260,7 +260,7 @@ Behavior:
 
 - loads epics with `planned !== true`
 - starts an interactive agent discussion about implementation approach and sequencing
-- asks the agent to write `plans/plan-EPIC-xxx.md`
+- asks the agent to write `ralph-teams/plans/plan-EPIC-xxx.md`
 - asks the agent to mark each agreed epic as `planned: true` in `prd.json`
 
 Notes:
@@ -282,9 +282,9 @@ ralph-teams discuss --backend codex
 Behavior:
 
 - loads failed stories from `prd.json`
-- gathers failure context from `progress.txt`, `plans/`, and `.worktrees/`
+- gathers failure context from `ralph-teams/progress.txt`, `ralph-teams/plans/`, and `ralph-teams/.worktrees/`
 - starts an interactive agent session that helps the user choose which failed story to discuss first
-- asks the agent to write `guidance/guidance-US-xxx.md` files directly for the stories discussed
+- asks the agent to write `ralph-teams/guidance/guidance-US-xxx.md` files directly for the stories discussed
 
 Notes:
 
@@ -294,7 +294,7 @@ Notes:
 
 ### `ralph-teams resume`
 
-Resumes an interrupted run from `./ralph-state.json`.
+Resumes an interrupted run from `./ralph-teams/ralph-state.json`.
 
 ```bash
 ralph-teams resume
@@ -305,7 +305,7 @@ Behavior:
 - reloads the saved PRD path, backend, and parallel settings
 - reuses the current project config for timeouts and pricing
 - restarts `ralph.sh`
-- removes `ralph-state.json` after a successful resume
+- removes `ralph-teams/ralph-state.json` after a successful resume
 
 ### `ralph-teams status [path]`
 
@@ -318,14 +318,14 @@ ralph-teams status ./my-prd.json
 
 ### `ralph-teams logs [--tail N]`
 
-Shows `progress.txt` with light colorization.
+Shows `ralph-teams/progress.txt` with light colorization.
 
 ```bash
 ralph-teams logs
 ralph-teams logs --tail 20
 ```
 
-`--tail` shows the last `N` wave blocks from `progress.txt`.
+`--tail` shows the last `N` wave blocks from `ralph-teams/progress.txt`.
 
 ### `ralph-teams reset <epicId> [path]`
 
@@ -479,16 +479,16 @@ The `init` command uses `prd.json.example` as schema and style guidance when gen
 
 During a run, Ralph writes:
 
-- `progress.txt`: high-level run log
-- `plans/plan-EPIC-xxx.md`: planner output for an epic
+- `ralph-teams/progress.txt`: high-level run log
+- `ralph-teams/plans/plan-EPIC-xxx.md`: planner output for an epic
 - planned epics are expected to use these files as their implementation contract
-- `logs/epic-EPIC-xxx-<timestamp>.log`: raw backend session log
-- `ralph-state.json`: saved interrupt/resume state
-- `guidance/guidance-US-xxx.md`: retry guidance captured from discuss flows
+- `ralph-teams/logs/epic-EPIC-xxx-<timestamp>.log`: raw backend session log
+- `ralph-teams/ralph-state.json`: saved interrupt/resume state
+- `ralph-teams/guidance/guidance-US-xxx.md`: retry guidance captured from discuss flows
 
 Ralph also updates the original `prd.json` in place as story and epic state changes.
 
-The team lead agent log for each epic is written to `logs/` regardless of backend.
+The team lead agent log for each epic is written to `ralph-teams/logs/` regardless of backend.
 
 ## Runtime Rules
 
@@ -511,7 +511,7 @@ The current execution contract is:
 - the validator checks output independently from the builder's reasoning
 - `DONE: X/Y stories passed` is a required session footer, but the durable completion signal is the `prd.json` story state updated by the Team Lead
 - after updating `prd.json` for all attempted stories, the team lead must print `DONE: X/Y stories passed` and exit the session immediately
-- pressing `Ctrl-C` writes `ralph-state.json` so the run can be resumed later with `ralph-teams resume`
+- pressing `Ctrl-C` writes `ralph-teams/ralph-state.json` so the run can be resumed later with `ralph-teams resume`
 
 ## Troubleshooting
 

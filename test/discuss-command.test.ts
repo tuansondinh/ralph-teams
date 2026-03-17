@@ -37,14 +37,14 @@ test('discussCommand gathers failed stories and starts a guided session', async 
     ],
   }, null, 2));
 
-  writeProjectFile(projectDir, 'progress.txt', [
+  writeProjectFile(projectDir, 'ralph-teams/progress.txt', [
     '## 2026-03-16 — US-002 - Failed story',
     'Result: FAIL (attempt 2/2)',
     '- Validator verdict: FAIL — typecheck error',
     '---',
   ].join('\n'));
 
-  writeProjectFile(projectDir, 'plans/plan-EPIC-001.md', [
+  writeProjectFile(projectDir, 'ralph-teams/plans/plan-EPIC-001.md', [
     '# Plan',
     '## US-002 — Failed story',
     'Fix the broken imports and rerun validation.',
@@ -85,7 +85,7 @@ test('discussCommand gathers failed stories and starts a guided session', async 
   assert.match(capturedContexts[0].planSection, /broken imports/i);
   assert.equal(
     capturedContexts[0].guidancePath,
-    path.resolve(projectDir, 'guidance', 'guidance-US-002.md'),
+    path.resolve(projectDir, 'ralph-teams', 'guidance', 'guidance-US-002.md'),
   );
 });
 

@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
+import { getRalphProgressPath } from '../runtime-paths';
 
 function colorizeLine(line: string): string {
   // Wave boundaries (highest priority — check before PASS/FAIL substring matches)
@@ -53,10 +54,10 @@ function splitLogEntries(content: string): string[] {
 }
 
 export function logsCommand(options: { tail?: string }): void {
-  const logPath = path.resolve('./progress.txt');
+  const logPath = getRalphProgressPath(path.resolve('.'));
 
   if (!fs.existsSync(logPath)) {
-    console.log(chalk.yellow('No progress.txt found. Run an epic first to generate logs.'));
+    console.log(chalk.yellow('No Ralph progress log found. Run an epic first to generate logs.'));
     return;
   }
 

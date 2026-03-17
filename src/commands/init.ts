@@ -71,7 +71,7 @@ export function buildInitPrompt(prdExample: string, outputPath: string): string 
     '- If they want to plan now, continue in the same session and discuss the implementation plan with the user.',
     '- Planning must be collaborative: discuss the approach with the user and ask follow-up questions whenever scope, architecture, sequencing, ownership, or verification is ambiguous.',
     '- Do not jump straight to writing plans if important implementation details are unclear. Resolve ambiguity through discussion first.',
-    '- For each epic the user chooses to plan, write plans/plan-EPIC-xxx.md and update that epic in the PRD to set planned=true.',
+    '- For each epic the user chooses to plan, write ralph-teams/plans/plan-EPIC-xxx.md and update that epic in the PRD to set planned=true.',
     '- If the user only wants to plan some epics now, plan those and leave the others planned=false.',
     '- If they want to skip, end cleanly after confirming the PRD is written.',
     '- Do NOT tell the user to run `ralph-teams plan`, `./ralph.sh --plan`, or any other command at this point.',

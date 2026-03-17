@@ -29,10 +29,10 @@ flowchart LR
     RUN --> SH[ralph.sh]
     SH --> WT[Git worktrees]
     SH --> AGENTS[Backend agent CLI]
-    AGENTS --> LOGS[logs/*.log]
+    AGENTS --> LOGS[ralph-teams/logs/*.log]
     SH --> PRD[prd.json]
-    SH --> PROGRESS[progress.txt]
-    SH --> STATE[ralph-state.json]
+    SH --> PROGRESS[ralph-teams/progress.txt]
+    SH --> STATE[ralph-teams/ralph-state.json]
 ```
 
 ## Main Layers
@@ -128,7 +128,7 @@ The shell runtime then:
 5. Repeatedly computes the next wave of runnable epics.
 6. Spawns each epic in its own worktree and backend process.
 7. Watches logs, timeout thresholds, and PRD progress.
-8. Updates `prd.json`, `progress.txt`, and stats after completion.
+8. Updates `prd.json`, `ralph-teams/progress.txt`, and stats after completion.
 9. Merges completed epic branches back into the loop branch.
 10. Repeats until no runnable epics remain.
 
@@ -138,7 +138,7 @@ Each epic is executed through a team-lead prompt assembled in `ralph.sh`.
 
 The team lead is instructed to:
 
-- follow `plans/plan-EPIC-xxx.md` directly when the epic is already marked `planned: true`
+- follow `ralph-teams/plans/plan-EPIC-xxx.md` directly when the epic is already marked `planned: true`
 - spawn a planner for unplanned medium- and high-complexity epics
 - skip planner only for clearly low-complexity unplanned epics
 - plan only the pending stories for that epic
@@ -171,7 +171,7 @@ Contains:
 
 The scheduler reads dependencies and completion state directly from this file on each wave.
 
-### `progress.txt`
+### `ralph-teams/progress.txt`
 
 Narrative event log for humans and follow-up tooling.
 
@@ -182,7 +182,7 @@ Used for:
 - failure diagnostics
 - discuss context extraction
 
-### `logs/`
+### `ralph-teams/logs/`
 
 Raw backend output per epic and per merge attempt.
 
@@ -197,7 +197,7 @@ Log format depends on backend:
 - Claude: stream-json
 - Copilot/Codex: text
 
-### `ralph-state.json`
+### `ralph-teams/ralph-state.json`
 
 Resume artifact written on `SIGINT`.
 
@@ -278,7 +278,7 @@ Key mechanisms:
 - process exit before PRD completion triggers crash handling
 - dependency failure blocks downstream epics
 - merge failure is tracked separately from implementation failure
-- `SIGINT` writes `ralph-state.json` and preserves worktrees for resume
+- `SIGINT` writes `ralph-teams/ralph-state.json` and preserves worktrees for resume
 
 This makes failure modes inspectable after the fact because evidence is left on disk.
 

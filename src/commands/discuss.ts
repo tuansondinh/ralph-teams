@@ -9,6 +9,12 @@ import {
   type FailedStoryContext,
 } from '../discuss';
 import { getGuidancePath } from '../guidance';
+import {
+  getRalphGuidanceDir,
+  getRalphPlansDir,
+  getRalphProgressPath,
+  getRalphWorktreesDir,
+} from '../runtime-paths';
 
 type SupportedBackend = 'claude' | 'copilot' | 'codex';
 
@@ -67,10 +73,10 @@ function ensureBackendAvailable(backend: SupportedBackend): void {
 
 function collectFailedStoryContexts(prd: Prd, projectRoot: string): FailedStoryContext[] {
   const prdPath = path.join(projectRoot, 'prd.json');
-  const progressPath = path.join(projectRoot, 'progress.txt');
-  const plansDir = path.join(projectRoot, 'plans');
-  const guidanceDir = path.join(projectRoot, 'guidance');
-  const worktreesDir = path.join(projectRoot, '.worktrees');
+  const progressPath = getRalphProgressPath(projectRoot);
+  const plansDir = getRalphPlansDir(projectRoot);
+  const guidanceDir = getRalphGuidanceDir(projectRoot);
+  const worktreesDir = getRalphWorktreesDir(projectRoot);
 
   const contexts: FailedStoryContext[] = [];
   for (const epic of prd.epics) {

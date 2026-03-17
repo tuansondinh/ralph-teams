@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
 import { loadPrd, epicStatusColor } from '../prd-utils';
+import { getRalphProgressPath } from '../runtime-paths';
 
 /** A single wave's worth of data parsed from progress.txt */
 export interface WaveInfo {
@@ -133,7 +134,7 @@ export function summaryCommand(prdPath: string): void {
   }
 
   // Wave History — parsed from progress.txt if present
-  const progressPath = path.resolve('./progress.txt');
+  const progressPath = getRalphProgressPath(path.resolve('.'));
   const waves = parseWavesFromProgress(progressPath);
   if (waves.length > 0) {
     console.log(chalk.bold('\nWave History:'));

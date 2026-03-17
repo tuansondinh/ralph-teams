@@ -60,7 +60,8 @@ test('resumeCommand with valid state invokes ralph.sh with correct PRD path and 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-resume-'));
   const prdPath = path.join(tempDir, 'prd.json');
   fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
-  const stateFile = path.join(tempDir, 'ralph-state.json');
+  const stateFile = path.join(tempDir, 'ralph-teams', 'ralph-state.json');
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
   fs.writeFileSync(stateFile, makeState({ prdFile: prdPath }));
 
   const tempRalphSh = path.join(tempDir, 'ralph.sh');
@@ -99,7 +100,8 @@ test('resumeCommand deletes ralph-state.json after successful run', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-resume-'));
   const prdPath = path.join(tempDir, 'prd.json');
   fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
-  const stateFile = path.join(tempDir, 'ralph-state.json');
+  const stateFile = path.join(tempDir, 'ralph-teams', 'ralph-state.json');
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
   fs.writeFileSync(stateFile, makeState({ prdFile: prdPath }));
 
   const tempRalphSh = path.join(tempDir, 'ralph.sh');
@@ -129,7 +131,8 @@ test('resumeCommand preserves ralph-state.json after failed run', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-resume-'));
   const prdPath = path.join(tempDir, 'prd.json');
   fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
-  const stateFile = path.join(tempDir, 'ralph-state.json');
+  const stateFile = path.join(tempDir, 'ralph-teams', 'ralph-state.json');
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
   fs.writeFileSync(stateFile, makeState({ prdFile: prdPath }));
 
   const tempRalphSh = path.join(tempDir, 'ralph.sh');
@@ -162,7 +165,8 @@ test('resumeCommand validates required fields in state file', () => {
   });
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-resume-'));
-  const stateFile = path.join(tempDir, 'ralph-state.json');
+  const stateFile = path.join(tempDir, 'ralph-teams', 'ralph-state.json');
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
   // Missing 'backend' field
   fs.writeFileSync(stateFile, JSON.stringify({ version: '1', prdFile: './prd.json' }));
 
@@ -189,7 +193,8 @@ test('resumeCommand passes --parallel to ralph.sh when present in state', () => 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-resume-'));
   const prdPath = path.join(tempDir, 'prd.json');
   fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
-  const stateFile = path.join(tempDir, 'ralph-state.json');
+  const stateFile = path.join(tempDir, 'ralph-teams', 'ralph-state.json');
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
   fs.writeFileSync(stateFile, makeState({ prdFile: prdPath, parallel: 3 }));
 
   const tempRalphSh = path.join(tempDir, 'ralph.sh');

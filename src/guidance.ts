@@ -5,18 +5,19 @@
  * is saved to a file so the Builder agent can incorporate it on the next run.
  *
  * Guidance files are written to:
- *   <guidanceDir>/guidance-<storyId>.md   (default guidanceDir: 'guidance')
+ *   <guidanceDir>/guidance-<storyId>.md   (default guidanceDir: 'ralph-teams/guidance')
  * e.g.
- *   guidance/guidance-US-003.md
+ *   ralph-teams/guidance/guidance-US-003.md
  *
  * Pure I/O module with no terminal UI dependencies.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { RALPH_RUNTIME_DIRNAME } from './runtime-paths';
 
 /** Default directory for guidance files, relative to project root. */
-const DEFAULT_GUIDANCE_DIR = 'guidance';
+const DEFAULT_GUIDANCE_DIR = path.join(RALPH_RUNTIME_DIRNAME, 'guidance');
 
 // ---------------------------------------------------------------------------
 // Path helpers

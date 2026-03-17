@@ -3,6 +3,7 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import chalk from 'chalk';
 import { loadConfig } from '../config';
+import { getRalphStatePath } from '../runtime-paths';
 
 /** Shape of the saved state file written by ralph.sh on interrupt. */
 interface RalphState {
@@ -59,7 +60,7 @@ function findRalphSh(deps: ResumeDeps): string | null {
 
 export function resumeCommand(deps: ResumeDeps = defaultDeps, backendOverride?: string): void {
   const cwd = deps.cwd();
-  const stateFile = path.join(cwd, 'ralph-state.json');
+  const stateFile = getRalphStatePath(cwd);
 
   // Check for saved state
   if (!deps.existsSync(stateFile)) {
@@ -74,7 +75,7 @@ export function resumeCommand(deps: ResumeDeps = defaultDeps, backendOverride?: 
     state = JSON.parse(raw) as RalphState;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(chalk.red(`Error reading ralph-state.json: ${msg}`));
+    console.error(chalk.red(`Error reading Ralph resume state: ${msg}`));
     deps.exit(1);
   }
 
@@ -82,7 +83,7 @@ export function resumeCommand(deps: ResumeDeps = defaultDeps, backendOverride?: 
   const requiredFields: (keyof RalphState)[] = ['version', 'prdFile', 'backend'];
   for (const field of requiredFields) {
     if (!state![field]) {
-      console.error(chalk.red(`Error: ralph-state.json is missing required field: ${field}`));
+      console.error(chalk.red(`Error: Ralph resume state is missing required field: ${field}`));
       deps.exit(1);
     }
   }
