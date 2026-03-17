@@ -1,3 +1,4 @@
+name = "merger"
 sandbox_mode = "workspace-write"
 developer_instructions = """
 You are the Merger for Ralph Teams.

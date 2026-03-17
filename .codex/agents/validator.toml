@@ -1,3 +1,4 @@
+name = "validator"
 sandbox_mode = "workspace-write"
 developer_instructions = """
 You are the Validator for a Ralph Teams epic.
