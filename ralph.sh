@@ -88,6 +88,56 @@ MODEL_BUILDER="$(map_model_for_backend "$BACKEND" "$MODEL_BUILDER")"
 MODEL_VALIDATOR="$(map_model_for_backend "$BACKEND" "$MODEL_VALIDATOR")"
 MODEL_MERGER="$(map_model_for_backend "$BACKEND" "$MODEL_MERGER")"
 
+resolve_rjq_bin() {
+  local candidates=()
+
+  if [ -n "${RALPH_RJQ_BIN:-}" ]; then
+    candidates+=("${RALPH_RJQ_BIN}")
+  fi
+  candidates+=(
+    "${SCRIPT_DIR}/dist/json-tool.js"
+    "${SCRIPT_DIR}/node_modules/.bin/rjq"
+  )
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [ -n "$candidate" ] && [ -f "$candidate" ] && [ -x "$candidate" ]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  if command -v rjq >/dev/null 2>&1; then
+    command -v rjq
+    return 0
+  fi
+
+  return 1
+}
+
+RJQ_BIN="$(resolve_rjq_bin || true)"
+
+rjq() {
+  if [ -z "${RJQ_BIN:-}" ]; then
+    echo "Error: rjq binary is not configured." >&2
+    exit 1
+  fi
+
+  if [ ! -e "$RJQ_BIN" ]; then
+    echo "Error: resolved rjq binary does not exist: $RJQ_BIN" >&2
+    exit 1
+  fi
+
+  case "$RJQ_BIN" in
+    *.js)
+      node "$RJQ_BIN" "$@"
+      ;;
+    *)
+      "$RJQ_BIN" "$@"
+      ;;
+  esac
+}
+
 export RALPH_MODEL_TEAM_LEAD="$MODEL_TEAM_LEAD"
 export RALPH_MODEL_PLANNER="$MODEL_PLANNER"
 export RALPH_MODEL_BUILDER="$MODEL_BUILDER"
@@ -143,8 +193,8 @@ if [ "$BACKEND" = "codex" ] && ! command -v codex &> /dev/null; then
   exit 1
 fi
 
-if ! command -v rjq &> /dev/null; then
-  echo "Error: 'rjq' not found. Run 'npm install -g ralph-teams' to install."
+if [ -z "$RJQ_BIN" ]; then
+  echo "Error: 'rjq' not found. Expected a bundled json tool at ${SCRIPT_DIR}/dist/json-tool.js or an rjq binary on PATH."
   exit 1
 fi
 
@@ -858,20 +908,20 @@ Only these stories should be planned or worked in this run. Stories omitted here
 $PENDING_STORIES_JSON
 
 ## Model Selection Policy
-- Respect explicit `ralph.config.yml` agent model overrides when they are present.
-  - If `RALPH_MODEL_PLANNER_EXPLICIT=1`, use `RALPH_MODEL_PLANNER` for planner work.
-  - If `RALPH_MODEL_BUILDER_EXPLICIT=1`, use `RALPH_MODEL_BUILDER` for builder work.
-  - If `RALPH_MODEL_VALIDATOR_EXPLICIT=1`, use `RALPH_MODEL_VALIDATOR` for validator work.
-  - If `RALPH_MODEL_MERGER_EXPLICIT=1`, use `RALPH_MODEL_MERGER` for merger work.
+- Respect explicit ralph.config.yml agent model overrides when they are present.
+  - If RALPH_MODEL_PLANNER_EXPLICIT=1, use RALPH_MODEL_PLANNER for planner work.
+  - If RALPH_MODEL_BUILDER_EXPLICIT=1, use RALPH_MODEL_BUILDER for builder work.
+  - If RALPH_MODEL_VALIDATOR_EXPLICIT=1, use RALPH_MODEL_VALIDATOR for validator work.
+  - If RALPH_MODEL_MERGER_EXPLICIT=1, use RALPH_MODEL_MERGER for merger work.
 - If there is no explicit override for that role, choose the model by task difficulty.
 - Default difficulty policy by backend:
   - Claude / Copilot-Claude: easy -> haiku, medium -> sonnet, difficult -> opus
   - Codex: easy -> gpt-5-mini, medium -> gpt-5.3-codex, difficult -> gpt-5.4
 - If your runtime supports setting reasoning effort per spawned task, use low for easy tasks, medium for normal tasks, high for difficult tasks, and xhigh only for unusually hard analysis or verification.
 - If your runtime is Codex, use these exact named teammate roles when spawning:
-  - planners: `planner_easy`, `planner_medium`, `planner_difficult`
-  - builders: `builder_easy`, `builder_medium`, `builder_difficult`
-  - validators: `validator_easy`, `validator_medium`, `validator_difficult`
+  - planners: planner_easy, planner_medium, planner_difficult
+  - builders: builder_easy, builder_medium, builder_difficult
+  - validators: validator_easy, validator_medium, validator_difficult
 
 ## Instructions
 1. **Planner decision.**
