@@ -2,6 +2,7 @@
   "name": "ralph-teams",
   "version": "1.0.7",
   "description": "CLI tool for Ralph Teams",
+  "license": "MIT",
   "bin": {
     "ralph-teams": "dist/index.js",
     "rjq": "dist/json-tool.js"
