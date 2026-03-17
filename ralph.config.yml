@@ -6,10 +6,3 @@ execution:
   backend: claude
   parallel: 0
   validatorMaxPushbacks: 1
-
-agents:
-  teamLead: opus
-  planner: opus
-  builder: sonnet
-  validator: sonnet
-  merger: sonnet

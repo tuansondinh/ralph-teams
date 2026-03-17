@@ -1127,8 +1127,37 @@ while true; do
   active_log_lines=()
   # wave_completed_ids collects epic IDs that completed successfully (for merge_wave)
   wave_completed_ids=()
-  declare -A crash_retries  # track crash retry count per epic ID
+  # Bash 3 on macOS does not support associative arrays, so keep retry counts
+  # in parallel indexed arrays keyed by epic id.
+  crash_retry_epic_ids=()
+  crash_retry_counts=()
   queue_pos=0
+
+  get_crash_retry_count() {
+    local epic_id="$1"
+    local idx
+    for idx in "${!crash_retry_epic_ids[@]}"; do
+      if [ "${crash_retry_epic_ids[$idx]}" = "$epic_id" ]; then
+        echo "${crash_retry_counts[$idx]}"
+        return
+      fi
+    done
+    echo 0
+  }
+
+  set_crash_retry_count() {
+    local epic_id="$1"
+    local count="$2"
+    local idx
+    for idx in "${!crash_retry_epic_ids[@]}"; do
+      if [ "${crash_retry_epic_ids[$idx]}" = "$epic_id" ]; then
+        crash_retry_counts[$idx]="$count"
+        return
+      fi
+    done
+    crash_retry_epic_ids+=("$epic_id")
+    crash_retry_counts+=("$count")
+  }
 
   # Helper: wait_for_one_slot — polls active_pids until a slot is free,
   # processes its result, and removes it from the arrays.
@@ -1156,9 +1185,10 @@ while true; do
           local _to_total _to_passed
           _to_total=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories")
           _to_passed=$(rjq count-where "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories" "passes=true")
-          local _to_retry_count="${crash_retries[$finished_epic_id]:-0}"
+          local _to_retry_count
+          _to_retry_count="$(get_crash_retry_count "$finished_epic_id")"
           if [ "$_to_retry_count" -lt "$MAX_CRASH_RETRIES" ] && [ "$_to_passed" -lt "$_to_total" ]; then
-            crash_retries[$finished_epic_id]=$((_to_retry_count + 1))
+            set_crash_retry_count "$finished_epic_id" "$((_to_retry_count + 1))"
             echo "  [$finished_epic_id] Timeout with $_to_passed/$_to_total passed — retry $((_to_retry_count + 1))/$MAX_CRASH_RETRIES"
             echo "[$finished_epic_id] TIMEOUT RETRY $((_to_retry_count + 1))/$MAX_CRASH_RETRIES ($_to_passed/$_to_total passed) — $(date)" >> "$PROGRESS_FILE"
             cleanup_epic_worktree "$finished_epic_id"
@@ -1208,9 +1238,10 @@ while true; do
           local _it_total _it_passed
           _it_total=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories")
           _it_passed=$(rjq count-where "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories" "passes=true")
-          local _it_retry_count="${crash_retries[$finished_epic_id]:-0}"
+          local _it_retry_count
+          _it_retry_count="$(get_crash_retry_count "$finished_epic_id")"
           if [ "$_it_retry_count" -lt "$MAX_CRASH_RETRIES" ] && [ "$_it_passed" -lt "$_it_total" ]; then
-            crash_retries[$finished_epic_id]=$((_it_retry_count + 1))
+            set_crash_retry_count "$finished_epic_id" "$((_it_retry_count + 1))"
             echo "  [$finished_epic_id] Idle timeout with $_it_passed/$_it_total passed — retry $((_it_retry_count + 1))/$MAX_CRASH_RETRIES"
             echo "[$finished_epic_id] IDLE RETRY $((_it_retry_count + 1))/$MAX_CRASH_RETRIES ($_it_passed/$_it_total passed) — $(date)" >> "$PROGRESS_FILE"
             cleanup_epic_worktree "$finished_epic_id"
@@ -1259,9 +1290,10 @@ while true; do
           [ "$passed_s" -eq "$total_s" ] && [ "$total_s" -gt 0 ] && all_done=true
 
           if [ ! -f "$result_file" ] && [ "$all_done" = false ]; then
-            local retry_count="${crash_retries[$finished_epic_id]:-0}"
+            local retry_count
+            retry_count="$(get_crash_retry_count "$finished_epic_id")"
             if [ "$retry_count" -lt "$MAX_CRASH_RETRIES" ]; then
-              crash_retries[$finished_epic_id]=$((retry_count + 1))
+              set_crash_retry_count "$finished_epic_id" "$((retry_count + 1))"
               echo ""
               echo "  [$finished_epic_id] CRASH DETECTED ($passed_s/$total_s passed) — retry $((retry_count + 1))/$MAX_CRASH_RETRIES"
               echo "[$finished_epic_id] CRASH RETRY $((retry_count + 1))/$MAX_CRASH_RETRIES ($passed_s/$total_s passed so far) — $(date)" >> "$PROGRESS_FILE"

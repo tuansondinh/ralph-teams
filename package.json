@@ -1,6 +1,6 @@
 {
   "name": "ralph-teams",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "CLI tool for Ralph Teams",
   "bin": {
     "ralph-teams": "dist/index.js",
@@ -15,7 +15,7 @@
     "prd.json.example"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "rm -rf dist && tsc",
     "dev": "tsx src/index.ts",
     "test": "node --import tsx --test $(find ./test -type f -name '*.test.ts' | sort)",
     "typecheck": "tsc --noEmit"
