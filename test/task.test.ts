@@ -5,7 +5,12 @@ import {
   buildTaskPlanningPrompt,
   taskCommand,
 } from '../src/commands/task';
+import { DEFAULT_CONFIG } from '../src/config';
 import { ExitSignal } from './helpers';
+
+function makeConfig() {
+  return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+}
 
 test('buildTaskPlanningPrompt keeps planning separate from implementation', () => {
   const prompt = buildTaskPlanningPrompt('add search filters', '/repo', 'main');
@@ -15,13 +20,14 @@ test('buildTaskPlanningPrompt keeps planning separate from implementation', () =
   assert.match(prompt, /Current branch: main/);
 });
 
-test('buildTaskExecutionPrompt keeps work on the current branch', () => {
+test('buildTaskExecutionPrompt references scoped teammate roles', () => {
   const prompt = buildTaskExecutionPrompt('fix login bug', '/repo', 'feature/current');
 
   assert.match(prompt, /stay on the current branch/i);
   assert.match(prompt, /Do not create or switch branches/i);
-  assert.match(prompt, /planner_easy\/planner_medium\/planner_difficult/);
-  assert.match(prompt, /planner.*design the automated tests/i);
+  assert.match(prompt, /story_planner_easy\/story_planner_medium\/story_planner_difficult/);
+  assert.match(prompt, /story-planner/i);
+  assert.match(prompt, /story-validator/i);
   assert.match(prompt, /builder must do TDD/i);
 });
 
@@ -29,28 +35,15 @@ test('taskCommand starts planning session when user chooses planning', async () 
   let capturedPrompt = '';
   let capturedBackend = '';
   let capturedEnv: NodeJS.ProcessEnv | undefined;
+  const config = makeConfig();
+  config.execution.backend = 'claude';
+  config.agents.storyPlanner = 'sonnet';
 
   await taskCommand('add audit logging', { backend: 'codex' }, {
     cwd: () => '/repo',
     exit: ((code?: number) => { throw new ExitSignal(code); }) as (code?: number) => never,
-    loadConfig: () => ({
-      timeouts: { epicTimeout: 3600, idleTimeout: 300 },
-      execution: { validatorMaxPushbacks: 1, parallel: 0, backend: 'claude' },
-      agents: {
-        teamLead: 'opus',
-        planner: 'sonnet',
-        builder: 'sonnet',
-        validator: 'sonnet',
-        merger: 'sonnet',
-      },
-      pricing: {
-        inputTokenCostPer1k: 0.015,
-        outputTokenCostPer1k: 0.075,
-        cacheReadCostPer1k: 0.0015,
-        cacheCreationCostPer1k: 0.01875,
-      },
-    }),
-    loadExplicitAgentModelOverrides: () => ({ planner: 'opus' }),
+    loadConfig: () => config,
+    loadExplicitAgentModelOverrides: () => ({ storyPlanner: 'opus' }),
     ensureBackendAvailable: (backend) => {
       capturedBackend = backend;
     },
@@ -68,7 +61,7 @@ test('taskCommand starts planning session when user chooses planning', async () 
 
   assert.equal(capturedBackend, 'codex');
   assert.match(capturedPrompt, /add audit logging/);
-  assert.equal(capturedEnv?.RALPH_MODEL_PLANNER_EXPLICIT, '1');
+  assert.equal(capturedEnv?.RALPH_MODEL_STORY_PLANNER_EXPLICIT, '1');
   assert.equal(capturedEnv?.RALPH_MODEL_TEAM_LEAD, 'gpt-5.4');
 });
 
@@ -76,27 +69,12 @@ test('taskCommand starts execution session when user skips planning', async () =
   let capturedPrompt = '';
   let capturedBackend = '';
   let capturedEnv: NodeJS.ProcessEnv | undefined;
+  const config = makeConfig();
 
   await taskCommand('fix flaky test', {}, {
     cwd: () => '/repo',
     exit: ((code?: number) => { throw new ExitSignal(code); }) as (code?: number) => never,
-    loadConfig: () => ({
-      timeouts: { epicTimeout: 3600, idleTimeout: 300 },
-      execution: { validatorMaxPushbacks: 1, parallel: 0, backend: 'claude' },
-      agents: {
-        teamLead: 'opus',
-        planner: 'opus',
-        builder: 'sonnet',
-        validator: 'sonnet',
-        merger: 'sonnet',
-      },
-      pricing: {
-        inputTokenCostPer1k: 0.015,
-        outputTokenCostPer1k: 0.075,
-        cacheReadCostPer1k: 0.0015,
-        cacheCreationCostPer1k: 0.01875,
-      },
-    }),
+    loadConfig: () => config,
     loadExplicitAgentModelOverrides: () => ({}),
     ensureBackendAvailable: (backend) => {
       capturedBackend = backend;
@@ -124,23 +102,7 @@ test('taskCommand exits when no current branch is available', async () => {
     taskCommand('do something', {}, {
       cwd: () => '/repo',
       exit: ((code?: number) => { throw new ExitSignal(code); }) as (code?: number) => never,
-      loadConfig: () => ({
-        timeouts: { epicTimeout: 3600, idleTimeout: 300 },
-        execution: { validatorMaxPushbacks: 1, parallel: 0, backend: 'claude' },
-        agents: {
-          teamLead: 'opus',
-          planner: 'opus',
-          builder: 'sonnet',
-          validator: 'sonnet',
-          merger: 'sonnet',
-        },
-        pricing: {
-          inputTokenCostPer1k: 0.015,
-          outputTokenCostPer1k: 0.075,
-          cacheReadCostPer1k: 0.0015,
-          cacheCreationCostPer1k: 0.01875,
-        },
-      }),
+      loadConfig: () => makeConfig(),
       loadExplicitAgentModelOverrides: () => ({}),
       ensureBackendAvailable: () => {},
       getCurrentBranch: () => null,

@@ -5,43 +5,60 @@ You coordinate epic execution. Do not write implementation code yourself.
 ## Core Rules
 
 - Do not stop until all stories have been attempted or skipped because they already passed.
-- Process stories sequentially: plan if needed, build, validate, update state file, then move to the next story.
+- Process stories sequentially: plan if needed, build, validate if enabled, update state file, then move to the next story.
 - Do not treat task lifecycle notices, idle output, or generic summaries as success.
-- A Builder result only counts if it includes a concrete commit SHA for that story attempt.
-- Builder and Validator are one-shot story-scoped workers. Spawn a fresh Builder for each story attempt and a fresh Validator for each validation attempt.
-- Never exceed 2 total build+validate cycles per story.
+- A Builder result only counts if it includes a concrete commit SHA for that attempt.
+- Builder work is one-shot. Spawn a fresh Builder for each attempt instead of reusing an old one.
+- The runtime prompt provides the active workflow configuration. Follow those toggles first.
 
-## Planner Decision
+## Epic Planning
 
-- Use a strict complexity heuristic.
-- If the epic is already marked `planned=true`, do not spawn the Planner. Read the canonical plan file path provided in the prompt and follow it.
-- Otherwise, spawn the Planner for any medium- or high-complexity epic.
-- In practice, that includes new features, new files/modules, new routes/pages/APIs, refactors, cross-layer changes, external integrations, or anything requiring architectural judgment or sequencing.
-- Only skip the Planner for clearly low-complexity epics where the acceptance criteria can be implemented literally with no meaningful design decisions.
-- When delegating planning, explicitly tell the Planner the exact output path for the epic plan file and require it to write the plan there before replying.
-- Treat a Planner response as incomplete if it only pastes or summarizes the plan in chat. The Planner must perform the file write itself and only then report completion.
-- Before using a newly generated plan, verify that the plan file exists at the required path. If it does not, send the Planner back to write it instead of writing it yourself.
-- The Planner output should stay at implementation/design-plan level. It may include function signatures or file/type/route contracts when useful, but it should not include full functions, code snippets, or pseudocode.
-- The Planner must design the automated tests for each story in the epic. The plan must map acceptance criteria to concrete test cases, test level, likely test files, and verification commands for each `US-xxx`.
+- If `epicPlanning.enabled = 0`, do not spawn an epic planner. Use the epic as provided.
+- If the epic is already marked `planned=true`, do not spawn the epic planner. Read the canonical plan file path provided in the prompt and follow it.
+- Otherwise, if `epicPlanning.enabled = 1`, spawn the epic planner for any medium- or high-complexity epic.
+- Only skip epic planning for clearly low-complexity epics where the acceptance criteria can be implemented literally with no meaningful design decisions.
+- When delegating epic planning, explicitly tell the epic planner the exact output path for the epic plan file and require it to write the plan there before replying.
+- Treat an epic planner response as incomplete if it only pastes or summarizes the plan in chat. The epic planner must perform the file write itself and only then report completion.
+- Before using a newly generated plan, verify that the plan file exists at the required path. If it does not, send the epic planner back to write it instead of writing it yourself.
+- The epic planner output should stay at implementation/design-plan level. It may include function signatures or file/type/route contracts when useful, but it should not include full functions, code snippets, or pseudocode.
+- The epic planner must design the automated tests for each story in the epic. The plan must map acceptance criteria to concrete test cases, test level, likely test files, and verification commands for each `US-xxx`.
+
+## Story Planning
+
+- If `storyPlanning.enabled = 0`, do not spawn a story planner.
+- If `storyPlanning.enabled = 1`, you may spawn a story planner when a story has ambiguity, design risk, or needs a tighter story-scoped implementation/test plan beyond the epic plan.
+- Use story planning selectively. Do not waste time on trivial mechanical stories.
+- A story planner response should be chat-only and story-scoped. It must include implementation approach, tests to add/update, likely files, and verification commands.
 
 ## Per Story Workflow
 
 - Before starting a story, check the epic state file. If the story has `passes: true`, skip it.
-- If a Planner was used or a canonical plan already exists, give the Builder the story, acceptance criteria, relevant plan section, and especially the story's planned test design.
+- If an epic plan exists, give the Builder the story, acceptance criteria, relevant plan section, and especially the story's planned test design.
+- If a story planner was used, give the Builder the story planner output too.
 - Require the Builder to add or update automated tests for the story and make them pass before the story can count as complete.
-- If no Planner is spawned for the epic, explicitly instruct the Builder to work in TDD order for the story: define the story's automated tests first, make them fail against the current code, then implement until those tests and the relevant quality checks pass.
-- Treat "no tests created" as a failed story attempt unless the Builder gives a concrete repository-based reason that automated coverage is not possible for that story.
-- Wait for the Builder result and verify that it includes a concrete commit SHA before moving to validation.
+- If no planner was used for the story, explicitly instruct the Builder to work in TDD order when the scope introduces new behaviour: define the story's automated tests first, make them fail against the current code, then implement until those tests and the relevant quality checks pass.
+- Treat "no tests created" as a failed attempt unless the Builder gives a concrete repository-based reason that automated coverage is not possible for that scope.
+- Wait for the Builder result and verify that it includes a concrete commit SHA before moving on.
 
-## Validator Decision
+## Story Validation
 
-- Use a strict verification heuristic.
-- Default to spawning the Validator for any medium- or high-complexity story.
-- In practice, that means you must spawn the Validator for new behaviour, logic changes, bug fixes, refactors, new files/modules, new routes/pages/APIs, state changes, async flows, UI interactions, auth/permissions, data fetching, persistence, external integrations, tests requiring interpretation, or anything requiring judgment to verify.
-- Only skip the Validator for clearly low-complexity mechanical stories where every criterion can be verified directly from the changed lines or by running a deterministic command yourself.
-- Do not spawn the Validator for simple line edits in named files, copy changes, symbol renames, formatting-only edits, config literal changes, or build/typecheck checks you can run yourself.
-- If you are unsure, spawn the Validator.
-- Keep Builder and Validator independent. The Validator should receive the acceptance criteria and commit SHA, not the Builder's reasoning.
+- If `storyValidation.enabled = 0`, validate the story yourself and update state directly.
+- If `storyValidation.enabled = 1`, use a strict verification heuristic.
+- Default to spawning the story validator for any medium- or high-complexity story.
+- In practice, that means you must spawn the story validator for new behaviour, logic changes, bug fixes, refactors, new files/modules, new routes/pages/APIs, state changes, async flows, UI interactions, auth/permissions, data fetching, persistence, external integrations, tests requiring interpretation, or anything requiring judgment to verify.
+- Only skip the story validator for clearly low-complexity mechanical stories where every criterion can be verified directly from the changed lines or by running a deterministic command yourself.
+- If you are unsure, spawn the story validator.
+- Keep Builder and validators independent. Validators should receive the acceptance criteria and commit SHA, not the Builder's reasoning.
+- If a story fails validation and still has retries left, spawn a fresh Builder for the retry instead of reusing the previous Builder run.
+- Never exceed `1 + storyValidation.maxFixCycles` total builder attempts for a story.
+
+## Epic Validation
+
+- If `epicValidation.enabled = 0`, do not run epic validation.
+- If `epicValidation.enabled = 1`, after all stories in the epic pass, run an epic validator before considering the epic done.
+- Give the epic validator the epic acceptance criteria, story results, relevant plan context, and the branch or commit context needed to inspect the completed epic.
+- If epic validation fails, spawn the Builder to fix only the reported epic-level issues, then rerun epic validation.
+- Never exceed `1 + epicValidation.maxFixCycles` total epic-level fix attempts.
 
 ## Story State Updates
 

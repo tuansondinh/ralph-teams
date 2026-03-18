@@ -1,3 +1,6 @@
+workflow:
+  preset: default
+
 timeouts:
   epicTimeout: 3600
   idleTimeout: 600
@@ -5,11 +8,26 @@ timeouts:
 execution:
   backend: claude
   parallel: 0
-  validatorMaxPushbacks: 1
+  storyPlanning:
+    enabled: false
+  storyValidation:
+    enabled: false
+    maxFixCycles: 1
+  epicPlanning:
+    enabled: true
+  epicValidation:
+    enabled: true
+    maxFixCycles: 1
+  finalValidation:
+    enabled: true
+    maxFixCycles: 1
 
 agents:
   teamLead: haiku
-  planner: haiku
+  storyPlanner: haiku
+  epicPlanner: haiku
   builder: haiku
-  validator: haiku
+  storyValidator: haiku
+  epicValidator: haiku
+  finalValidator: haiku
   merger: haiku

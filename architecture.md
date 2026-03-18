@@ -136,8 +136,8 @@ Each epic is executed through a team-lead prompt assembled in `ralph.sh`.
 The team lead is instructed to:
 
 - follow `.ralph-teams/plans/plan-EPIC-xxx.md` directly when the epic is already marked `planned: true`
-- spawn a planner for unplanned medium- and high-complexity epics
-- skip planner only for clearly low-complexity unplanned epics
+- spawn the epic planner for unplanned medium- and high-complexity epics when epic planning is enabled
+- skip epic planning only for clearly low-complexity unplanned epics or when epic planning is disabled
 - plan only the pending stories for that epic
 - process stories sequentially
 - spawn a fresh Builder for each story attempt
@@ -319,11 +319,12 @@ This makes failure modes inspectable after the fact because evidence is left on 
 - `prompts/agents/`
 - `.claude/agents/`
 - `.github/agents/`
+- `.opencode/agents/`
 - `.codex/agents/`
 
 For Codex specifically, `.codex/agents/` defines the spawned teammate roles. The Codex Team Lead policy itself is injected by `ralph.sh` at runtime rather than coming from a separate `.codex/agents/team-lead.toml` file.
 
-For Claude and Copilot, the Team Lead contract lives in `.claude/agents/team-lead.md` and `.github/agents/team-lead.agent.md`. All three backends now share the same coordination rule: Builder and Validator are one-shot story-scoped workers, not persistent teammates reused across stories.
+For Claude and Copilot, the Team Lead contract lives in `.claude/agents/team-lead.md` and `.github/agents/team-lead.agent.md`. All three backends now share the same coordination rule: planning and validation are scope-specific and configurable, while Builder attempts remain one-shot and are never reused as persistent teammates.
 
 The worker-role instruction bodies are canonicalized in `prompts/agents/*.md` and rendered into the backend-specific agent files. The backend directories remain the runtime contract, but contributors should edit the canonical prompts and regenerate the rendered files instead of hand-editing every backend copy.
 

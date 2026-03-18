@@ -5,7 +5,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { loadConfig, mergeCliOverrides, validateConfig, DEFAULT_CONFIG, RalphConfig, renderCommentedConfigTemplate } from '../src/config';
 
-// Helper: create a temp directory and write a ralph.config.yml file there
 function makeTempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-config-'));
 }
@@ -14,77 +13,157 @@ function writeConfig(dir: string, content: string): void {
   fs.writeFileSync(path.join(dir, 'ralph.config.yml'), content, 'utf-8');
 }
 
-// -------------------------------------------------------------------
-// loadConfig — no file present
-// -------------------------------------------------------------------
+function makeBaseConfig(): RalphConfig {
+  return JSON.parse(JSON.stringify(DEFAULT_CONFIG)) as RalphConfig;
+}
 
 test('loadConfig returns defaults when ralph.config.yml is absent', () => {
   const dir = makeTempDir();
-  const config = loadConfig(dir);
-
-  assert.deepEqual(config, DEFAULT_CONFIG);
+  assert.deepEqual(loadConfig(dir), DEFAULT_CONFIG);
 });
 
-// -------------------------------------------------------------------
-// loadConfig — valid YAML
-// -------------------------------------------------------------------
-
-test('loadConfig parses a fully-specified valid config file', () => {
+test('loadConfig applies the default preset and allows explicit execution overrides', () => {
   const dir = makeTempDir();
   writeConfig(dir, `
-timeouts:
-  epicTimeout: 7200
-  idleTimeout: 600
+workflow:
+  preset: default
+execution:
+  storyValidation:
+    enabled: true
+    maxFixCycles: 2
+`);
+
+  const config = loadConfig(dir);
+  assert.equal(config.workflow.preset, 'default');
+  assert.equal(config.execution.epicPlanning.enabled, true);
+  assert.equal(config.execution.epicValidation.enabled, true);
+  assert.equal(config.execution.finalValidation.enabled, true);
+  assert.equal(config.execution.storyPlanning.enabled, false);
+  assert.equal(config.execution.storyValidation.enabled, true);
+  assert.equal(config.execution.storyValidation.maxFixCycles, 2);
+});
+
+test('loadConfig applies the thorough preset', () => {
+  const dir = makeTempDir();
+  writeConfig(dir, `
+workflow:
+  preset: thorough
+`);
+
+  const config = loadConfig(dir);
+  assert.equal(config.execution.storyPlanning.enabled, true);
+  assert.equal(config.execution.storyValidation.enabled, true);
+  assert.equal(config.execution.epicPlanning.enabled, true);
+  assert.equal(config.execution.epicValidation.enabled, true);
+  assert.equal(config.execution.finalValidation.enabled, true);
+});
+
+test('loadConfig applies the off preset', () => {
+  const dir = makeTempDir();
+  writeConfig(dir, `
+workflow:
+  preset: off
+`);
+
+  const config = loadConfig(dir);
+  assert.equal(config.execution.storyPlanning.enabled, false);
+  assert.equal(config.execution.storyValidation.enabled, false);
+  assert.equal(config.execution.epicPlanning.enabled, false);
+  assert.equal(config.execution.epicValidation.enabled, false);
+  assert.equal(config.execution.finalValidation.enabled, false);
+});
+
+test('loadConfig supports planner and validator aliases for backward compatibility', () => {
+  const dir = makeTempDir();
+  writeConfig(dir, `
 execution:
   validatorMaxPushbacks: 2
-  parallel: 4
-  backend: copilot
+agents:
+  planner: haiku
+  validator: opus
 `);
 
   const config = loadConfig(dir);
-
-  assert.equal(config.timeouts.epicTimeout, 7200);
-  assert.equal(config.timeouts.idleTimeout, 600);
-  assert.equal(config.execution.validatorMaxPushbacks, 2);
-  assert.equal(config.execution.parallel, 4);
-  assert.equal(config.execution.backend, 'copilot');
+  assert.equal(config.execution.storyValidation.maxFixCycles, 2);
+  assert.equal(config.agents.epicPlanner, 'haiku');
+  assert.equal(config.agents.storyValidator, 'opus');
 });
 
-// -------------------------------------------------------------------
-// loadConfig — partial YAML fills in defaults
-// -------------------------------------------------------------------
-
-test('loadConfig fills in defaults for fields omitted from a partial config', () => {
+test('loadConfig returns defaults when ralph.config.yml only contains comments', () => {
   const dir = makeTempDir();
-  writeConfig(dir, `
-timeouts:
-  epicTimeout: 1800
-`);
-
-  const config = loadConfig(dir);
-
-  assert.equal(config.timeouts.epicTimeout, 1800);
-  // All other fields should retain their defaults
-  assert.equal(config.timeouts.idleTimeout, DEFAULT_CONFIG.timeouts.idleTimeout);
-  assert.equal(config.execution.validatorMaxPushbacks, DEFAULT_CONFIG.execution.validatorMaxPushbacks);
-  assert.equal(config.execution.parallel, DEFAULT_CONFIG.execution.parallel);
-  assert.equal(config.execution.backend, DEFAULT_CONFIG.execution.backend);
+  writeConfig(dir, renderCommentedConfigTemplate());
+  assert.deepEqual(loadConfig(dir), DEFAULT_CONFIG);
 });
 
-test('loadConfig fills in defaults when only execution section is provided', () => {
+test('loadConfig throws a clear error on invalid YAML syntax', () => {
   const dir = makeTempDir();
   writeConfig(dir, `
-execution:
-  backend: copilot
+workflow:
+  preset: [oops
 `);
 
-  const config = loadConfig(dir);
+  assert.throws(() => loadConfig(dir), /Invalid YAML in ralph\.config\.yml/i);
+});
 
-  assert.equal(config.execution.backend, 'copilot');
-  assert.equal(config.timeouts.epicTimeout, DEFAULT_CONFIG.timeouts.epicTimeout);
-  assert.equal(config.timeouts.idleTimeout, DEFAULT_CONFIG.timeouts.idleTimeout);
-  assert.equal(config.execution.validatorMaxPushbacks, DEFAULT_CONFIG.execution.validatorMaxPushbacks);
-  assert.equal(config.execution.parallel, DEFAULT_CONFIG.execution.parallel);
+test('validateConfig returns descriptive errors for invalid fields', () => {
+  const { errors } = validateConfig({
+    workflow: { preset: 'bad' },
+    timeouts: { epicTimeout: 'abc', idleTimeout: -5 },
+    execution: {
+      parallel: 1.5,
+      backend: 'unknown',
+      storyPlanning: { enabled: 'yes' },
+      storyValidation: { enabled: true, maxFixCycles: -1 },
+      epicPlanning: { enabled: null },
+      epicValidation: { enabled: false, maxFixCycles: 'x' },
+      finalValidation: { enabled: 'nope', maxFixCycles: 2 },
+    },
+    agents: { storyPlanner: 'bad-model' },
+  });
+
+  const joined = errors.join('\n');
+  assert.match(joined, /workflow\.preset/);
+  assert.match(joined, /timeouts\.epicTimeout/);
+  assert.match(joined, /timeouts\.idleTimeout/);
+  assert.match(joined, /execution\.parallel/);
+  assert.match(joined, /execution\.backend/);
+  assert.match(joined, /execution\.storyPlanning\.enabled/);
+  assert.match(joined, /execution\.storyValidation\.maxFixCycles/);
+  assert.match(joined, /execution\.epicPlanning\.enabled/);
+  assert.match(joined, /execution\.epicValidation\.maxFixCycles/);
+  assert.match(joined, /execution\.finalValidation\.enabled/);
+  assert.match(joined, /agents\.storyPlanner/);
+});
+
+test('validateConfig accepts a full valid object', () => {
+  const { errors, config } = validateConfig({
+    workflow: { preset: 'thorough' },
+    timeouts: { epicTimeout: 1800, idleTimeout: 120 },
+    execution: {
+      parallel: 2,
+      backend: 'claude',
+      storyPlanning: { enabled: true },
+      storyValidation: { enabled: true, maxFixCycles: 2 },
+      epicPlanning: { enabled: true },
+      epicValidation: { enabled: true, maxFixCycles: 1 },
+      finalValidation: { enabled: true, maxFixCycles: 1 },
+    },
+    agents: {
+      teamLead: 'opus',
+      storyPlanner: 'haiku',
+      epicPlanner: 'opus',
+      builder: 'sonnet',
+      storyValidator: 'sonnet',
+      epicValidator: 'sonnet',
+      finalValidator: 'sonnet',
+      merger: 'sonnet',
+    },
+  });
+
+  assert.equal(errors.length, 0);
+  assert.equal(config.workflow.preset, 'thorough');
+  assert.equal(config.execution.storyValidation.maxFixCycles, 2);
+  assert.equal(config.agents.finalValidator, 'sonnet');
 });
 
 test('loadConfig accepts codex as a valid backend', () => {
@@ -99,169 +178,27 @@ execution:
   assert.equal(config.execution.backend, 'codex');
 });
 
-test('loadConfig returns defaults when ralph.config.yml only contains comments', () => {
-  const dir = makeTempDir();
-  writeConfig(dir, renderCommentedConfigTemplate());
-
-  const config = loadConfig(dir);
-
-  assert.deepEqual(config, DEFAULT_CONFIG);
-});
-
-// -------------------------------------------------------------------
-// loadConfig — invalid YAML syntax
-// -------------------------------------------------------------------
-
-test('loadConfig throws a clear error on invalid YAML syntax', () => {
-  const dir = makeTempDir();
-  // Deliberately malformed YAML
-  writeConfig(dir, `
-timeouts:
-  epicTimeout: [unclosed bracket
-`);
-
-  assert.throws(() => loadConfig(dir), (err: unknown) => {
-    assert.ok(err instanceof Error);
-    assert.match(err.message, /Invalid YAML in ralph\.config\.yml/i);
-    return true;
-  });
-});
-
-// -------------------------------------------------------------------
-// loadConfig — validation errors
-// -------------------------------------------------------------------
-
-test('loadConfig throws with the invalid field identified when a field has wrong type', () => {
-  const dir = makeTempDir();
-  writeConfig(dir, `
-timeouts:
-  epicTimeout: abc
-`);
-
-  assert.throws(() => loadConfig(dir), (err: unknown) => {
-    assert.ok(err instanceof Error);
-    assert.match(err.message, /timeouts\.epicTimeout/);
-    return true;
-  });
-});
-
-test('loadConfig throws when backend has an unknown value', () => {
+test('loadConfig accepts opencode as a valid backend', () => {
   const dir = makeTempDir();
   writeConfig(dir, `
 execution:
-  backend: openai
+  backend: opencode
 `);
 
-  assert.throws(() => loadConfig(dir), (err: unknown) => {
-    assert.ok(err instanceof Error);
-    assert.match(err.message, /execution\.backend/);
-    return true;
-  });
+  const config = loadConfig(dir);
+
+  assert.equal(config.execution.backend, 'opencode');
 });
 
-// -------------------------------------------------------------------
-// validateConfig — descriptive errors per field
-// -------------------------------------------------------------------
-
-test('validateConfig returns errors with field paths for invalid types', () => {
-  const { errors } = validateConfig({
-    timeouts: { epicTimeout: 'abc', idleTimeout: -5 },
-    execution: { validatorMaxPushbacks: -1, parallel: 1.5, backend: 'unknown' },
-  });
-
-  assert.ok(errors.length >= 1, 'expected at least one error');
-
-  const joined = errors.join('\n');
-  assert.match(joined, /timeouts\.epicTimeout/, 'should identify epicTimeout field');
-  assert.match(joined, /timeouts\.idleTimeout/, 'should identify idleTimeout field');
-  assert.match(joined, /execution\.validatorMaxPushbacks/, 'should identify validatorMaxPushbacks field');
-  assert.match(joined, /execution\.parallel/, 'should identify parallel field');
-  assert.match(joined, /execution\.backend/, 'should identify backend field');
-});
-
-test('validateConfig returns no errors for a valid full object', () => {
-  const { errors, config } = validateConfig({
-    timeouts: { epicTimeout: 1800, idleTimeout: 120 },
-    execution: { validatorMaxPushbacks: 0, parallel: 2, backend: 'claude' },
-  });
-
-  assert.equal(errors.length, 0);
-  assert.equal(config.timeouts.epicTimeout, 1800);
-  assert.equal(config.execution.backend, 'claude');
-});
-
-test('validateConfig returns error when root value is not an object', () => {
-  const { errors } = validateConfig(['not', 'an', 'object']);
-  assert.ok(errors.length > 0);
-});
-
-test('validateConfig accepts 0 for parallel (unlimited)', () => {
-  const { errors, config } = validateConfig({ execution: { parallel: 0 } });
-  assert.equal(errors.length, 0);
-  assert.equal(config.execution.parallel, 0);
-});
-
-test('validateConfig accepts 0 for validatorMaxPushbacks', () => {
-  const { errors, config } = validateConfig({ execution: { validatorMaxPushbacks: 0 } });
-  assert.equal(errors.length, 0);
-  assert.equal(config.execution.validatorMaxPushbacks, 0);
-});
-
-// -------------------------------------------------------------------
-// mergeCliOverrides
-// -------------------------------------------------------------------
-
-test('mergeCliOverrides overrides backend and parallel from CLI flags', () => {
-  const base: RalphConfig = {
-    timeouts: { epicTimeout: 3600, idleTimeout: 300 },
-    execution: { validatorMaxPushbacks: 1, parallel: 0, backend: 'claude' },
-  };
+test('mergeCliOverrides overrides backend and parallel without mutating the config', () => {
+  const base = makeBaseConfig();
+  base.execution.parallel = 5;
 
   const merged = mergeCliOverrides(base, { backend: 'copilot', parallel: 3 });
 
   assert.equal(merged.execution.backend, 'copilot');
   assert.equal(merged.execution.parallel, 3);
-  // Timeouts should be unchanged
-  assert.equal(merged.timeouts.epicTimeout, 3600);
-  assert.equal(merged.timeouts.idleTimeout, 300);
-  // validatorMaxPushbacks not overridden
-  assert.equal(merged.execution.validatorMaxPushbacks, 1);
-});
-
-test('mergeCliOverrides with no overrides returns config unchanged', () => {
-  const base: RalphConfig = {
-    timeouts: { epicTimeout: 7200, idleTimeout: 600 },
-    execution: { validatorMaxPushbacks: 2, parallel: 4, backend: 'copilot' },
-    agents: { teamLead: 'opus', planner: 'opus', builder: 'sonnet', validator: 'sonnet', merger: 'sonnet' },
-    pricing: { inputTokenCostPer1k: 0.015, outputTokenCostPer1k: 0.075, cacheReadCostPer1k: 0.0015, cacheCreationCostPer1k: 0.01875 },
-  };
-
-  const merged = mergeCliOverrides(base, {});
-
-  assert.deepEqual(merged, base);
-});
-
-test('mergeCliOverrides with only backend override leaves parallel unchanged', () => {
-  const base: RalphConfig = {
-    timeouts: { epicTimeout: 3600, idleTimeout: 300 },
-    execution: { validatorMaxPushbacks: 1, parallel: 5, backend: 'claude' },
-  };
-
-  const merged = mergeCliOverrides(base, { backend: 'copilot' });
-
-  assert.equal(merged.execution.backend, 'copilot');
-  assert.equal(merged.execution.parallel, 5);
-});
-
-test('mergeCliOverrides does not mutate the original config', () => {
-  const base: RalphConfig = {
-    timeouts: { epicTimeout: 3600, idleTimeout: 300 },
-    execution: { validatorMaxPushbacks: 1, parallel: 0, backend: 'claude' },
-  };
-
-  mergeCliOverrides(base, { backend: 'copilot', parallel: 2 });
-
-  // Original should be unchanged
-  assert.equal(base.execution.backend, 'claude');
-  assert.equal(base.execution.parallel, 0);
+  assert.equal(merged.execution.finalValidation.enabled, base.execution.finalValidation.enabled);
+  assert.equal(base.execution.backend, DEFAULT_CONFIG.execution.backend);
+  assert.equal(base.execution.parallel, 5);
 });

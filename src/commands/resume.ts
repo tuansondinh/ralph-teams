@@ -157,6 +157,14 @@ export function resumeCommand(deps: ResumeDeps = defaultDeps, backendOverride?: 
     RALPH_FINAL_VALIDATION_MAX_FIX_CYCLES: String(resolvedConfig.execution.finalValidation.maxFixCycles),
     RALPH_PARALLEL: String(resolvedConfig.execution.parallel),
     RALPH_BACKEND: resolvedConfig.execution.backend,
+    RALPH_MODEL_TEAM_LEAD: resolvedConfig.agents.teamLead,
+    RALPH_MODEL_STORY_PLANNER: resolvedConfig.agents.storyPlanner,
+    RALPH_MODEL_EPIC_PLANNER: resolvedConfig.agents.epicPlanner,
+    RALPH_MODEL_BUILDER: resolvedConfig.agents.builder,
+    RALPH_MODEL_STORY_VALIDATOR: resolvedConfig.agents.storyValidator,
+    RALPH_MODEL_EPIC_VALIDATOR: resolvedConfig.agents.epicValidator,
+    RALPH_MODEL_FINAL_VALIDATOR: resolvedConfig.agents.finalValidator,
+    RALPH_MODEL_MERGER: resolvedConfig.agents.merger,
   };
 
   const result = deps.spawnSync(ralphSh, args, {

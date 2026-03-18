@@ -17,7 +17,7 @@ ralph-teams init
 # start the loop, by default uses claude
 ralph-teams run
 
-# optionally before run, you can also plan epics before hand, otherwise this will be done automatically by the planner:
+# optionally before run, you can also plan epics before hand, otherwise this will be done automatically by the epic planner:
 ralph-teams plan
 ```
 
@@ -54,11 +54,17 @@ The system has two layers:
 - `ralph.sh` acts as the project manager. It validates the PRD, checks epic dependencies, loops through ready epics, records results, and updates progress files.
 - A backend agent session handles one epic at a time using a small team:
   - `team-lead` coordinates the epic
-  - `planner` creates the implementation plan
+  - `epic-planner` creates the implementation plan when epic planning is enabled
+  - `story-planner` can create a story-scoped plan when story planning is enabled
   - `builder` makes changes and runs tests
-  - `validator` verifies the result independently, pushes backes (by default: 1 pushback max )
+  - `story-validator`, `epic-validator`, and `final-validator` verify work at their respective scopes when enabled
 
-Across all backends, `builder` and `validator` are one-shot story-scoped workers. The Team Lead must spawn a fresh Builder for each story attempt, spawn a fresh Validator when verification needs an independent agent, and never treat idle/task-lifecycle output as completion. A build attempt only counts when the Builder returns a concrete commit SHA and the Team Lead persists the story result to the epic state file at `.ralph-teams/state/{epic-id}.json`.
+Across all backends, `builder` work is one-shot per attempt. Scoped validation is configurable via `storyValidation`, `epicValidation`, and `finalValidation`. A build attempt only counts when the Builder returns a concrete commit SHA and the Team Lead persists the story result to the epic state file at `.ralph-teams/state/{epic-id}.json`.
+
+Workflow presets:
+- `default`: epic planning, epic validation, and final validation enabled
+- `thorough`: all planning and validation toggles enabled
+- `off`: all planning and validation toggles disabled
 
 Default Team Lead policy by backend:
 - Claude: keep `team-lead` on `opus`; for spawned work use `haiku` for easy tasks, `sonnet` for medium tasks, `opus` for difficult tasks
@@ -228,7 +234,7 @@ Notes:
 Planning behavior:
 
 - if an epic has `planned: true`, the Team Lead is expected to read `.ralph-teams/plans/plan-EPIC-xxx.md` and follow it
-- if an epic is still unplanned, medium- and high-complexity epics should spawn a planner before implementation
+- if an epic is still unplanned and epic planning is enabled, medium- and high-complexity epics should spawn the epic planner before implementation
 - only clearly low-complexity epics should skip planning during execution
 
 ### `ralph-teams task <prompt>`
@@ -273,7 +279,7 @@ Notes:
 
 - this command is intended after `ralph-teams init`
 - if you skip an epic during planning, it remains `planned: false`
-- planned epics should not require the Team Lead to spawn another planner later
+- planned epics should not require the Team Lead to spawn another epic planner later
 
 ### `ralph-teams resume`
 
@@ -396,7 +402,7 @@ Uses:
 - `codex exec`
 - canonical worker prompts in `prompts/agents/`
 - `.codex/agents/*.toml`
-- Codex multi-agent mode with repo-local planner, builder, and validator roles
+- Codex multi-agent mode with repo-local scoped planner, builder, and validator roles
 
 Example:
 
@@ -408,8 +414,8 @@ Notes:
 
 - Ralph enables Codex multi-agent mode per run, so no global `~/.codex/config.toml` edits are required
 - Codex runs from each epic worktree and is granted write access to the repo root so it can update the shared PRD
-- Codex does not use a separate repo-local Team Lead role file; the Team Lead policy comes from the runtime prompt assembled in `ralph.sh`, while `.codex/agents/*.toml` define the spawned planner, builder, validator, and merger roles
-- Codex follows the same one-shot story-scoped Builder/Validator contract as Claude and Copilot; the runtime prompt in `ralph.sh` enforces that policy for Codex Team Leads
+- Codex does not use a separate repo-local Team Lead role file; the Team Lead policy comes from the runtime prompt assembled in `ralph.sh`, while `.codex/agents/*.toml` define the spawned story-planner, epic-planner, builder, story-validator, epic-validator, final-validator, and merger roles
+- Codex follows the same scoped planning/validation contract as Claude and Copilot; the runtime prompt in `ralph.sh` enforces that policy for Codex Team Leads
 - Edit `prompts/agents/*.md` and run `npm run sync:agents` to regenerate the backend-specific worker agent files
 
 ## PRD Format
@@ -469,7 +475,7 @@ During a run, Ralph writes:
 
 - `.ralph-teams/progress.txt`: high-level run log
 - `.ralph-teams/state/EPIC-xxx.json`: per-epic story pass/fail state (Team Lead reads/writes)
-- `.ralph-teams/plans/plan-EPIC-xxx.md`: planner output for an epic
+- `.ralph-teams/plans/plan-EPIC-xxx.md`: epic-planner output for an epic
 - planned epics are expected to use these files as their implementation contract
 - `.ralph-teams/logs/epic-EPIC-xxx-<timestamp>.log`: raw backend session log
 - `.ralph-teams/ralph-state.json`: saved interrupt/resume state
@@ -496,7 +502,7 @@ The current execution contract is:
 - each story gets at most two build/validate cycles
 - Builder and Validator are one-shot story-scoped workers, never long-lived mailboxes shared across stories
 - a Builder attempt only counts when the Team Lead receives a concrete commit SHA for that story attempt
-- the validator checks output independently from the builder's reasoning
+- scoped validators check output independently from the builder's reasoning
 - `DONE: X/Y stories passed` is a required session footer, but the durable completion signal is the epic state file updated by the Team Lead
 - after updating the epic state file for all attempted stories, the team lead must print `DONE: X/Y stories passed` and exit the session immediately
 - pressing `Ctrl-C` writes `.ralph-teams/ralph-state.json` so the run can be resumed later with `ralph-teams resume`

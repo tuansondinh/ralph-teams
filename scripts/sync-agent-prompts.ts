@@ -21,27 +21,36 @@ const markdownBackends: MarkdownBackend[] = [
   {
     dir: '.claude/agents',
     models: {
-      planner: 'opus',
+      'story-planner': 'haiku',
+      'epic-planner': 'opus',
       builder: 'sonnet',
-      validator: 'sonnet',
+      'story-validator': 'sonnet',
+      'epic-validator': 'sonnet',
+      'final-validator': 'sonnet',
       merger: 'sonnet',
     },
   },
   {
     dir: '.github/agents',
     models: {
-      planner: 'gpt-5.3-codex',
+      'story-planner': 'gpt-5-mini',
+      'epic-planner': 'gpt-5.3-codex',
       builder: 'gpt-5.3-codex',
-      validator: 'gpt-5.3-codex',
+      'story-validator': 'gpt-5.3-codex',
+      'epic-validator': 'gpt-5.3-codex',
+      'final-validator': 'gpt-5.3-codex',
       merger: 'gpt-5.3-codex',
     },
   },
   {
     dir: '.opencode/agents',
     models: {
-      planner: 'openai/gpt-5.4',
+      'story-planner': 'openai/gpt-5-mini',
+      'epic-planner': 'openai/gpt-5.4',
       builder: 'openai/gpt-5.3-codex',
-      validator: 'openai/gpt-5.3-codex',
+      'story-validator': 'openai/gpt-5.3-codex',
+      'epic-validator': 'openai/gpt-5.3-codex',
+      'final-validator': 'openai/gpt-5.3-codex',
       merger: 'openai/gpt-5.3-codex',
     },
   },
@@ -114,11 +123,10 @@ const canonicalPromptFiles = fs.readdirSync(promptsDir)
 
 for (const fileName of canonicalPromptFiles) {
   const canonical = parseCanonicalPrompt(path.join(promptsDir, fileName));
-  const markdownName = canonical.name === 'merger' ? 'merger' : canonical.name;
 
   for (const backend of markdownBackends) {
     const suffix = backend.dir === '.github/agents' ? '.agent.md' : '.md';
-    const outputPath = path.join(repoRoot, backend.dir, `${markdownName}${suffix}`);
+    const outputPath = path.join(repoRoot, backend.dir, `${canonical.name}${suffix}`);
     const model = backend.models[canonical.name];
     if (!model) {
       throw new Error(`Missing model for ${canonical.name} in ${backend.dir}`);

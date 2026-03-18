@@ -41,11 +41,21 @@ fi
 EPIC_TIMEOUT="${RALPH_EPIC_TIMEOUT:-3600}"
 IDLE_TIMEOUT="${RALPH_IDLE_TIMEOUT:-600}"
 MAX_CRASH_RETRIES="${RALPH_MAX_CRASH_RETRIES:-2}"
-VALIDATOR_MAX_PUSHBACKS="${RALPH_VALIDATOR_MAX_PUSHBACKS:-1}"
+STORY_PLANNING_ENABLED="${RALPH_STORY_PLANNING_ENABLED:-0}"
+STORY_VALIDATION_ENABLED="${RALPH_STORY_VALIDATION_ENABLED:-0}"
+STORY_VALIDATION_MAX_FIX_CYCLES="${RALPH_STORY_VALIDATION_MAX_FIX_CYCLES:-1}"
+EPIC_PLANNING_ENABLED="${RALPH_EPIC_PLANNING_ENABLED:-1}"
+EPIC_VALIDATION_ENABLED="${RALPH_EPIC_VALIDATION_ENABLED:-1}"
+EPIC_VALIDATION_MAX_FIX_CYCLES="${RALPH_EPIC_VALIDATION_MAX_FIX_CYCLES:-1}"
+FINAL_VALIDATION_ENABLED="${RALPH_FINAL_VALIDATION_ENABLED:-1}"
+FINAL_VALIDATION_MAX_FIX_CYCLES="${RALPH_FINAL_VALIDATION_MAX_FIX_CYCLES:-1}"
 MODEL_TEAM_LEAD="${RALPH_MODEL_TEAM_LEAD:-opus}"
-MODEL_PLANNER="${RALPH_MODEL_PLANNER:-opus}"
+MODEL_STORY_PLANNER="${RALPH_MODEL_STORY_PLANNER:-haiku}"
+MODEL_EPIC_PLANNER="${RALPH_MODEL_EPIC_PLANNER:-opus}"
 MODEL_BUILDER="${RALPH_MODEL_BUILDER:-sonnet}"
-MODEL_VALIDATOR="${RALPH_MODEL_VALIDATOR:-sonnet}"
+MODEL_STORY_VALIDATOR="${RALPH_MODEL_STORY_VALIDATOR:-sonnet}"
+MODEL_EPIC_VALIDATOR="${RALPH_MODEL_EPIC_VALIDATOR:-sonnet}"
+MODEL_FINAL_VALIDATOR="${RALPH_MODEL_FINAL_VALIDATOR:-sonnet}"
 MODEL_MERGER="${RALPH_MODEL_MERGER:-sonnet}"
 # Only apply RALPH_PARALLEL env var if --parallel flag was not provided
 if [ -z "$PARALLEL" ] && [ -n "${RALPH_PARALLEL:-}" ] && [ "${RALPH_PARALLEL}" != "0" ]; then
@@ -94,9 +104,12 @@ map_model_for_backend() {
 }
 
 MODEL_TEAM_LEAD="$(map_model_for_backend "$BACKEND" "$MODEL_TEAM_LEAD")"
-MODEL_PLANNER="$(map_model_for_backend "$BACKEND" "$MODEL_PLANNER")"
+MODEL_STORY_PLANNER="$(map_model_for_backend "$BACKEND" "$MODEL_STORY_PLANNER")"
+MODEL_EPIC_PLANNER="$(map_model_for_backend "$BACKEND" "$MODEL_EPIC_PLANNER")"
 MODEL_BUILDER="$(map_model_for_backend "$BACKEND" "$MODEL_BUILDER")"
-MODEL_VALIDATOR="$(map_model_for_backend "$BACKEND" "$MODEL_VALIDATOR")"
+MODEL_STORY_VALIDATOR="$(map_model_for_backend "$BACKEND" "$MODEL_STORY_VALIDATOR")"
+MODEL_EPIC_VALIDATOR="$(map_model_for_backend "$BACKEND" "$MODEL_EPIC_VALIDATOR")"
+MODEL_FINAL_VALIDATOR="$(map_model_for_backend "$BACKEND" "$MODEL_FINAL_VALIDATOR")"
 MODEL_MERGER="$(map_model_for_backend "$BACKEND" "$MODEL_MERGER")"
 
 resolve_rjq_bin() {
@@ -150,9 +163,12 @@ rjq() {
 }
 
 export RALPH_MODEL_TEAM_LEAD="$MODEL_TEAM_LEAD"
-export RALPH_MODEL_PLANNER="$MODEL_PLANNER"
+export RALPH_MODEL_STORY_PLANNER="$MODEL_STORY_PLANNER"
+export RALPH_MODEL_EPIC_PLANNER="$MODEL_EPIC_PLANNER"
 export RALPH_MODEL_BUILDER="$MODEL_BUILDER"
-export RALPH_MODEL_VALIDATOR="$MODEL_VALIDATOR"
+export RALPH_MODEL_STORY_VALIDATOR="$MODEL_STORY_VALIDATOR"
+export RALPH_MODEL_EPIC_VALIDATOR="$MODEL_EPIC_VALIDATOR"
+export RALPH_MODEL_FINAL_VALIDATOR="$MODEL_FINAL_VALIDATOR"
 export RALPH_MODEL_MERGER="$MODEL_MERGER"
 
 # --- Backend configuration ---
@@ -397,7 +413,7 @@ if [ -n "$PARALLEL" ]; then
 else
   echo "  Mode: sequential"
 fi
-echo "  Models: team-lead=$MODEL_TEAM_LEAD  planner=$MODEL_PLANNER  builder=$MODEL_BUILDER  validator=$MODEL_VALIDATOR  merger=$MODEL_MERGER"
+echo "  Models: team-lead=$MODEL_TEAM_LEAD  story-planner=$MODEL_STORY_PLANNER  epic-planner=$MODEL_EPIC_PLANNER  builder=$MODEL_BUILDER  story-validator=$MODEL_STORY_VALIDATOR  epic-validator=$MODEL_EPIC_VALIDATOR  final-validator=$MODEL_FINAL_VALIDATOR  merger=$MODEL_MERGER"
 echo "========================================================"
 
 ensure_runtime_gitignore_entries() {
@@ -718,20 +734,35 @@ prepare_codex_agent_configs() {
 
   CODEX_AGENT_RUNTIME_DIR=$(mktemp -d "${TMPDIR:-/tmp}/ralph-codex-agents.XXXXXX")
 
-  local planner_model_easy="$MODEL_PLANNER"
-  local planner_model_medium="$MODEL_PLANNER"
-  local planner_model_difficult="$MODEL_PLANNER"
+  local story_planner_model_easy="$MODEL_STORY_PLANNER"
+  local story_planner_model_medium="$MODEL_STORY_PLANNER"
+  local story_planner_model_difficult="$MODEL_STORY_PLANNER"
+  local epic_planner_model_easy="$MODEL_EPIC_PLANNER"
+  local epic_planner_model_medium="$MODEL_EPIC_PLANNER"
+  local epic_planner_model_difficult="$MODEL_EPIC_PLANNER"
   local builder_model_easy="$MODEL_BUILDER"
   local builder_model_medium="$MODEL_BUILDER"
   local builder_model_difficult="$MODEL_BUILDER"
-  local validator_model_easy="$MODEL_VALIDATOR"
-  local validator_model_medium="$MODEL_VALIDATOR"
-  local validator_model_difficult="$MODEL_VALIDATOR"
+  local story_validator_model_easy="$MODEL_STORY_VALIDATOR"
+  local story_validator_model_medium="$MODEL_STORY_VALIDATOR"
+  local story_validator_model_difficult="$MODEL_STORY_VALIDATOR"
+  local epic_validator_model_easy="$MODEL_EPIC_VALIDATOR"
+  local epic_validator_model_medium="$MODEL_EPIC_VALIDATOR"
+  local epic_validator_model_difficult="$MODEL_EPIC_VALIDATOR"
+  local final_validator_model_easy="$MODEL_FINAL_VALIDATOR"
+  local final_validator_model_medium="$MODEL_FINAL_VALIDATOR"
+  local final_validator_model_difficult="$MODEL_FINAL_VALIDATOR"
 
-  if [ "${RALPH_MODEL_PLANNER_EXPLICIT:-0}" != "1" ]; then
-    planner_model_easy="$(map_model_for_backend codex haiku)"
-    planner_model_medium="$(map_model_for_backend codex sonnet)"
-    planner_model_difficult="$(map_model_for_backend codex opus)"
+  if [ "${RALPH_MODEL_STORY_PLANNER_EXPLICIT:-0}" != "1" ]; then
+    story_planner_model_easy="$(map_model_for_backend codex haiku)"
+    story_planner_model_medium="$(map_model_for_backend codex sonnet)"
+    story_planner_model_difficult="$(map_model_for_backend codex opus)"
+  fi
+
+  if [ "${RALPH_MODEL_EPIC_PLANNER_EXPLICIT:-0}" != "1" ]; then
+    epic_planner_model_easy="$(map_model_for_backend codex haiku)"
+    epic_planner_model_medium="$(map_model_for_backend codex sonnet)"
+    epic_planner_model_difficult="$(map_model_for_backend codex opus)"
   fi
 
   if [ "${RALPH_MODEL_BUILDER_EXPLICIT:-0}" != "1" ]; then
@@ -740,23 +771,47 @@ prepare_codex_agent_configs() {
     builder_model_difficult="$(map_model_for_backend codex opus)"
   fi
 
-  if [ "${RALPH_MODEL_VALIDATOR_EXPLICIT:-0}" != "1" ]; then
-    validator_model_easy="$(map_model_for_backend codex haiku)"
-    validator_model_medium="$(map_model_for_backend codex sonnet)"
-    validator_model_difficult="$(map_model_for_backend codex opus)"
+  if [ "${RALPH_MODEL_STORY_VALIDATOR_EXPLICIT:-0}" != "1" ]; then
+    story_validator_model_easy="$(map_model_for_backend codex haiku)"
+    story_validator_model_medium="$(map_model_for_backend codex sonnet)"
+    story_validator_model_difficult="$(map_model_for_backend codex opus)"
   fi
 
-  write_codex_agent_config "${CODEX_AGENT_DIR}/planner.toml" "${CODEX_AGENT_RUNTIME_DIR}/planner-easy.toml" "$planner_model_easy"
-  write_codex_agent_config "${CODEX_AGENT_DIR}/planner.toml" "${CODEX_AGENT_RUNTIME_DIR}/planner-medium.toml" "$planner_model_medium"
-  write_codex_agent_config "${CODEX_AGENT_DIR}/planner.toml" "${CODEX_AGENT_RUNTIME_DIR}/planner-difficult.toml" "$planner_model_difficult"
+  if [ "${RALPH_MODEL_EPIC_VALIDATOR_EXPLICIT:-0}" != "1" ]; then
+    epic_validator_model_easy="$(map_model_for_backend codex haiku)"
+    epic_validator_model_medium="$(map_model_for_backend codex sonnet)"
+    epic_validator_model_difficult="$(map_model_for_backend codex opus)"
+  fi
+
+  if [ "${RALPH_MODEL_FINAL_VALIDATOR_EXPLICIT:-0}" != "1" ]; then
+    final_validator_model_easy="$(map_model_for_backend codex haiku)"
+    final_validator_model_medium="$(map_model_for_backend codex sonnet)"
+    final_validator_model_difficult="$(map_model_for_backend codex opus)"
+  fi
+
+  write_codex_agent_config "${CODEX_AGENT_DIR}/story-planner.toml" "${CODEX_AGENT_RUNTIME_DIR}/story-planner-easy.toml" "$story_planner_model_easy"
+  write_codex_agent_config "${CODEX_AGENT_DIR}/story-planner.toml" "${CODEX_AGENT_RUNTIME_DIR}/story-planner-medium.toml" "$story_planner_model_medium"
+  write_codex_agent_config "${CODEX_AGENT_DIR}/story-planner.toml" "${CODEX_AGENT_RUNTIME_DIR}/story-planner-difficult.toml" "$story_planner_model_difficult"
+
+  write_codex_agent_config "${CODEX_AGENT_DIR}/epic-planner.toml" "${CODEX_AGENT_RUNTIME_DIR}/epic-planner-easy.toml" "$epic_planner_model_easy"
+  write_codex_agent_config "${CODEX_AGENT_DIR}/epic-planner.toml" "${CODEX_AGENT_RUNTIME_DIR}/epic-planner-medium.toml" "$epic_planner_model_medium"
+  write_codex_agent_config "${CODEX_AGENT_DIR}/epic-planner.toml" "${CODEX_AGENT_RUNTIME_DIR}/epic-planner-difficult.toml" "$epic_planner_model_difficult"
 
   write_codex_agent_config "${CODEX_AGENT_DIR}/builder.toml" "${CODEX_AGENT_RUNTIME_DIR}/builder-easy.toml" "$builder_model_easy"
   write_codex_agent_config "${CODEX_AGENT_DIR}/builder.toml" "${CODEX_AGENT_RUNTIME_DIR}/builder-medium.toml" "$builder_model_medium"
   write_codex_agent_config "${CODEX_AGENT_DIR}/builder.toml" "${CODEX_AGENT_RUNTIME_DIR}/builder-difficult.toml" "$builder_model_difficult"
 
-  write_codex_agent_config "${CODEX_AGENT_DIR}/validator.toml" "${CODEX_AGENT_RUNTIME_DIR}/validator-easy.toml" "$validator_model_easy"
-  write_codex_agent_config "${CODEX_AGENT_DIR}/validator.toml" "${CODEX_AGENT_RUNTIME_DIR}/validator-medium.toml" "$validator_model_medium"
-  write_codex_agent_config "${CODEX_AGENT_DIR}/validator.toml" "${CODEX_AGENT_RUNTIME_DIR}/validator-difficult.toml" "$validator_model_difficult"
+  write_codex_agent_config "${CODEX_AGENT_DIR}/story-validator.toml" "${CODEX_AGENT_RUNTIME_DIR}/story-validator-easy.toml" "$story_validator_model_easy"
+  write_codex_agent_config "${CODEX_AGENT_DIR}/story-validator.toml" "${CODEX_AGENT_RUNTIME_DIR}/story-validator-medium.toml" "$story_validator_model_medium"
+  write_codex_agent_config "${CODEX_AGENT_DIR}/story-validator.toml" "${CODEX_AGENT_RUNTIME_DIR}/story-validator-difficult.toml" "$story_validator_model_difficult"
+
+  write_codex_agent_config "${CODEX_AGENT_DIR}/epic-validator.toml" "${CODEX_AGENT_RUNTIME_DIR}/epic-validator-easy.toml" "$epic_validator_model_easy"
+  write_codex_agent_config "${CODEX_AGENT_DIR}/epic-validator.toml" "${CODEX_AGENT_RUNTIME_DIR}/epic-validator-medium.toml" "$epic_validator_model_medium"
+  write_codex_agent_config "${CODEX_AGENT_DIR}/epic-validator.toml" "${CODEX_AGENT_RUNTIME_DIR}/epic-validator-difficult.toml" "$epic_validator_model_difficult"
+
+  write_codex_agent_config "${CODEX_AGENT_DIR}/final-validator.toml" "${CODEX_AGENT_RUNTIME_DIR}/final-validator-easy.toml" "$final_validator_model_easy"
+  write_codex_agent_config "${CODEX_AGENT_DIR}/final-validator.toml" "${CODEX_AGENT_RUNTIME_DIR}/final-validator-medium.toml" "$final_validator_model_medium"
+  write_codex_agent_config "${CODEX_AGENT_DIR}/final-validator.toml" "${CODEX_AGENT_RUNTIME_DIR}/final-validator-difficult.toml" "$final_validator_model_difficult"
 
   write_codex_agent_config "${CODEX_AGENT_DIR}/merger.toml" "${CODEX_AGENT_RUNTIME_DIR}/merger.toml" "$MODEL_MERGER"
 }
@@ -775,26 +830,44 @@ run_codex_exec() {
     --skip-git-repo-check \
     --color never \
     --enable multi_agent \
-    -c "agents.max_threads=3" \
+    -c "agents.max_threads=6" \
     -c "agents.max_depth=2" \
-    -c "agents.planner_easy.description='Implementation planner for easy Ralph tasks'" \
-    -c "agents.planner_easy.config_file='${CODEX_AGENT_RUNTIME_DIR}/planner-easy.toml'" \
-    -c "agents.planner_medium.description='Implementation planner for normal Ralph tasks'" \
-    -c "agents.planner_medium.config_file='${CODEX_AGENT_RUNTIME_DIR}/planner-medium.toml'" \
-    -c "agents.planner_difficult.description='Implementation planner for difficult Ralph tasks'" \
-    -c "agents.planner_difficult.config_file='${CODEX_AGENT_RUNTIME_DIR}/planner-difficult.toml'" \
+    -c "agents.story_planner_easy.description='Story planner for easy Ralph stories'" \
+    -c "agents.story_planner_easy.config_file='${CODEX_AGENT_RUNTIME_DIR}/story-planner-easy.toml'" \
+    -c "agents.story_planner_medium.description='Story planner for normal Ralph stories'" \
+    -c "agents.story_planner_medium.config_file='${CODEX_AGENT_RUNTIME_DIR}/story-planner-medium.toml'" \
+    -c "agents.story_planner_difficult.description='Story planner for difficult Ralph stories'" \
+    -c "agents.story_planner_difficult.config_file='${CODEX_AGENT_RUNTIME_DIR}/story-planner-difficult.toml'" \
+    -c "agents.epic_planner_easy.description='Epic planner for easy Ralph epics'" \
+    -c "agents.epic_planner_easy.config_file='${CODEX_AGENT_RUNTIME_DIR}/epic-planner-easy.toml'" \
+    -c "agents.epic_planner_medium.description='Epic planner for normal Ralph epics'" \
+    -c "agents.epic_planner_medium.config_file='${CODEX_AGENT_RUNTIME_DIR}/epic-planner-medium.toml'" \
+    -c "agents.epic_planner_difficult.description='Epic planner for difficult Ralph epics'" \
+    -c "agents.epic_planner_difficult.config_file='${CODEX_AGENT_RUNTIME_DIR}/epic-planner-difficult.toml'" \
     -c "agents.builder_easy.description='Implementation builder for easy Ralph stories'" \
     -c "agents.builder_easy.config_file='${CODEX_AGENT_RUNTIME_DIR}/builder-easy.toml'" \
     -c "agents.builder_medium.description='Implementation builder for normal Ralph stories'" \
     -c "agents.builder_medium.config_file='${CODEX_AGENT_RUNTIME_DIR}/builder-medium.toml'" \
     -c "agents.builder_difficult.description='Implementation builder for difficult Ralph stories'" \
     -c "agents.builder_difficult.config_file='${CODEX_AGENT_RUNTIME_DIR}/builder-difficult.toml'" \
-    -c "agents.validator_easy.description='Independent validator for easy Ralph stories'" \
-    -c "agents.validator_easy.config_file='${CODEX_AGENT_RUNTIME_DIR}/validator-easy.toml'" \
-    -c "agents.validator_medium.description='Independent validator for normal Ralph stories'" \
-    -c "agents.validator_medium.config_file='${CODEX_AGENT_RUNTIME_DIR}/validator-medium.toml'" \
-    -c "agents.validator_difficult.description='Independent validator for difficult Ralph stories'" \
-    -c "agents.validator_difficult.config_file='${CODEX_AGENT_RUNTIME_DIR}/validator-difficult.toml'" \
+    -c "agents.story_validator_easy.description='Story validator for easy Ralph stories'" \
+    -c "agents.story_validator_easy.config_file='${CODEX_AGENT_RUNTIME_DIR}/story-validator-easy.toml'" \
+    -c "agents.story_validator_medium.description='Story validator for normal Ralph stories'" \
+    -c "agents.story_validator_medium.config_file='${CODEX_AGENT_RUNTIME_DIR}/story-validator-medium.toml'" \
+    -c "agents.story_validator_difficult.description='Story validator for difficult Ralph stories'" \
+    -c "agents.story_validator_difficult.config_file='${CODEX_AGENT_RUNTIME_DIR}/story-validator-difficult.toml'" \
+    -c "agents.epic_validator_easy.description='Epic validator for easy Ralph epics'" \
+    -c "agents.epic_validator_easy.config_file='${CODEX_AGENT_RUNTIME_DIR}/epic-validator-easy.toml'" \
+    -c "agents.epic_validator_medium.description='Epic validator for normal Ralph epics'" \
+    -c "agents.epic_validator_medium.config_file='${CODEX_AGENT_RUNTIME_DIR}/epic-validator-medium.toml'" \
+    -c "agents.epic_validator_difficult.description='Epic validator for difficult Ralph epics'" \
+    -c "agents.epic_validator_difficult.config_file='${CODEX_AGENT_RUNTIME_DIR}/epic-validator-difficult.toml'" \
+    -c "agents.final_validator_easy.description='Final validator for easy Ralph final reviews'" \
+    -c "agents.final_validator_easy.config_file='${CODEX_AGENT_RUNTIME_DIR}/final-validator-easy.toml'" \
+    -c "agents.final_validator_medium.description='Final validator for normal Ralph final reviews'" \
+    -c "agents.final_validator_medium.config_file='${CODEX_AGENT_RUNTIME_DIR}/final-validator-medium.toml'" \
+    -c "agents.final_validator_difficult.description='Final validator for difficult Ralph final reviews'" \
+    -c "agents.final_validator_difficult.config_file='${CODEX_AGENT_RUNTIME_DIR}/final-validator-difficult.toml'" \
     "$@" \
     -
 }
@@ -1158,11 +1231,25 @@ $PENDING_STORIES_JSON
 ## Canonical Team Lead Policy
 $TEAM_LEAD_POLICY
 
+## Workflow Configuration
+- storyPlanning.enabled = ${STORY_PLANNING_ENABLED}
+- storyValidation.enabled = ${STORY_VALIDATION_ENABLED}
+- storyValidation.maxFixCycles = ${STORY_VALIDATION_MAX_FIX_CYCLES}
+- epicPlanning.enabled = ${EPIC_PLANNING_ENABLED}
+- epicValidation.enabled = ${EPIC_VALIDATION_ENABLED}
+- epicValidation.maxFixCycles = ${EPIC_VALIDATION_MAX_FIX_CYCLES}
+- finalValidation.enabled = ${FINAL_VALIDATION_ENABLED}
+- finalValidation.maxFixCycles = ${FINAL_VALIDATION_MAX_FIX_CYCLES}
+- Final validation is orchestrated by ralph.sh after all epics complete and merge cleanly. Do not try to perform final validation inside this epic session.
+
 ## Model Selection Policy
 - Respect explicit ralph.config.yml agent model overrides when they are present.
-  - If RALPH_MODEL_PLANNER_EXPLICIT=1, use RALPH_MODEL_PLANNER for planner work.
+  - If RALPH_MODEL_STORY_PLANNER_EXPLICIT=1, use RALPH_MODEL_STORY_PLANNER for story planner work.
+  - If RALPH_MODEL_EPIC_PLANNER_EXPLICIT=1, use RALPH_MODEL_EPIC_PLANNER for epic planner work.
   - If RALPH_MODEL_BUILDER_EXPLICIT=1, use RALPH_MODEL_BUILDER for builder work.
-  - If RALPH_MODEL_VALIDATOR_EXPLICIT=1, use RALPH_MODEL_VALIDATOR for validator work.
+  - If RALPH_MODEL_STORY_VALIDATOR_EXPLICIT=1, use RALPH_MODEL_STORY_VALIDATOR for story validator work.
+  - If RALPH_MODEL_EPIC_VALIDATOR_EXPLICIT=1, use RALPH_MODEL_EPIC_VALIDATOR for epic validator work.
+  - If RALPH_MODEL_FINAL_VALIDATOR_EXPLICIT=1, use RALPH_MODEL_FINAL_VALIDATOR for final validator work.
   - If RALPH_MODEL_MERGER_EXPLICIT=1, use RALPH_MODEL_MERGER for merger work.
 - If there is no explicit override for that role, choose the model by task difficulty.
 - Default difficulty policy by backend:
@@ -1171,19 +1258,25 @@ $TEAM_LEAD_POLICY
   - OpenCode: easy -> openai/gpt-5-mini, medium -> openai/gpt-5.3-codex, difficult -> openai/gpt-5.4
 - If your runtime supports setting reasoning effort per spawned task, use low for easy tasks, medium for normal tasks, high for difficult tasks, and xhigh only for unusually hard analysis or verification.
 - If your runtime is Codex, use these exact named teammate roles when spawning:
-  - planners: planner_easy, planner_medium, planner_difficult
+  - story planners: story_planner_easy, story_planner_medium, story_planner_difficult
+  - epic planners: epic_planner_easy, epic_planner_medium, epic_planner_difficult
   - builders: builder_easy, builder_medium, builder_difficult
-  - validators: validator_easy, validator_medium, validator_difficult
+  - story validators: story_validator_easy, story_validator_medium, story_validator_difficult
+  - epic validators: epic_validator_easy, epic_validator_medium, epic_validator_difficult
+  - final validators: final_validator_easy, final_validator_medium, final_validator_difficult
 - If your runtime is OpenCode, use these exact agent names when spawning with the Task tool:
-  - planner
+  - story-planner
+  - epic-planner
   - builder
-  - validator
+  - story-validator
+  - epic-validator
+  - final-validator
   - merger
 
 ## Runtime-Specific Notes
 - Use the exact plan path shown above when the policy refers to the canonical epic plan file.
 - Use the exact epic state file path shown above for every story update. The PRD path is read-only context.
-- If your runtime supports named sub-agents, use the dedicated planner, builder, and validator roles and choose their models using the policy above.
+- If your runtime supports named sub-agents, use the dedicated story-planner, epic-planner, builder, story-validator, and epic-validator roles and choose their models using the policy above.
 - If a story fails validation and still has retries left, spawn a new Builder for the retry instead of reusing the previous Builder run.
 
 Begin."
@@ -1359,6 +1452,126 @@ Begin resolving."
   done
 
   return $merge_failures
+}
+
+extract_prompt_body() {
+  local source_file="$1"
+  awk '
+    BEGIN { in_frontmatter=0; frontmatter_done=0 }
+    NR == 1 && $0 == "---" { in_frontmatter=1; next }
+    in_frontmatter && $0 == "---" { in_frontmatter=0; frontmatter_done=1; next }
+    in_frontmatter { next }
+    frontmatter_done && $0 == "" { frontmatter_done=2; next }
+    { print }
+  ' "$source_file"
+}
+
+run_backend_agent_session() {
+  local workdir="$1"
+  local agent_name="$2"
+  local model="$3"
+  local prompt="$4"
+  local log_file="$5"
+
+  case "$BACKEND" in
+    claude)
+      echo "$prompt" | $AGENT_CMD --agent "$agent_name" --model "$model" --dangerously-skip-permissions --print --verbose --output-format stream-json > "$log_file" 2>&1 || true
+      ;;
+    copilot)
+      COPILOT_ROLE_PROMPT="$prompt" \
+        script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent "$0" --model "$1" --allow-all --no-ask-user --stream on -p "$2"' \
+        "$agent_name" "$model" "$COPILOT_ROLE_PROMPT" \
+        > "$log_file" 2>&1 || true
+      ;;
+    opencode)
+      run_opencode_exec "$workdir" "$prompt" "$agent_name" "$model" > "$log_file" 2>&1 || true
+      ;;
+    codex)
+      local prompt_file="${SCRIPT_DIR}/prompts/agents/${agent_name}.md"
+      local role_body
+      role_body="$(extract_prompt_body "$prompt_file")"
+      printf '%s\n\n## Assignment\n%s\n' "$role_body" "$prompt" | codex \
+        -a never \
+        exec \
+        -C "$workdir" \
+        -m "$model" \
+        -s workspace-write \
+        --skip-git-repo-check \
+        --color never \
+        - > "$log_file" 2>&1 || true
+      ;;
+  esac
+}
+
+run_final_validation_cycle() {
+  local final_fix_cycle=0
+
+  [ "$FINAL_VALIDATION_ENABLED" = "1" ] || return 0
+  [ "$COMPLETED" -eq "$TOTAL_EPICS" ] || return 0
+
+  echo ""
+  echo "  --- Final validation ---"
+
+  while true; do
+    local validation_log="${LOGS_DIR}/final-validation-$(date +%s).log"
+    local validation_prompt="Validate the final integrated branch after all epics have completed.
+
+## Project
+$PROJECT
+
+## Working Directory
+$ROOT_DIR
+
+## Context
+- Current branch: $(git branch --show-current 2>/dev/null || echo unknown)
+- Completed epics: $COMPLETED / $TOTAL_EPICS
+- Progress log: $PROGRESS_FILE
+
+## Expectations
+- Review the final repository state as a whole.
+- Run relevant tests or verification commands yourself.
+- Use browser verification when UI behavior is affected and local verification is possible.
+- Return a clear PASS or FAIL verdict in the role's required format.
+- If you return FAIL, include a concise actionable fix list."
+
+    run_backend_agent_session "$ROOT_DIR" final-validator "$MODEL_FINAL_VALIDATOR" "$validation_prompt" "$validation_log"
+
+    if grep -Eq '### VERDICT: PASS|VERDICT: PASS' "$validation_log"; then
+      echo "  Final validation PASSED"
+      echo "[FINAL] FINAL VALIDATION PASSED — $(date)" >> "$PROGRESS_FILE"
+      return 0
+    fi
+
+    echo "  Final validation FAILED"
+    echo "  Final validation log: $validation_log"
+    echo "[FINAL] FINAL VALIDATION FAILED — $(date)" >> "$PROGRESS_FILE"
+
+    if [ "$final_fix_cycle" -ge "$FINAL_VALIDATION_MAX_FIX_CYCLES" ]; then
+      return 1
+    fi
+
+    final_fix_cycle=$((final_fix_cycle + 1))
+    local fix_log="${LOGS_DIR}/final-fix-$(date +%s).log"
+    local fix_prompt="Implement only the fixes required by the failed final validation report.
+
+## Working Directory
+$ROOT_DIR
+
+## Final Validation Log
+$validation_log
+
+## Rules
+- Read the validation findings from the log file yourself before editing.
+- Make only the changes needed to address those findings.
+- Add or update automated tests when needed.
+- Run the relevant verification commands.
+- Commit the result and report the commit SHA in your normal format."
+
+    run_backend_agent_session "$ROOT_DIR" builder "$MODEL_BUILDER" "$fix_prompt" "$fix_log"
+    echo "  Final fix cycle ${final_fix_cycle} completed"
+    echo "  Final fix log: $fix_log"
+    echo "[FINAL] FINAL FIX CYCLE ${final_fix_cycle} — $(date)" >> "$PROGRESS_FILE"
+  done
 }
 
 WAVE_NUM=0
@@ -1713,6 +1926,10 @@ while true; do
     break
   fi
 done
+
+if ! run_final_validation_cycle; then
+  FAILED=$((FAILED + 1))
+fi
 
 # --- Summary ---
 REMAINING=$((TOTAL_EPICS - COMPLETED - FAILED))

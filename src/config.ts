@@ -285,8 +285,8 @@ export function validateConfig(raw: unknown): { config: RalphConfig; errors: str
 
       if ('backend' in e) {
         const v = e['backend'];
-        if (v !== 'claude' && v !== 'copilot' && v !== 'codex') {
-          errors.push(`execution.backend must be 'claude', 'copilot', or 'codex', got '${v}'`);
+        if (v !== 'claude' && v !== 'copilot' && v !== 'codex' && v !== 'opencode') {
+          errors.push(`execution.backend must be 'claude', 'copilot', 'codex', or 'opencode', got '${v}'`);
         } else {
           config.execution.backend = v;
         }
