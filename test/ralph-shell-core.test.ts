@@ -161,6 +161,42 @@ test('codex backend suppresses bare file-path chatter in stdout while keeping ou
   assert.match(result.stdout, /\[EPIC-001\] PASSED/);
 });
 
+test('write_codex_agent_config rewrites generated codex roles without duplicate top-level keys', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-codex-config-'));
+  const sourceFile = path.join(tempDir, 'builder.toml');
+  const outputFile = path.join(tempDir, 'builder-runtime.toml');
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+  const fnMatch = script.match(/write_codex_agent_config\(\) \{[\s\S]*?^}/m);
+
+  assert.ok(fnMatch, 'expected write_codex_agent_config to exist in ralph.sh');
+
+  fs.writeFileSync(sourceFile, [
+    '# Generated prompt',
+    'name = "builder"',
+    'description = "Builder role"',
+    'sandbox_mode = "workspace-write"',
+    'developer_instructions = """',
+    'model = "should stay inside the prompt body"',
+    'sandbox_mode = "should also stay inside the prompt body"',
+    '"""',
+    '',
+  ].join('\n'));
+
+  const result = spawnSync(BASH, ['-lc', `${fnMatch[0]}\nwrite_codex_agent_config "$1" "$2" "$3"` , '--', sourceFile, outputFile, 'gpt-5.3-codex'], {
+    cwd: tempDir,
+    encoding: 'utf-8',
+  });
+
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+
+  const output = fs.readFileSync(outputFile, 'utf-8');
+  const header = output.split('developer_instructions = """')[0] ?? output;
+  assert.equal((header.match(/^sandbox_mode = /gm) ?? []).length, 1);
+  assert.equal((header.match(/^model = /gm) ?? []).length, 1);
+  assert.match(output, /^sandbox_mode = "workspace-write"\nmodel = "gpt-5\.3-codex"\n# Generated prompt/m);
+  assert.match(output, /developer_instructions = """\nmodel = "should stay inside the prompt body"\nsandbox_mode = "should also stay inside the prompt body"\n"""/);
+});
+
 test('US-001: two independent epics run in the same wave', () => {
   const { tempDir, env } = setupMultiEpicRepo(
     [{ id: 'EPIC-001', title: 'Alpha' }, { id: 'EPIC-002', title: 'Beta' }],

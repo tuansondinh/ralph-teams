@@ -727,7 +727,16 @@ write_codex_agent_config() {
   {
     printf 'sandbox_mode = "workspace-write"\n'
     printf 'model = "%s"\n' "$model"
-    sed '1{/^sandbox_mode = /d;}' "$source_file"
+    awk '
+      /^[[:space:]]*developer_instructions[[:space:]]*=/ {
+        in_prompt_body = 1
+        print
+        next
+      }
+      !in_prompt_body && /^[[:space:]]*sandbox_mode[[:space:]]*=/ { next }
+      !in_prompt_body && /^[[:space:]]*model[[:space:]]*=/ { next }
+      { print }
+    ' "$source_file"
   } > "$output_file"
 }
 
