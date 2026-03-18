@@ -238,16 +238,19 @@ test('ralph.sh maps abstract model tiers to backend-specific copilot and codex m
   assert.match(script, /opencode:haiku[\s\S]*zai-coding-plan\/glm-4\.7-flash/);
   assert.match(script, /opencode:sonnet[\s\S]*zai-coding-plan\/glm-4\.7/);
   assert.match(script, /opencode:opus[\s\S]*zai-coding-plan\/glm-5/);
-  assert.match(script, /--agent team-lead --model \$MODEL_TEAM_LEAD/);
   assert.match(script, /-m "\$MODEL_TEAM_LEAD"/);
   assert.match(script, /--agent "\$agent_name"[\s\S]*--model "\$model"/);
 });
 
-test('copilot shell launch passes explicit model env vars into nested script sessions', () => {
+test('copilot shell launch relies on agent markdown models instead of forcing CLI model flags', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
-  assert.match(script, /MODEL_TEAM_LEAD="\$MODEL_TEAM_LEAD"[\s\S]*gh copilot -- --agent team-lead --model "\$MODEL_TEAM_LEAD"/);
-  assert.match(script, /MODEL_MERGER="\$MODEL_MERGER"[\s\S]*gh copilot -- --agent merger --model "\$MODEL_MERGER"/);
+  assert.match(script, /gh copilot -- --agent team-lead --allow-all --no-ask-user --stream on -p/);
+  assert.match(script, /gh copilot -- --agent merger --allow-all --no-ask-user --stream on -p/);
+  assert.match(script, /gh copilot -- --agent "\$0" --allow-all --no-ask-user --stream on -p "\$1"/);
+  assert.doesNotMatch(script, /gh copilot -- --agent team-lead --model /);
+  assert.doesNotMatch(script, /gh copilot -- --agent merger --model /);
+  assert.doesNotMatch(script, /gh copilot -- --agent "\$0" --model /);
 });
 
 test('ralph.sh launches opencode from the repo root so named agents remain discoverable', () => {
@@ -277,7 +280,7 @@ test('ralph.sh requires one-shot builder and validator runs for shared team-lead
   assert.match(script, /## Runtime-Specific Notes/);
   assert.match(script, /If your runtime supports named sub-agents, use the dedicated story-planner, epic-planner, builder, story-validator, and epic-validator roles/i);
   assert.match(script, /spawn a new Builder for the retry instead of reusing the previous Builder run/i);
-  assert.match(script, /If your runtime is Codex exec mode, `request_user_input` is unavailable/i);
+  assert.match(script, /If your runtime is Codex exec mode, \\`request_user_input\\` is unavailable/i);
 });
 
 test('ralph.sh escapes request_user_input in the shell-built team lead prompt', () => {

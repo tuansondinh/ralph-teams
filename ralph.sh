@@ -210,8 +210,9 @@ case "$BACKEND" in
     AGENT_CMD="gh"
     # Copilot uses -p for non-interactive, --allow-all for full permissions
     # --agent team-lead loads .github/agents/team-lead.agent.md
-    # --no-ask-user for autonomous execution, --stream on for live output
-    AGENT_FLAGS="copilot -- --agent team-lead --model $MODEL_TEAM_LEAD --allow-all --no-ask-user --stream on -p"
+    # --no-ask-user for autonomous execution, --stream on for live output.
+    # Model selection lives in the agent markdown frontmatter for Copilot.
+    AGENT_FLAGS="copilot -- --agent team-lead --allow-all --no-ask-user --stream on -p"
     STREAM_FORMAT="text"
     ;;
   codex)
@@ -1379,9 +1380,8 @@ Begin."
     ) &
   else
     (
-      MODEL_TEAM_LEAD="$MODEL_TEAM_LEAD" \
       COPILOT_TEAM_PROMPT="$TEAM_PROMPT" \
-        script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent team-lead --model "$MODEL_TEAM_LEAD" --allow-all --no-ask-user --stream on -p "$COPILOT_TEAM_PROMPT"' \
+        script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent team-lead --allow-all --no-ask-user --stream on -p "$COPILOT_TEAM_PROMPT"' \
         > "$EPIC_LOG" 2>&1
     ) &
   fi
@@ -1505,9 +1505,8 @@ Begin resolving."
           echo "$merge_prompt" | $AGENT_CMD --agent merger --model "$MODEL_MERGER" --dangerously-skip-permissions --print --verbose --output-format stream-json > "$merge_log" 2>&1 || true
           ;;
         copilot)
-          MODEL_MERGER="$MODEL_MERGER" \
           COPILOT_MERGE_PROMPT="$merge_prompt" \
-            script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent merger --model "$MODEL_MERGER" --allow-all --no-ask-user --stream on -p "$COPILOT_MERGE_PROMPT"' \
+            script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent merger --allow-all --no-ask-user --stream on -p "$COPILOT_MERGE_PROMPT"' \
             > "$merge_log" 2>&1 || true
           ;;
         codex)
@@ -1623,8 +1622,8 @@ run_backend_agent_session() {
       ;;
     copilot)
       COPILOT_ROLE_PROMPT="$prompt" \
-        script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent "$0" --model "$1" --allow-all --no-ask-user --stream on -p "$2"' \
-        "$agent_name" "$model" "$COPILOT_ROLE_PROMPT" \
+        script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent "$0" --allow-all --no-ask-user --stream on -p "$1"' \
+        "$agent_name" "$COPILOT_ROLE_PROMPT" \
         > "$log_file" 2>&1 || true
       ;;
     opencode)
