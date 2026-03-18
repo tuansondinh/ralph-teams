@@ -2,7 +2,7 @@
 # Ralph Teams — Project Manager Shell Harness
 # Ralph never writes code. Ralph schedules epics and spawns teams.
 #
-# Usage: ./ralph.sh [prd.json] [--max-epics N] [--backend claude|copilot|codex] [--parallel N]
+# Usage: ./ralph.sh [prd.json] [--max-epics N] [--backend claude|copilot|codex|opencode] [--parallel N]
 
 set -euo pipefail
 
@@ -77,6 +77,15 @@ map_model_for_backend() {
       ;;
     codex:opus)
       echo "gpt-5.4"
+      ;;
+    opencode:haiku)
+      echo "openai/gpt-5-mini"
+      ;;
+    opencode:sonnet)
+      echo "openai/gpt-5.3-codex"
+      ;;
+    opencode:opus)
+      echo "openai/gpt-5.4"
       ;;
     *)
       echo "$model"
@@ -166,8 +175,13 @@ case "$BACKEND" in
     AGENT_FLAGS=""
     STREAM_FORMAT="text"
     ;;
+  opencode)
+    AGENT_CMD="opencode"
+    AGENT_FLAGS=""
+    STREAM_FORMAT="stream-json"
+    ;;
   *)
-    echo "Error: Unknown backend '$BACKEND'. Use 'claude', 'copilot', or 'codex'."
+    echo "Error: Unknown backend '$BACKEND'. Use 'claude', 'copilot', 'codex', or 'opencode'."
     exit 1
     ;;
 esac
@@ -192,6 +206,11 @@ fi
 
 if [ "$BACKEND" = "codex" ] && ! command -v codex &> /dev/null; then
   echo "Error: 'codex' CLI not found. Install Codex CLI first."
+  exit 1
+fi
+
+if [ "$BACKEND" = "opencode" ] && ! command -v opencode &> /dev/null; then
+  echo "Error: 'opencode' CLI not found. Install OpenCode CLI first."
   exit 1
 fi
 
@@ -446,19 +465,44 @@ ensure_runtime_gitignore_entries
 
 mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$STATE_DIR" "$WORKTREES_DIR"
 
-if [ "$CURRENT_BRANCH" != "$LOOP_BRANCH" ]; then
-  if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
-    prompt_to_commit_dirty_worktree "$LOOP_BRANCH"
+ensure_loop_branch_ready() {
+  local checkout_output=""
+
+  if [ "$CURRENT_BRANCH" != "$LOOP_BRANCH" ]; then
+    if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+      prompt_to_commit_dirty_worktree "$LOOP_BRANCH"
+    fi
+
+    if git show-ref --verify --quiet "refs/heads/${LOOP_BRANCH}"; then
+      echo "Switching to loop branch: $LOOP_BRANCH"
+      if ! checkout_output=$(git checkout "$LOOP_BRANCH" 2>&1 >/dev/null); then
+        echo "Error: failed to switch to loop branch '$LOOP_BRANCH'." >&2
+        [ -n "$checkout_output" ] && echo "$checkout_output" >&2
+        exit 1
+      fi
+    else
+      echo "Creating loop branch: $LOOP_BRANCH (from $CURRENT_BRANCH)"
+      if ! checkout_output=$(git checkout -b "$LOOP_BRANCH" 2>&1 >/dev/null); then
+        echo "Error: failed to create loop branch '$LOOP_BRANCH' from '$CURRENT_BRANCH'." >&2
+        [ -n "$checkout_output" ] && echo "$checkout_output" >&2
+        exit 1
+      fi
+    fi
   fi
 
-  if git show-ref --verify --quiet "refs/heads/${LOOP_BRANCH}"; then
-    echo "Switching to loop branch: $LOOP_BRANCH"
-    git checkout "$LOOP_BRANCH" >/dev/null 2>&1
-  else
-    echo "Creating loop branch: $LOOP_BRANCH (from $CURRENT_BRANCH)"
-    git checkout -b "$LOOP_BRANCH" >/dev/null 2>&1
+  if ! git show-ref --verify --quiet "refs/heads/${LOOP_BRANCH}"; then
+    echo "Error: loop branch '$LOOP_BRANCH' does not exist locally after setup." >&2
+    exit 1
   fi
-fi
+
+  CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+  if [ "$CURRENT_BRANCH" != "$LOOP_BRANCH" ]; then
+    echo "Error: expected current branch '$LOOP_BRANCH' after setup, got '${CURRENT_BRANCH:-<none>}'." >&2
+    exit 1
+  fi
+}
+
+ensure_loop_branch_ready
 
 # --- Worktree Management ---
 # Creates a git worktree at .worktrees/<epic_id> on branch ralph/<epic_id>,
@@ -496,6 +540,21 @@ create_epic_worktree() {
     exit 1
   fi
   echo "$worktree_path"
+}
+
+ensure_worktree_runtime_link() {
+  local worktree_abs_path="$1"
+  local worktree_runtime_path="${worktree_abs_path}/${RALPH_RUNTIME_DIRNAME}"
+
+  if [ -L "$worktree_runtime_path" ]; then
+    return 0
+  fi
+
+  if [ -e "$worktree_runtime_path" ] && [ ! -L "$worktree_runtime_path" ]; then
+    rm -rf "$worktree_runtime_path"
+  fi
+
+  ln -s "$RALPH_RUNTIME_DIR" "$worktree_runtime_path"
 }
 
 # Removes a worktree. The branch is kept for potential merge by a later agent.
@@ -610,6 +669,7 @@ if [ "${PRD_ABS_PATH#"$ROOT_DIR"/}" != "$PRD_ABS_PATH" ]; then
 else
   PRD_REL_PATH="$(basename "$PRD_FILE")"
 fi
+OPENCODE_AGENT_DIR="${SCRIPT_DIR}/agent"
 CODEX_AGENT_DIR="${SCRIPT_DIR}/.codex/agents"
 CODEX_AGENT_RUNTIME_DIR=""
 
@@ -709,6 +769,22 @@ run_codex_exec() {
     -c "agents.validator_difficult.config_file='${CODEX_AGENT_RUNTIME_DIR}/validator-difficult.toml'" \
     "$@" \
     -
+}
+
+run_opencode_exec() {
+  local workdir="$1"
+  local prompt="$2"
+  local agent_name="$3"
+  local model="$4"
+  shift 4
+
+  opencode run \
+    --format json \
+    --dir "$workdir" \
+    --agent "$agent_name" \
+    --model "$model" \
+    "$@" \
+    "$prompt"
 }
 
 normalize_epic_statuses() {
@@ -1013,7 +1089,10 @@ spawn_epic_bg() {
   WORKTREE_PATH=$(create_epic_worktree "$EPIC_ID")
   local WORKTREE_ABS_PATH
   WORKTREE_ABS_PATH="$(cd "${ROOT_DIR}/${WORKTREE_PATH}" && pwd)"
+  ensure_worktree_runtime_link "$WORKTREE_ABS_PATH"
   local WORKTREE_PRD_PATH="${WORKTREE_ABS_PATH}/${PRD_REL_PATH}"
+  local WORKTREE_STATE_FILE="${WORKTREE_ABS_PATH}/${RALPH_RUNTIME_DIRNAME}/state/${EPIC_ID}.json"
+  local WORKTREE_PLAN_FILE="${WORKTREE_ABS_PATH}/${RALPH_RUNTIME_DIRNAME}/plans/plan-${EPIC_ID}.md"
 
   init_epic_state_file "$EPIC_ID" "$EPIC_INDEX"
 
@@ -1032,7 +1111,7 @@ ALL work for this epic MUST happen in this directory: $WORKTREE_ABS_PATH
 Do NOT modify files outside this directory, except for the epic state file below.
 
 ## Epic State File
-${STATE_DIR}/${EPIC_ID}.json
+$WORKTREE_STATE_FILE
 
 ## PRD File Path (read-only context)
 $WORKTREE_PRD_PATH
@@ -1042,7 +1121,7 @@ $EPIC_JSON
 
 ## Plan File
 If this epic has planned=true in the PRD, the canonical implementation plan is:
-$PLANS_DIR/plan-${EPIC_ID}.md
+$WORKTREE_PLAN_FILE
 
 ## Stories To Plan And Execute
 Only these stories should be planned or worked in this run. Stories omitted here are already passed and must be treated as done context only.
@@ -1061,11 +1140,17 @@ $TEAM_LEAD_POLICY
 - Default difficulty policy by backend:
   - Claude: easy -> haiku, medium -> sonnet, difficult -> opus
   - Copilot / Codex: easy -> gpt-5-mini, medium -> gpt-5.3-codex, difficult -> gpt-5.4
+  - OpenCode: easy -> openai/gpt-5-mini, medium -> openai/gpt-5.3-codex, difficult -> openai/gpt-5.4
 - If your runtime supports setting reasoning effort per spawned task, use low for easy tasks, medium for normal tasks, high for difficult tasks, and xhigh only for unusually hard analysis or verification.
 - If your runtime is Codex, use these exact named teammate roles when spawning:
   - planners: planner_easy, planner_medium, planner_difficult
   - builders: builder_easy, builder_medium, builder_difficult
   - validators: validator_easy, validator_medium, validator_difficult
+- If your runtime is OpenCode, use these exact agent names when spawning with the Task tool:
+  - planner
+  - builder
+  - validator
+  - merger
 
 ## Runtime-Specific Notes
 - Use the exact plan path shown above when the policy refers to the canonical epic plan file.
@@ -1078,7 +1163,11 @@ Begin."
   # Run agent in background; write all output to log file (no console streaming in parallel mode)
   if [ "$STREAM_FORMAT" = "stream-json" ]; then
     (
-      echo "$TEAM_PROMPT" | $AGENT_CMD $AGENT_FLAGS > "$EPIC_LOG" 2>&1
+      if [ "$BACKEND" = "opencode" ]; then
+        run_opencode_exec "$WORKTREE_ABS_PATH" "$TEAM_PROMPT" team-lead "$MODEL_TEAM_LEAD" > "$EPIC_LOG" 2>&1
+      else
+        echo "$TEAM_PROMPT" | $AGENT_CMD $AGENT_FLAGS > "$EPIC_LOG" 2>&1
+      fi
     ) &
   elif [ "$BACKEND" = "codex" ]; then
     (
@@ -1202,6 +1291,9 @@ Begin resolving."
           ;;
         codex)
           MODEL_TEAM_LEAD="$MODEL_MERGER" run_codex_exec "$ROOT_DIR" "$merge_prompt" > "$merge_log" 2>&1 || true
+          ;;
+        opencode)
+          run_opencode_exec "$ROOT_DIR" "$merge_prompt" merger "$MODEL_MERGER" > "$merge_log" 2>&1 || true
           ;;
       esac
 

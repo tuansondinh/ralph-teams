@@ -15,6 +15,7 @@ const BASH = fs.existsSync('/opt/homebrew/bin/bash') ? '/opt/homebrew/bin/bash' 
 
 test('planner prompt assets require writing the epic plan markdown file', () => {
   const promptFiles = [
+    'agent/planner.md',
     '.codex/agents/planner.toml',
     '.github/agents/planner.agent.md',
     '.claude/agents/planner.md',
@@ -42,6 +43,7 @@ test('planner prompt assets require writing the epic plan markdown file', () => 
 
 test('planner prompt assets require designing story-level tests', () => {
   const promptFiles = [
+    'agent/planner.md',
     '.codex/agents/planner.toml',
     '.github/agents/planner.agent.md',
     '.claude/agents/planner.md',
@@ -60,6 +62,7 @@ test('planner prompt assets require designing story-level tests', () => {
 
 test('planner prompt assets require design-level plans instead of code dumps', () => {
   const promptFiles = [
+    'agent/planner.md',
     '.codex/agents/planner.toml',
     '.github/agents/planner.agent.md',
     '.claude/agents/planner.md',
@@ -83,6 +86,7 @@ test('planner prompt assets require design-level plans instead of code dumps', (
 
 test('builder prompt assets require reading the epic plan markdown file', () => {
   const promptFiles = [
+    'agent/builder.md',
     '.codex/agents/builder.toml',
     '.github/agents/builder.agent.md',
     '.claude/agents/builder.md',
@@ -105,6 +109,7 @@ test('builder prompt assets require reading the epic plan markdown file', () => 
 
 test('builder prompt assets require test creation and TDD fallback when planning is skipped', () => {
   const promptFiles = [
+    'agent/builder.md',
     '.codex/agents/builder.toml',
     '.github/agents/builder.agent.md',
     '.claude/agents/builder.md',
@@ -213,8 +218,12 @@ test('ralph.sh maps abstract model tiers to backend-specific copilot and codex m
   assert.match(script, /codex:haiku[\s\S]*gpt-5-mini/);
   assert.match(script, /codex:sonnet[\s\S]*gpt-5\.3-codex/);
   assert.match(script, /codex:opus[\s\S]*gpt-5\.4/);
+  assert.match(script, /opencode:haiku[\s\S]*openai\/gpt-5-mini/);
+  assert.match(script, /opencode:sonnet[\s\S]*openai\/gpt-5\.3-codex/);
+  assert.match(script, /opencode:opus[\s\S]*openai\/gpt-5\.4/);
   assert.match(script, /--agent team-lead --model \$MODEL_TEAM_LEAD/);
   assert.match(script, /-m "\$MODEL_TEAM_LEAD"/);
+  assert.match(script, /--agent "\$agent_name"[\s\S]*--model "\$model"/);
 });
 
 test('ralph.sh prepares codex teammate variants so the team lead can choose per-task models', () => {
@@ -314,6 +323,37 @@ test('ralph.sh auto-commits dirty changes and continues', () => {
   assert.match(execFileSync('git', ['log', '-1', '--pretty=%s'], { cwd: tempDir, encoding: 'utf-8' }), /chore: auto-commit changes before ralph run/);
   assert.equal(execFileSync('git', ['status', '--short'], { cwd: tempDir, encoding: 'utf-8' }).trim(), '');
   assert.match(execFileSync('git', ['branch', '--show-current'], { cwd: tempDir, encoding: 'utf-8' }).trim(), /^ralph\/loop\//);
+});
+
+test('ralph.sh fails early with the real error when loop branch creation fails', () => {
+  const { tempDir, binDir } = setupTempRepo();
+  const realGit = execFileSync('which', ['git'], { encoding: 'utf-8' }).trim();
+  const mockGit = [
+    '#!/bin/sh',
+    `REAL_GIT='${realGit}'`,
+    'if [ "$1" = "checkout" ] && [ "$2" = "-b" ] && [ "${3#ralph/loop/}" != "$3" ]; then',
+    '  echo "fatal: simulated loop branch creation failure" >&2',
+    '  exit 1',
+    'fi',
+    'exec "$REAL_GIT" "$@"',
+  ].join('\n');
+  fs.writeFileSync(path.join(binDir, 'git'), `${mockGit}\n`);
+  fs.chmodSync(path.join(binDir, 'git'), 0o755);
+
+  const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
+    cwd: tempDir,
+    env: {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ''}`,
+    },
+    encoding: 'utf-8',
+  });
+
+  const combined = `${result.stdout}\n${result.stderr}`;
+  assert.equal(result.status, 1, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.match(combined, /Error: failed to create loop branch 'ralph\/loop\//);
+  assert.match(combined, /fatal: simulated loop branch creation failure/);
+  assert.doesNotMatch(combined, /invalid reference:/);
 });
 
 // ─── US-001: Wave Computation Helpers ────────────────────────────────────────
