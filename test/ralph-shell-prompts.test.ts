@@ -233,9 +233,9 @@ test('ralph.sh maps abstract model tiers to backend-specific copilot and codex m
   assert.match(script, /codex:haiku[\s\S]*gpt-5-mini/);
   assert.match(script, /codex:sonnet[\s\S]*gpt-5\.3-codex/);
   assert.match(script, /codex:opus[\s\S]*gpt-5\.4/);
-  assert.match(script, /opencode:haiku[\s\S]*openai\/gpt-5-mini/);
-  assert.match(script, /opencode:sonnet[\s\S]*openai\/gpt-5\.3-codex/);
-  assert.match(script, /opencode:opus[\s\S]*openai\/gpt-5\.4/);
+  assert.match(script, /opencode:haiku[\s\S]*zai-coding-plan\/glm-4\.7-flash/);
+  assert.match(script, /opencode:sonnet[\s\S]*zai-coding-plan\/glm-4\.7/);
+  assert.match(script, /opencode:opus[\s\S]*zai-coding-plan\/glm-5/);
   assert.match(script, /--agent team-lead --model \$MODEL_TEAM_LEAD/);
   assert.match(script, /-m "\$MODEL_TEAM_LEAD"/);
   assert.match(script, /--agent "\$agent_name"[\s\S]*--model "\$model"/);

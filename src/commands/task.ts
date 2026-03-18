@@ -90,6 +90,12 @@ function mapModelForBackend(backend: SupportedBackend, model: string): string {
       return 'gpt-5.3-codex';
     case 'codex:opus':
       return 'gpt-5.4';
+    case 'opencode:haiku':
+      return 'zai-coding-plan/glm-4.7-flash';
+    case 'opencode:sonnet':
+      return 'zai-coding-plan/glm-4.7';
+    case 'opencode:opus':
+      return 'zai-coding-plan/glm-5';
     default:
       return model;
   }

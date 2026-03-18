@@ -40,6 +40,7 @@ fi
 # CLI flags passed directly to ralph.sh take precedence over these env vars.
 EPIC_TIMEOUT="${RALPH_EPIC_TIMEOUT:-3600}"
 IDLE_TIMEOUT="${RALPH_IDLE_TIMEOUT:-600}"
+LOOP_TIMEOUT="${RALPH_LOOP_TIMEOUT:-18000}"
 MAX_CRASH_RETRIES="${RALPH_MAX_CRASH_RETRIES:-2}"
 POLL_INTERVAL_SECONDS="${RALPH_POLL_INTERVAL_SECONDS:-0.2}"
 STORY_PLANNING_ENABLED="${RALPH_STORY_PLANNING_ENABLED:-0}"
@@ -90,13 +91,13 @@ map_model_for_backend() {
       echo "gpt-5.4"
       ;;
     opencode:haiku)
-      echo "openai/gpt-5-mini"
+      echo "zai-coding-plan/glm-4.7-flash"
       ;;
     opencode:sonnet)
-      echo "openai/gpt-5.3-codex"
+      echo "zai-coding-plan/glm-4.7"
       ;;
     opencode:opus)
-      echo "openai/gpt-5.4"
+      echo "zai-coding-plan/glm-5"
       ;;
     *)
       echo "$model"
@@ -933,6 +934,30 @@ initialize_counters() {
   FAILED=$(rjq count-where "$PRD_FILE" .epics "status=failed|merge-failed" --default pending)
 }
 
+handle_loop_timeout() {
+  local now elapsed
+  now=$(date +%s)
+  elapsed=$(( now - LOOP_STARTED_AT ))
+
+  if [ "$LOOP_TIMEOUT" -le 0 ] || [ "$elapsed" -lt "$LOOP_TIMEOUT" ]; then
+    return 1
+  fi
+
+  echo ""
+  echo "Overall loop timeout reached after ${LOOP_TIMEOUT}s"
+  echo "[loop] FAILED (overall loop timeout after ${LOOP_TIMEOUT}s) — $(date)" >> "$PROGRESS_FILE"
+
+  for pid in "${active_pids[@]+"${active_pids[@]}"}"; do
+    terminate_process_tree "$pid"
+  done
+  for pid in "${active_pids[@]+"${active_pids[@]}"}"; do
+    wait "$pid" 2>/dev/null || true
+  done
+
+  save_run_state
+  exit 1
+}
+
 # Writes current run state to ralph-state.json atomically (temp file + rename).
 # Captures CURRENT_WAVE, active epic indices, backend, parallel settings,
 # story progress from the PRD, and the currently-interrupted story ID.
@@ -1049,6 +1074,7 @@ detect_circular_deps "$PRD_FILE" "$TOTAL_EPICS"
 normalize_epic_statuses
 initialize_counters
 prepare_codex_agent_configs
+LOOP_STARTED_AT=$(date +%s)
 
 # Cleanup worktrees on exit only when NOT interrupted (on interrupt, worktrees are preserved for resume)
 trap 'if [ "$INTERRUPTED" = false ]; then cleanup_all_worktrees; fi; [ -n "${CODEX_AGENT_RUNTIME_DIR:-}" ] && rm -rf "${CODEX_AGENT_RUNTIME_DIR}"; kill $(jobs -p) 2>/dev/null || true' EXIT
@@ -1261,7 +1287,7 @@ $TEAM_LEAD_POLICY
 - Default difficulty policy by backend:
   - Claude: easy -> haiku, medium -> sonnet, difficult -> opus
   - Copilot / Codex: easy -> gpt-5-mini, medium -> gpt-5.3-codex, difficult -> gpt-5.4
-  - OpenCode: easy -> openai/gpt-5-mini, medium -> openai/gpt-5.3-codex, difficult -> openai/gpt-5.4
+  - OpenCode: easy -> zai-coding-plan/glm-4.7-flash, medium -> zai-coding-plan/glm-4.7, difficult -> zai-coding-plan/glm-5
 - If your runtime supports setting reasoning effort per spawned task, use low for easy tasks, medium for normal tasks, high for difficult tasks, and xhigh only for unusually hard analysis or verification.
 - If your runtime is Codex, use these exact named teammate roles when spawning:
   - story planners: story_planner_easy, story_planner_medium, story_planner_difficult
@@ -1718,6 +1744,7 @@ while true; do
   # processes its result, and removes it from the arrays.
   wait_for_one_slot() {
     while true; do
+      handle_loop_timeout || true
       local now
       now=$(date +%s)
       for slot in "${!active_pids[@]}"; do
@@ -1909,6 +1936,7 @@ while true; do
   }
 
   while [ "$queue_pos" -lt "${#WAVE_EPICS[@]}" ]; do
+    handle_loop_timeout || true
     EPIC_INDEX="${WAVE_EPICS[$queue_pos]}"
     queue_pos=$((queue_pos + 1))
 
@@ -1943,6 +1971,7 @@ while true; do
 
   # Wait for all remaining active processes to finish
   while [ "${#active_pids[@]}" -gt 0 ]; do
+    handle_loop_timeout || true
     wait_for_one_slot
   done
 

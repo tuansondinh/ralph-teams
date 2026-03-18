@@ -97,6 +97,31 @@ test('taskCommand starts execution session when user skips planning', async () =
   assert.equal(capturedEnv?.RALPH_MODEL_TEAM_LEAD, 'opus');
 });
 
+test('taskCommand maps abstract opencode defaults to zai coding-plan models', async () => {
+  let capturedEnv: NodeJS.ProcessEnv | undefined;
+  const config = makeConfig();
+
+  await taskCommand('improve editor performance', { backend: 'opencode' }, {
+    cwd: () => '/repo',
+    exit: ((code?: number) => { throw new ExitSignal(code); }) as (code?: number) => never,
+    loadConfig: () => config,
+    loadExplicitAgentModelOverrides: () => ({}),
+    ensureBackendAvailable: () => {},
+    getCurrentBranch: () => 'main',
+    askShouldPlan: async () => false,
+    runPlanningSession: async () => {
+      throw new Error('should not plan');
+    },
+    runExecutionSession: async (_prompt, _backend, env) => {
+      capturedEnv = env;
+    },
+  });
+
+  assert.equal(capturedEnv?.RALPH_MODEL_STORY_PLANNER, 'zai-coding-plan/glm-4.7-flash');
+  assert.equal(capturedEnv?.RALPH_MODEL_BUILDER, 'zai-coding-plan/glm-4.7');
+  assert.equal(capturedEnv?.RALPH_MODEL_TEAM_LEAD, 'zai-coding-plan/glm-5');
+});
+
 test('taskCommand exits when no current branch is available', async () => {
   await assert.rejects(
     taskCommand('do something', {}, {
