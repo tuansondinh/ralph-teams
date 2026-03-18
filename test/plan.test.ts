@@ -104,12 +104,6 @@ test('planCommand starts a planning session for unplanned epics', async () => {
     loadConfig: () => ({
       timeouts: { epicTimeout: 3600, idleTimeout: 300 },
       execution: { validatorMaxPushbacks: 1, parallel: 0, backend: 'claude' },
-      pricing: {
-        inputTokenCostPer1k: 0.015,
-        outputTokenCostPer1k: 0.075,
-        cacheReadCostPer1k: 0.0015,
-        cacheCreationCostPer1k: 0.01875,
-      },
     }),
     ensureBackendAvailable: (backend) => {
       capturedBackend = backend;
@@ -158,12 +152,6 @@ test('planCommand exits cleanly when all epics are already planned', async () =>
       loadConfig: () => ({
         timeouts: { epicTimeout: 3600, idleTimeout: 300 },
         execution: { validatorMaxPushbacks: 1, parallel: 0, backend: 'claude' },
-        pricing: {
-          inputTokenCostPer1k: 0.015,
-          outputTokenCostPer1k: 0.075,
-          cacheReadCostPer1k: 0.0015,
-          cacheCreationCostPer1k: 0.01875,
-        },
       }),
       ensureBackendAvailable: () => {
         throw new Error('should not check backend');

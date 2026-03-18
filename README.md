@@ -333,7 +333,7 @@ ralph-teams resume
 Behavior:
 
 - reloads the saved PRD path, backend, and parallel settings
-- reuses the current project config for timeouts and pricing
+- reuses the current project config for timeouts and workflow settings
 - restarts `ralph.sh`
 - removes `.ralph-teams/ralph-state.json` after a successful resume
 

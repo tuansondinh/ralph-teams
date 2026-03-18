@@ -60,16 +60,6 @@ export interface RalphConfig {
     /** Model for the merger agent. Default: 'sonnet'. */
     merger: string;
   };
-  pricing: {
-    /** USD cost per 1k input tokens. Default: 0.015 (Claude Sonnet). */
-    inputTokenCostPer1k: number;
-    /** USD cost per 1k output tokens. Default: 0.075 (Claude Sonnet). */
-    outputTokenCostPer1k: number;
-    /** USD cost per 1k cache read tokens. Default: 0.0015. */
-    cacheReadCostPer1k: number;
-    /** USD cost per 1k cache creation tokens. Default: 0.01875. */
-    cacheCreationCostPer1k: number;
-  };
 }
 
 export type AgentModelField = keyof RalphConfig['agents'];
@@ -134,12 +124,6 @@ export const DEFAULT_CONFIG: RalphConfig = {
     finalValidator: 'opus',
     merger: 'sonnet',
   },
-  pricing: {
-    inputTokenCostPer1k: 0.015,
-    outputTokenCostPer1k: 0.075,
-    cacheReadCostPer1k: 0.0015,
-    cacheCreationCostPer1k: 0.01875,
-  },
 };
 
 function cloneConfig(config: RalphConfig): RalphConfig {
@@ -156,7 +140,6 @@ function cloneConfig(config: RalphConfig): RalphConfig {
       finalValidation: { ...config.execution.finalValidation },
     },
     agents: { ...config.agents },
-    pricing: { ...config.pricing },
   };
 }
 
@@ -419,32 +402,6 @@ export function validateConfig(raw: unknown): { config: RalphConfig; errors: str
     }
   }
 
-  if ('pricing' in obj) {
-    const pricing = obj['pricing'];
-    if (pricing === null || typeof pricing !== 'object' || Array.isArray(pricing)) {
-      errors.push('pricing must be an object');
-    } else {
-      const p = pricing as Record<string, unknown>;
-      const pricingFields = [
-        'inputTokenCostPer1k',
-        'outputTokenCostPer1k',
-        'cacheReadCostPer1k',
-        'cacheCreationCostPer1k',
-      ] as const;
-
-      for (const field of pricingFields) {
-        if (field in p) {
-          const v = p[field];
-          if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) {
-            errors.push(`pricing.${field} must be a non-negative number, got '${v}'`);
-          } else {
-            config.pricing[field] = v;
-          }
-        }
-      }
-    }
-  }
-
   return { config, errors };
 }
 
@@ -496,7 +453,6 @@ export function mergeCliOverrides(
       finalValidation: { ...config.execution.finalValidation },
     },
     agents: { ...config.agents },
-    pricing: { ...config.pricing },
   };
 }
 
