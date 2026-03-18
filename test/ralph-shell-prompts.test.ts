@@ -242,6 +242,13 @@ test('ralph.sh maps abstract model tiers to backend-specific copilot and codex m
   assert.match(script, /--agent "\$agent_name"[\s\S]*--model "\$model"/);
 });
 
+test('ralph.sh launches opencode from the repo root so named agents remain discoverable', () => {
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+
+  assert.match(script, /run_opencode_exec\(\)[\s\S]*cd "\$ROOT_DIR"[\s\S]*opencode run/);
+  assert.match(script, /run_opencode_exec\(\)[\s\S]*--dir "\$workdir"/);
+});
+
 test('ralph.sh prepares codex teammate variants so the team lead can choose per-task models', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
 

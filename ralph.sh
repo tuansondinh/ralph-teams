@@ -881,13 +881,16 @@ run_opencode_exec() {
   local model="$4"
   shift 4
 
-  opencode run \
-    --format json \
-    --dir "$workdir" \
-    --agent "$agent_name" \
-    --model "$model" \
-    "$@" \
-    "$prompt"
+  (
+    cd "$ROOT_DIR"
+    opencode run \
+      --format json \
+      --dir "$workdir" \
+      --agent "$agent_name" \
+      --model "$model" \
+      "$@" \
+      "$prompt"
+  )
 }
 
 normalize_epic_statuses() {
