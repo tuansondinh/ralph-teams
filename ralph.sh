@@ -1225,6 +1225,8 @@ spawn_epic_bg() {
   EPIC_TITLE=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].title")
   local EPIC_JSON
   EPIC_JSON=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX]")
+  local EPIC_PLANNED
+  EPIC_PLANNED=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].planned" "false")
   local PENDING_STORIES_JSON
   PENDING_STORIES_JSON=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].userStories" | \
     node -e 'const fs=require("fs"); const stories=JSON.parse(fs.readFileSync(0,"utf8")); process.stdout.write(JSON.stringify(stories.filter(s => s.passes !== true)));')
@@ -1240,6 +1242,10 @@ spawn_epic_bg() {
   local WORKTREE_PRD_PATH="${WORKTREE_ABS_PATH}/${PRD_REL_PATH}"
   local WORKTREE_STATE_FILE="${WORKTREE_ABS_PATH}/${RALPH_RUNTIME_DIRNAME}/state/${EPIC_ID}.json"
   local WORKTREE_PLAN_FILE="${WORKTREE_ABS_PATH}/${RALPH_RUNTIME_DIRNAME}/plans/plan-${EPIC_ID}.md"
+  local WORKTREE_PLAN_EXISTS="false"
+  if [ -f "$WORKTREE_PLAN_FILE" ]; then
+    WORKTREE_PLAN_EXISTS="true"
+  fi
 
   init_epic_state_file "$EPIC_ID" "$EPIC_INDEX"
 
@@ -1269,6 +1275,13 @@ $EPIC_JSON
 ## Plan File
 If this epic has planned=true in the PRD, the canonical implementation plan is:
 $WORKTREE_PLAN_FILE
+
+## Planning Status
+- epic.planned = ${EPIC_PLANNED}
+- canonical_plan.exists = ${WORKTREE_PLAN_EXISTS}
+- If epic.planned = true, do NOT spawn the epic planner.
+- If epic.planned = true and canonical_plan.exists = true, read the canonical plan file above and execute against it.
+- Only spawn the epic planner when epic.planned is not true and epicPlanning.enabled = 1.
 
 ## Stories To Plan And Execute
 Only these stories should be planned or worked in this run. Stories omitted here are already passed and must be treated as done context only.

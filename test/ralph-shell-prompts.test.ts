@@ -271,3 +271,14 @@ test('ralph.sh requires one-shot builder and validator runs for shared team-lead
   assert.match(script, /spawn a new Builder for the retry instead of reusing the previous Builder run/i);
   assert.match(script, /If your runtime is Codex exec mode, `request_user_input` is unavailable/i);
 });
+
+test('ralph.sh team lead prompt forbids epic replanning when the PRD already marks the epic planned', () => {
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+
+  assert.match(script, /## Planning Status/);
+  assert.match(script, /epic\.planned = \$\{EPIC_PLANNED\}/);
+  assert.match(script, /canonical_plan\.exists = \$\{WORKTREE_PLAN_EXISTS\}/);
+  assert.match(script, /If epic\.planned = true, do NOT spawn the epic planner/);
+  assert.match(script, /If epic\.planned = true and canonical_plan\.exists = true, read the canonical plan file above and execute against it/);
+  assert.match(script, /Only spawn the epic planner when epic\.planned is not true and epicPlanning\.enabled = 1/);
+});
