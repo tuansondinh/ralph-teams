@@ -273,6 +273,14 @@ test('ralph.sh prepares codex teammate variants so the team lead can choose per-
   assert.match(script, /If your runtime is Codex, use these exact named teammate roles when spawning/);
 });
 
+test('codex shell launches add the Ralph package directory alongside the project workspace', () => {
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+
+  assert.match(script, /run_codex_exec "\$WORKTREE_ABS_PATH" "\$TEAM_PROMPT" --add-dir "\$ROOT_DIR" --add-dir "\$SCRIPT_DIR"/);
+  assert.match(script, /codex[\s\S]*--add-dir "\$SCRIPT_DIR"/);
+  assert.match(script, /codex[\s\S]*--add-dir "\$ROOT_DIR"[\s\S]*--add-dir "\$SCRIPT_DIR"[\s\S]*- > "\$log_file"/);
+});
+
 test('ralph.sh requires one-shot builder and validator runs for shared team-lead prompt backends', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
 

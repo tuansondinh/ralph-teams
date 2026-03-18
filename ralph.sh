@@ -772,8 +772,11 @@ write_codex_agent_config() {
   local source_file="$1"
   local output_file="$2"
   local model="$3"
+  local agent_name
+  agent_name="$(basename "$output_file" .toml)"
 
   {
+    printf 'name = "%s"\n' "$agent_name"
     printf 'sandbox_mode = "workspace-write"\n'
     printf 'model = "%s"\n' "$model"
     awk '
@@ -782,6 +785,7 @@ write_codex_agent_config() {
         print
         next
       }
+      !in_prompt_body && /^[[:space:]]*name[[:space:]]*=/ { next }
       !in_prompt_body && /^[[:space:]]*sandbox_mode[[:space:]]*=/ { next }
       !in_prompt_body && /^[[:space:]]*model[[:space:]]*=/ { next }
       { print }
@@ -890,6 +894,7 @@ run_codex_exec() {
     --skip-git-repo-check \
     --color never \
     --enable multi_agent \
+    --add-dir "$SCRIPT_DIR" \
     -c "agents.max_threads=6" \
     -c "agents.max_depth=2" \
     -c "agents.story_planner_easy.description='Story planner for easy Ralph stories'" \
@@ -1398,7 +1403,7 @@ Begin."
     ) &
   elif [ "$BACKEND" = "codex" ]; then
     (
-      run_codex_exec "$WORKTREE_ABS_PATH" "$TEAM_PROMPT" --add-dir "$ROOT_DIR" > "$EPIC_LOG" 2>&1
+      run_codex_exec "$WORKTREE_ABS_PATH" "$TEAM_PROMPT" --add-dir "$ROOT_DIR" --add-dir "$SCRIPT_DIR" > "$EPIC_LOG" 2>&1
     ) &
   else
     (
@@ -1663,6 +1668,8 @@ run_backend_agent_session() {
         -s workspace-write \
         --skip-git-repo-check \
         --color never \
+        --add-dir "$ROOT_DIR" \
+        --add-dir "$SCRIPT_DIR" \
         - > "$log_file" 2>&1 || true
       ;;
   esac
