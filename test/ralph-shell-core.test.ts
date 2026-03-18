@@ -197,6 +197,44 @@ test('write_codex_agent_config rewrites generated codex roles without duplicate 
   assert.match(output, /developer_instructions = """\nmodel = "should stay inside the prompt body"\nsandbox_mode = "should also stay inside the prompt body"\n"""/);
 });
 
+test('rjq helper re-resolves to a working binary when the cached path is stale', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-rjq-fallback-'));
+  const binDir = path.join(tempDir, 'bin');
+  fs.mkdirSync(binDir);
+
+  const fallbackRjq = [
+    '#!/bin/sh',
+    'printf "RECOVERED:%s\\n" "$*"',
+  ].join('\n');
+  fs.writeFileSync(path.join(binDir, 'rjq'), fallbackRjq);
+  fs.chmodSync(path.join(binDir, 'rjq'), 0o755);
+
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+  const resolveMatch = script.match(/resolve_rjq_bin\(\) \{[\s\S]*?^}/m);
+  const rjqMatch = script.match(/rjq\(\) \{[\s\S]*?^}/m);
+
+  assert.ok(resolveMatch, 'expected resolve_rjq_bin to exist in ralph.sh');
+  assert.ok(rjqMatch, 'expected rjq helper to exist in ralph.sh');
+
+  const result = spawnSync(BASH, ['-lc', [
+    `SCRIPT_DIR="${tempDir}"`,
+    'RJQ_BIN="/definitely/missing/rjq"',
+    resolveMatch[0],
+    rjqMatch[0],
+    'rjq read sample.json .value',
+  ].join('\n')], {
+    cwd: tempDir,
+    encoding: 'utf-8',
+    env: {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ''}`,
+    },
+  });
+
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.match(result.stdout, /RECOVERED:read sample\.json \.value/);
+});
+
 test('US-001: two independent epics run in the same wave', () => {
   const { tempDir, env } = setupMultiEpicRepo(
     [{ id: 'EPIC-001', title: 'Alpha' }, { id: 'EPIC-002', title: 'Beta' }],

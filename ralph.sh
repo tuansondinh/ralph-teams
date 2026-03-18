@@ -134,8 +134,12 @@ resolve_rjq_bin() {
   done
 
   if command -v rjq >/dev/null 2>&1; then
-    command -v rjq
-    return 0
+    local path_rjq
+    path_rjq="$(command -v rjq)"
+    if [ -n "$path_rjq" ] && [ -e "$path_rjq" ] && [ -x "$path_rjq" ]; then
+      echo "$path_rjq"
+      return 0
+    fi
   fi
 
   return 1
@@ -144,14 +148,12 @@ resolve_rjq_bin() {
 RJQ_BIN="$(resolve_rjq_bin || true)"
 
 rjq() {
-  if [ -z "${RJQ_BIN:-}" ]; then
-    echo "Error: rjq binary is not configured." >&2
-    exit 1
-  fi
-
-  if [ ! -e "$RJQ_BIN" ]; then
-    echo "Error: resolved rjq binary does not exist: $RJQ_BIN" >&2
-    exit 1
+  if [ -z "${RJQ_BIN:-}" ] || [ ! -e "$RJQ_BIN" ]; then
+    RJQ_BIN="$(resolve_rjq_bin || true)"
+    if [ -z "${RJQ_BIN:-}" ] || [ ! -e "$RJQ_BIN" ]; then
+      echo "Error: resolved rjq binary does not exist: ${RJQ_BIN:-<unset>}" >&2
+      exit 1
+    fi
   fi
 
   case "$RJQ_BIN" in
@@ -1322,6 +1324,7 @@ $TEAM_LEAD_POLICY
 - Use the exact epic state file path shown above for every story update. The PRD path is read-only context.
 - If your runtime supports named sub-agents, use the dedicated story-planner, epic-planner, builder, story-validator, and epic-validator roles and choose their models using the policy above.
 - If a story fails validation and still has retries left, spawn a new Builder for the retry instead of reusing the previous Builder run.
+- If your runtime is Codex exec mode, `request_user_input` is unavailable. Never call it. Do not stop to ask the user questions. Make a reasonable assumption, continue, and report the assumption in your final summary only if it matters.
 
 Begin."
 
@@ -1549,7 +1552,7 @@ run_backend_agent_session() {
       local prompt_file="${SCRIPT_DIR}/prompts/agents/${agent_name}.md"
       local role_body
       role_body="$(extract_prompt_body "$prompt_file")"
-      printf '%s\n\n## Assignment\n%s\n' "$role_body" "$prompt" | codex \
+      printf 'Runtime note: This Codex session runs in exec mode. `request_user_input` is unavailable. Never call it. Do not stop to ask the user questions. Make a reasonable assumption and continue.\n\n%s\n\n## Assignment\n%s\n' "$role_body" "$prompt" | codex \
         -a never \
         exec \
         -C "$workdir" \

@@ -269,4 +269,5 @@ test('ralph.sh requires one-shot builder and validator runs for shared team-lead
   assert.match(script, /## Runtime-Specific Notes/);
   assert.match(script, /If your runtime supports named sub-agents, use the dedicated story-planner, epic-planner, builder, story-validator, and epic-validator roles/i);
   assert.match(script, /spawn a new Builder for the retry instead of reusing the previous Builder run/i);
+  assert.match(script, /If your runtime is Codex exec mode, `request_user_input` is unavailable/i);
 });
