@@ -219,6 +219,12 @@ test('rjq helper re-resolves to a working binary when the cached path is stale',
   const result = spawnSync(BASH, ['-c', [
     `PATH="${binDir}:${process.env.PATH ?? ''}"`,
     `SCRIPT_DIR="${tempDir}"`,
+    'command() {',
+    '  if [ "$1" = "-v" ] && [ "$2" = "node" ]; then',
+    '    return 1',
+    '  fi',
+    '  builtin command "$@"',
+    '}',
     'RJQ_BIN="/definitely/missing/rjq"',
     resolveMatch[0],
     rjqMatch[0],
@@ -231,6 +237,52 @@ test('rjq helper re-resolves to a working binary when the cached path is stale',
 
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
   assert.match(result.stdout, /RECOVERED:read sample\.json \.value/);
+});
+
+test('resolve_rjq_bin falls back to the node sibling bin when PATH lacks rjq', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-rjq-node-bin-'));
+  const fakeNodeBinDir = path.join(tempDir, 'node-bin');
+  fs.mkdirSync(fakeNodeBinDir);
+
+  const fallbackRjq = [
+    '#!/bin/sh',
+    'printf "NODEBIN:%s\\n" "$*"',
+  ].join('\n');
+  fs.writeFileSync(path.join(fakeNodeBinDir, 'rjq'), fallbackRjq);
+  fs.chmodSync(path.join(fakeNodeBinDir, 'rjq'), 0o755);
+
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+  const resolveMatch = script.match(/resolve_rjq_bin\(\) \{[\s\S]*?^}/m);
+  const rjqMatch = script.match(/rjq\(\) \{[\s\S]*?^}/m);
+
+  assert.ok(resolveMatch, 'expected resolve_rjq_bin to exist in ralph.sh');
+  assert.ok(rjqMatch, 'expected rjq helper to exist in ralph.sh');
+
+  const result = spawnSync(BASH, ['-c', [
+    `SCRIPT_DIR="${tempDir}"`,
+    `PATH="${process.env.PATH ?? ''}"`,
+    'command() {',
+    '  if [ "$1" = "-v" ] && [ "$2" = "node" ]; then',
+    `    printf '%s\\n' "${fakeNodeBinDir}/node"`,
+    '    return 0',
+    '  fi',
+    '  if [ "$1" = "-v" ] && [ "$2" = "rjq" ]; then',
+    '    return 1',
+    '  fi',
+    '  builtin command "$@"',
+    '}',
+    'RJQ_BIN=""',
+    resolveMatch[0],
+    rjqMatch[0],
+    'rjq read sample.json .value',
+  ].join('\n')], {
+    cwd: tempDir,
+    encoding: 'utf-8',
+    env: { ...process.env },
+  });
+
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.match(result.stdout, /NODEBIN:read sample\.json \.value/);
 });
 
 test('US-001: two independent epics run in the same wave', () => {

@@ -116,14 +116,38 @@ MODEL_MERGER="$(map_model_for_backend "$BACKEND" "$MODEL_MERGER")"
 
 resolve_rjq_bin() {
   local candidates=()
+  local script_realpath=""
+  local script_real_dir=""
 
   if [ -n "${RALPH_RJQ_BIN:-}" ]; then
     candidates+=("${RALPH_RJQ_BIN}")
   fi
+
+  if command -v realpath >/dev/null 2>&1; then
+    script_realpath="$(realpath "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+  elif command -v readlink >/dev/null 2>&1; then
+    script_realpath="$(readlink "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+  fi
+
+  if [ -n "$script_realpath" ]; then
+    script_real_dir="$(cd "$(dirname "$script_realpath")" && pwd)"
+  fi
+
   candidates+=(
     "${SCRIPT_DIR}/dist/json-tool.js"
     "${SCRIPT_DIR}/node_modules/.bin/rjq"
+    "${script_real_dir}/dist/json-tool.js"
+    "${script_real_dir}/node_modules/.bin/rjq"
   )
+
+  if command -v node >/dev/null 2>&1; then
+    local node_bin_dir
+    node_bin_dir="$(cd "$(dirname "$(command -v node)")" && pwd)"
+    candidates+=(
+      "${node_bin_dir}/rjq"
+      "${node_bin_dir}/../lib/node_modules/ralph-teams/dist/json-tool.js"
+    )
+  fi
 
   local candidate
   for candidate in "${candidates[@]}"; do
