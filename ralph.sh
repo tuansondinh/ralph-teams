@@ -1528,6 +1528,50 @@ Begin resolving."
   return $merge_failures
 }
 
+collect_pending_merge_epics() {
+  local -a pending_merge_ids=()
+
+  for epic_index in $(seq 0 $((TOTAL_EPICS - 1))); do
+    local epic_status
+    epic_status=$(rjq read "$PRD_FILE" ".epics[$epic_index].status" "pending")
+    [ "$epic_status" = "completed" ] || continue
+
+    local epic_id
+    epic_id=$(rjq read "$PRD_FILE" ".epics[$epic_index].id")
+    [ -n "$epic_id" ] || continue
+
+    local branch_name="ralph/${epic_id}"
+    if git show-ref --verify --quiet "refs/heads/${branch_name}"; then
+      pending_merge_ids+=("$epic_id")
+    fi
+  done
+
+  printf '%s\n' "${pending_merge_ids[@]+"${pending_merge_ids[@]}"}"
+}
+
+recover_pending_merges() {
+  local context="$1"
+  local -a pending_merge_ids=()
+
+  while IFS= read -r epic_id; do
+    [ -n "$epic_id" ] && pending_merge_ids+=("$epic_id")
+  done < <(collect_pending_merge_epics)
+
+  if [ ${#pending_merge_ids[@]} -eq 0 ]; then
+    return 0
+  fi
+
+  echo ""
+  echo "  --- Recovering completed epic branches before ${context} ---"
+  local epic_id
+  for epic_id in "${pending_merge_ids[@]}"; do
+    echo "  [$epic_id] Recovered pending merge from existing epic branch"
+    echo "[$epic_id] RECOVERED PENDING MERGE (${context}) — $(date)" >> "$PROGRESS_FILE"
+  done
+
+  merge_wave "${pending_merge_ids[@]}"
+}
+
 extract_prompt_body() {
   local source_file="$1"
   awk '
@@ -1648,6 +1692,11 @@ $validation_log
     echo "[FINAL] FINAL FIX CYCLE ${final_fix_cycle} — $(date)" >> "$PROGRESS_FILE"
   done
 }
+
+if ! recover_pending_merges "resume/startup"; then
+  initialize_counters
+fi
+initialize_counters
 
 WAVE_NUM=0
 
@@ -2013,6 +2062,11 @@ while true; do
     break
   fi
 done
+
+if ! recover_pending_merges "finalization"; then
+  initialize_counters
+fi
+initialize_counters
 
 if ! run_final_validation_cycle; then
   FAILED=$((FAILED + 1))
