@@ -285,7 +285,7 @@ test('resolve_rjq_bin falls back to the node sibling bin when PATH lacks rjq', (
   assert.match(result.stdout, /NODEBIN:read sample\.json \.value/);
 });
 
-test('US-001: two independent epics run in the same wave', () => {
+test('US-001: sequential mode processes one independent epic per iteration', () => {
   const { tempDir, env } = setupMultiEpicRepo(
     [{ id: 'EPIC-001', title: 'Alpha' }, { id: 'EPIC-002', title: 'Beta' }],
     { 'EPIC-001': 'PASS', 'EPIC-002': 'PASS' },
@@ -293,6 +293,7 @@ test('US-001: two independent epics run in the same wave', () => {
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
   assert.match(result.stdout, /2 epic\(s\) remaining to run sequentially/);
+  assert.match(result.stdout, /1 epic\(s\) remaining to run sequentially/);
   assert.doesNotMatch(result.stdout, /Wave 1/);
   assert.doesNotMatch(result.stdout, /Wave 2/);
   assert.match(result.stdout, /\[EPIC-001\] PASSED/);
@@ -352,6 +353,23 @@ test('US-001: wave boundaries are logged to progress.txt', () => {
   assert.match(progress, /=== Run/);
   assert.match(progress, /EPIC-001/);
   assert.match(progress, /EPIC-002/);
+});
+
+test('US-001: sequential mode merges before scheduling the next independent epic', () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }, { id: 'EPIC-002', title: 'Beta' }],
+    { 'EPIC-001': 'PASS', 'EPIC-002': 'PASS' },
+  );
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+
+  const epic1MergedPos = result.stdout.indexOf('[EPIC-001] Merge successful (clean)');
+  const secondRemainingPos = result.stdout.indexOf('1 epic(s) remaining to run sequentially');
+  const epic2PassedPos = result.stdout.indexOf('[EPIC-002] PASSED');
+
+  assert.ok(epic1MergedPos !== -1 && secondRemainingPos !== -1 && epic2PassedPos !== -1);
+  assert.ok(epic1MergedPos < secondRemainingPos);
+  assert.ok(secondRemainingPos < epic2PassedPos);
 });
 
 test('US-001: rerunning Ralph automatically retries failed epics', () => {

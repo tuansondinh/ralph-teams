@@ -1763,6 +1763,10 @@ while true; do
     [ "$ALL_DEPS_MET" = true ] && WAVE_EPICS+=("$EPIC_INDEX")
   done
 
+  if [ -z "$PARALLEL" ] && [ ${#WAVE_EPICS[@]} -gt 1 ]; then
+    WAVE_EPICS=("${WAVE_EPICS[0]}")
+  fi
+
   # If no epics ready, we're done
   [ ${#WAVE_EPICS[@]} -eq 0 ] && break
 
