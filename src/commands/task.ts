@@ -1,10 +1,10 @@
 import { spawn, spawnSync } from 'child_process';
 import * as readline from 'readline/promises';
 import chalk from 'chalk';
-import { loadConfig, loadExplicitAgentModelOverrides, mergeCliOverrides } from '../config';
+import { loadConfig, loadExplicitAgentModelOverrides, mergeCliOverrides, type AgentModelField } from '../config';
 import { createDefaultSpawner, type AgentSpawner } from '../discuss';
 
-type SupportedBackend = 'claude' | 'copilot' | 'codex';
+type SupportedBackend = 'claude' | 'copilot' | 'codex' | 'opencode';
 
 interface TaskOptions {
   backend?: string;
@@ -27,6 +27,17 @@ const defaultDeps: TaskDeps = {
   exit: (code?: number) => process.exit(code),
   loadConfig,
   loadExplicitAgentModelOverrides,
+};
+
+const TASK_RUNTIME_AGENT_DEFAULTS: Record<AgentModelField, string> = {
+  teamLead: 'opus',
+  storyPlanner: 'haiku',
+  epicPlanner: 'opus',
+  builder: 'sonnet',
+  storyValidator: 'sonnet',
+  epicValidator: 'sonnet',
+  finalValidator: 'sonnet',
+  merger: 'sonnet',
 };
 
 function ensureBackendAvailable(backend: SupportedBackend): void {
@@ -56,9 +67,18 @@ function ensureBackendAvailable(backend: SupportedBackend): void {
     return;
   }
 
-  const codexResult = spawnSync('command', ['-v', 'codex'], { shell: true, stdio: 'ignore' });
-  if (codexResult.status !== 0) {
-    console.error(chalk.red('Error: codex CLI is not installed or not in PATH.'));
+  if (backend === 'codex') {
+    const codexResult = spawnSync('command', ['-v', 'codex'], { shell: true, stdio: 'ignore' });
+    if (codexResult.status !== 0) {
+      console.error(chalk.red('Error: codex CLI is not installed or not in PATH.'));
+      process.exit(1);
+    }
+    return;
+  }
+
+  const opencodeResult = spawnSync('command', ['-v', 'opencode'], { shell: true, stdio: 'ignore' });
+  if (opencodeResult.status !== 0) {
+    console.error(chalk.red('Error: opencode CLI is not installed or not in PATH.'));
     process.exit(1);
   }
 }
@@ -164,19 +184,25 @@ function buildSpawnEnv(
   backend: SupportedBackend,
   projectRoot: string,
   config: ReturnType<typeof mergeCliOverrides>,
-  explicitAgentOverrides: Partial<Record<'teamLead' | 'storyPlanner' | 'epicPlanner' | 'builder' | 'storyValidator' | 'epicValidator' | 'finalValidator' | 'merger', string>>,
+  explicitAgentOverrides: Partial<Record<AgentModelField, string>>,
 ): NodeJS.ProcessEnv {
+  const resolveAgentModel = (field: AgentModelField): string => (
+    explicitAgentOverrides[field] !== undefined
+      ? config.agents[field]
+      : TASK_RUNTIME_AGENT_DEFAULTS[field]
+  );
+
   return {
     ...process.env,
     RALPH_BACKEND: backend,
-    RALPH_MODEL_TEAM_LEAD: mapModelForBackend(backend, config.agents.teamLead),
-    RALPH_MODEL_STORY_PLANNER: mapModelForBackend(backend, config.agents.storyPlanner),
-    RALPH_MODEL_EPIC_PLANNER: mapModelForBackend(backend, config.agents.epicPlanner),
-    RALPH_MODEL_BUILDER: mapModelForBackend(backend, config.agents.builder),
-    RALPH_MODEL_STORY_VALIDATOR: mapModelForBackend(backend, config.agents.storyValidator),
-    RALPH_MODEL_EPIC_VALIDATOR: mapModelForBackend(backend, config.agents.epicValidator),
-    RALPH_MODEL_FINAL_VALIDATOR: mapModelForBackend(backend, config.agents.finalValidator),
-    RALPH_MODEL_MERGER: mapModelForBackend(backend, config.agents.merger),
+    RALPH_MODEL_TEAM_LEAD: mapModelForBackend(backend, resolveAgentModel('teamLead')),
+    RALPH_MODEL_STORY_PLANNER: mapModelForBackend(backend, resolveAgentModel('storyPlanner')),
+    RALPH_MODEL_EPIC_PLANNER: mapModelForBackend(backend, resolveAgentModel('epicPlanner')),
+    RALPH_MODEL_BUILDER: mapModelForBackend(backend, resolveAgentModel('builder')),
+    RALPH_MODEL_STORY_VALIDATOR: mapModelForBackend(backend, resolveAgentModel('storyValidator')),
+    RALPH_MODEL_EPIC_VALIDATOR: mapModelForBackend(backend, resolveAgentModel('epicValidator')),
+    RALPH_MODEL_FINAL_VALIDATOR: mapModelForBackend(backend, resolveAgentModel('finalValidator')),
+    RALPH_MODEL_MERGER: mapModelForBackend(backend, resolveAgentModel('merger')),
     RALPH_MODEL_TEAM_LEAD_EXPLICIT: explicitAgentOverrides.teamLead !== undefined ? '1' : '0',
     RALPH_MODEL_STORY_PLANNER_EXPLICIT: explicitAgentOverrides.storyPlanner !== undefined ? '1' : '0',
     RALPH_MODEL_EPIC_PLANNER_EXPLICIT: explicitAgentOverrides.epicPlanner !== undefined ? '1' : '0',
@@ -229,6 +255,11 @@ async function runExecutionSession(prompt: string, backend: SupportedBackend, en
 
   if (backend === 'copilot') {
     await runSpawnedProcess('gh', ['copilot', '--', '--allow-all', '--no-ask-user', '-p', prompt], env);
+    return;
+  }
+
+  if (backend === 'opencode') {
+    await runSpawnedProcess('opencode', ['.', '--prompt', prompt], env);
     return;
   }
 
