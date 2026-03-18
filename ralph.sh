@@ -133,9 +133,9 @@ resolve_rjq_bin() {
     fi
   done
 
-  if command -v rjq >/dev/null 2>&1; then
+  if type -P rjq >/dev/null 2>&1; then
     local path_rjq
-    path_rjq="$(command -v rjq)"
+    path_rjq="$(type -P rjq)"
     if [ -n "$path_rjq" ] && [ -e "$path_rjq" ] && [ -x "$path_rjq" ]; then
       echo "$path_rjq"
       return 0

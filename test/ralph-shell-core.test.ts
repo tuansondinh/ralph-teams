@@ -216,7 +216,8 @@ test('rjq helper re-resolves to a working binary when the cached path is stale',
   assert.ok(resolveMatch, 'expected resolve_rjq_bin to exist in ralph.sh');
   assert.ok(rjqMatch, 'expected rjq helper to exist in ralph.sh');
 
-  const result = spawnSync(BASH, ['-lc', [
+  const result = spawnSync(BASH, ['-c', [
+    `PATH="${binDir}:${process.env.PATH ?? ''}"`,
     `SCRIPT_DIR="${tempDir}"`,
     'RJQ_BIN="/definitely/missing/rjq"',
     resolveMatch[0],
@@ -225,10 +226,7 @@ test('rjq helper re-resolves to a working binary when the cached path is stale',
   ].join('\n')], {
     cwd: tempDir,
     encoding: 'utf-8',
-    env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH ?? ''}`,
-    },
+    env: { ...process.env },
   });
 
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
