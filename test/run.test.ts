@@ -345,3 +345,82 @@ test('runCommand checks for the codex CLI when codex backend is selected', async
   );
   assert.match(errors[0] ?? '', /codex CLI is not installed/i);
 });
+
+test('runCommand prints parallel mode line when config sets parallel without CLI flag', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
+  const prdPath = path.join(tempDir, 'prd.json');
+  fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
+  // Write a config with execution.parallel: 4
+  fs.writeFileSync(path.join(tempDir, 'ralph.config.yml'), 'execution:\n  parallel: 4\n');
+  const tempRalphSh = path.join(tempDir, 'ralph.sh');
+  fs.writeFileSync(tempRalphSh, '#!/bin/sh\n');
+
+  const logs: string[] = [];
+  mock.method(console, 'log', (...args: unknown[]) => {
+    logs.push(args.join(' '));
+  });
+
+  const deps = createRunDeps({
+    existsSync: (target: fs.PathLike) => fs.existsSync(target),
+    spawnSync: ((command: string, args?: readonly string[]) => {
+      return { status: 0 } as ReturnType<NonNullable<Parameters<typeof runCommand>[2]>['spawnSync']>;
+    }) as NonNullable<Parameters<typeof runCommand>[2]>['spawnSync'],
+    chmodSync: (() => {}) as typeof fs.chmodSync,
+    cwd: () => tempDir,
+  });
+
+  // No --parallel CLI flag — parallel mode comes from config only
+  await assert.rejects(runCommand(prdPath, { backend: 'claude' }, deps), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 0);
+    return true;
+  });
+
+  assert.ok(
+    logs.some(line => line.includes('Parallel: 4 epics per wave')),
+    'expected parallel mode line in output',
+  );
+  assert.ok(
+    !logs.some(line => line.includes('Mode: sequential')),
+    'should NOT print sequential mode when parallel is configured',
+  );
+});
+
+test('runCommand prints sequential mode line when config parallel is 0 and no CLI flag', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
+  const prdPath = path.join(tempDir, 'prd.json');
+  fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
+  const tempRalphSh = path.join(tempDir, 'ralph.sh');
+  fs.writeFileSync(tempRalphSh, '#!/bin/sh\n');
+
+  const logs: string[] = [];
+  mock.method(console, 'log', (...args: unknown[]) => {
+    logs.push(args.join(' '));
+  });
+
+  const deps = createRunDeps({
+    existsSync: (target: fs.PathLike) => fs.existsSync(target),
+    spawnSync: ((command: string, args?: readonly string[]) => {
+      return { status: 0 } as ReturnType<NonNullable<Parameters<typeof runCommand>[2]>['spawnSync']>;
+    }) as NonNullable<Parameters<typeof runCommand>[2]>['spawnSync'],
+    chmodSync: (() => {}) as typeof fs.chmodSync,
+    cwd: () => tempDir,
+    // loadConfig returns default config with parallel: 0 (no config file in tempDir)
+  });
+
+  // No --parallel CLI flag, no config file with parallel set
+  await assert.rejects(runCommand(prdPath, { backend: 'claude' }, deps), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 0);
+    return true;
+  });
+
+  assert.ok(
+    logs.some(line => line.includes('Mode: sequential')),
+    'expected sequential mode line in output',
+  );
+  assert.ok(
+    !logs.some(line => line.includes('Parallel:')),
+    'should NOT print parallel mode when parallel is 0',
+  );
+});

@@ -143,8 +143,10 @@ export async function runCommand(
       console.error(chalk.red('Error: --parallel must be greater than 0'));
       deps.exit(1);
     }
+  }
 
-    console.log(chalk.dim(`Parallel: ${parallelCount} epics per wave\n`));
+  if (resolvedConfig.execution.parallel > 0) {
+    console.log(chalk.dim(`Parallel: ${resolvedConfig.execution.parallel} epics per wave\n`));
   } else {
     console.log(chalk.dim('Mode: sequential\n'));
   }
