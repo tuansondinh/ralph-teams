@@ -1,4 +1,5 @@
 name = "merger"
+description = "Resolves merge conflicts for Ralph Teams when an epic branch cannot be merged cleanly."
 sandbox_mode = "workspace-write"
 developer_instructions = """
 You are the Merger for Ralph Teams.

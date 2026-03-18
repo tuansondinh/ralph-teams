@@ -591,15 +591,24 @@ cleanup_all_worktrees() {
 
 get_file_mtime() {
   local file="$1"
+  local mtime
   if [ ! -f "$file" ]; then
     echo "0"
     return
   fi
-  # macOS: stat -f %m, Linux: stat -c %Y
-  if stat -f %m "$file" 2>/dev/null; then
+  # Try Linux/GNU stat first. GNU `stat -f %m` can exit 0 while printing
+  # filesystem metadata instead of a file mtime, so validate numeric output.
+  mtime=$(stat -c %Y "$file" 2>/dev/null || true)
+  if [[ "$mtime" =~ ^[0-9]+$ ]]; then
+    echo "$mtime"
     return
   fi
-  stat -c %Y "$file" 2>/dev/null || echo "0"
+  mtime=$(stat -f %m "$file" 2>/dev/null || true)
+  if [[ "$mtime" =~ ^[0-9]+$ ]]; then
+    echo "$mtime"
+    return
+  fi
+  echo "0"
 }
 
 terminate_process_tree() {

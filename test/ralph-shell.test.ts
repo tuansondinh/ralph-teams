@@ -1787,6 +1787,39 @@ test('US-005 (idle timeout): idle epic is killed and marked failed after RALPH_I
   assert.match(result.stdout, /\[EPIC-001\] IDLE TIMEOUT — no output for 2s/);
 });
 
+test('US-005 (idle timeout): GNU stat -f output does not break log mtime parsing', { timeout: 15000 }, () => {
+  const { tempDir, binDir, env } = setupIdleTimeoutRepo(
+    [{ id: 'EPIC-001', title: 'Alpha' }],
+  );
+  env['MOCK_SILENT_EPIC_001'] = '1';
+  env['RALPH_IDLE_TIMEOUT'] = '2';
+
+  const mockStat = [
+    '#!/bin/sh',
+    'if [ "$1" = "-f" ] && [ "$2" = "%m" ]; then',
+    '  echo "File: \\"$3\\""',
+    '  echo "ID: deadbeef Namelen: 255 Type: ext2/ext3"',
+    '  exit 0',
+    'fi',
+    'exec /usr/bin/stat "$@"',
+  ].join('\n');
+  fs.writeFileSync(path.join(binDir, 'stat'), mockStat);
+  fs.chmodSync(path.join(binDir, 'stat'), 0o755);
+
+  const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
+    cwd: tempDir,
+    encoding: 'utf-8',
+    env,
+    timeout: 12000,
+  });
+
+  assert.notEqual(result.status, null, 'Expected script process to exit');
+  assert.doesNotMatch(result.stderr, /integer expression expected|unbound variable/);
+
+  const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
+  assert.equal(prd.epics[0].status, 'failed', `Expected failed status, got: ${prd.epics[0].status}`);
+});
+
 test('US-005 (idle timeout): idle timeout event is logged to progress.txt', { timeout: 15000 }, () => {
   const { tempDir, env } = setupIdleTimeoutRepo(
     [{ id: 'EPIC-001', title: 'Alpha' }],

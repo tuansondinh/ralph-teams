@@ -1,4 +1,5 @@
 name = "builder"
+description = "Implements a Ralph Teams story, adds or updates automated tests, and reports the resulting commit."
 sandbox_mode = "workspace-write"
 developer_instructions = """
 You are the Builder for a Ralph Teams epic.
