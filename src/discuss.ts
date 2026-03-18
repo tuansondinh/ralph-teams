@@ -65,12 +65,12 @@ export interface DiscussSessionOptions {
    */
   spawnAgent?: AgentSpawner;
   /** Backend to launch for the guided session. Defaults to 'claude'. */
-  backend?: 'claude' | 'copilot' | 'codex';
+  backend?: 'claude' | 'copilot' | 'codex' | 'opencode';
 }
 
 export interface FailedStoriesDiscussOptions {
   spawnAgent?: AgentSpawner;
-  backend?: 'claude' | 'copilot' | 'codex';
+  backend?: 'claude' | 'copilot' | 'codex' | 'opencode';
 }
 
 // ---------------------------------------------------------------------------
@@ -386,7 +386,7 @@ export function buildFailedStoriesDiscussPrompt(contexts: FailedStoryContext[]):
  * @param agentArgs - Additional args to pass to the agent (default: [])
  */
 export function createDefaultSpawner(
-  backend: 'claude' | 'copilot' | 'codex' = 'claude',
+  backend: 'claude' | 'copilot' | 'codex' | 'opencode' = 'claude',
 ): AgentSpawner {
   return (contextPrompt: string): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -404,9 +404,12 @@ export function createDefaultSpawner(
       } else if (backend === 'copilot') {
         command = 'gh';
         args = ['copilot', '--', '--allow-all', '-i', contextPrompt];
-      } else {
+      } else if (backend === 'codex') {
         command = 'codex';
         args = ['-a', 'never', '-s', 'workspace-write', contextPrompt];
+      } else {
+        command = 'opencode';
+        args = ['run', contextPrompt];
       }
 
       let agentProcess: ChildProcess;

@@ -11,8 +11,11 @@ ralph-teams run --parallel={max_parallel_epics}
 ```bash
 npm install -g ralph-teams
 
+# configure Ralph for your repository (interactive setup)
+ralph-teams setup
+
 # discuss with an agent and create the prd.json (epics and user stories)
-ralph-teams init 
+ralph-teams init
 
 # start the loop, by default uses claude
 ralph-teams run
@@ -55,11 +58,19 @@ The system has two layers:
 - A backend agent session handles one epic at a time using a small team:
   - `team-lead` coordinates the epic
   - `epic-planner` creates the implementation plan when epic planning is enabled
-  - `story-planner` can create a story-scoped plan when story planning is enabled
+  - `story-planner` creates a story-scoped plan when story planning is enabled
   - `builder` makes changes and runs tests
-  - `story-validator`, `epic-validator`, and `final-validator` verify work at their respective scopes when enabled
+  - `story-validator` verifies a single story when story validation is enabled
+  - `epic-validator` verifies the full epic after all stories pass when epic validation is enabled
+  - `final-validator` verifies the merged result when final validation is enabled
+  - `merger` resolves merge conflicts when they occur
 
-Across all backends, `builder` work is one-shot per attempt. Scoped validation is configurable via `storyValidation`, `epicValidation`, and `finalValidation`. A build attempt only counts when the Builder returns a concrete commit SHA and the Team Lead persists the story result to the epic state file at `.ralph-teams/state/{epic-id}.json`.
+Scoped planning and validation are configurable via `ralph.config.yml`. Workflow presets provide sensible defaults:
+- `default`: epic planning + epic validation + final validation enabled
+- `thorough`: all planning and validation toggles enabled
+- `off`: all planning and validation toggles disabled
+
+Across all backends, `builder` work is one-shot per attempt. A build attempt only counts when the Builder returns a concrete commit SHA and the Team Lead persists the story result to the epic state file at `.ralph-teams/state/{epic-id}.json`.
 
 Workflow presets:
 - `default`: epic planning, epic validation, and final validation enabled
@@ -80,6 +91,7 @@ Current backends:
 - `claude` via the `claude` CLI and `.claude/agents/*.md`
 - `copilot` via `gh copilot` and `.github/agents/*.agent.md`
 - `codex` via the `codex` CLI, repo-local `.codex/agents/*.toml`, and Codex multi-agent mode
+- `opencode` via the `opencode` CLI and `.opencode/agents/*.md`
 - shared worker-agent prompt source in `prompts/agents/*.md`, rendered to those backend-specific files via `npm run sync:agents`
 
 The runtime is file-based. During a run, Ralph treats these files as the working state of the system:
@@ -107,6 +119,8 @@ Backend-specific requirements:
 - Codex backend:
   - `codex` CLI in `PATH`
   - multi-agent feature enabled by the CLI (Ralph passes `--enable multi_agent` automatically)
+- OpenCode backend:
+  - `opencode` CLI in `PATH`
 
 ## Install
 
@@ -176,16 +190,35 @@ Run `ralph.sh` directly when you want shell-level flags:
 
 ## Commands
 
+### `ralph-teams setup`
+
+Runs interactive setup to create or update `ralph.config.yml` for your repository.
+
+```bash
+ralph-teams setup
+```
+
+Prompts for:
+- Default backend (`claude`, `copilot`, `codex`, `opencode`)
+- Workflow preset (`default`, `thorough`, `off`)
+- Max parallel epics
+- Agent model overrides (optional)
+
+Workflow presets:
+- `default`: epic planning + epic validation + final validation enabled
+- `thorough`: all planning and validation toggles enabled
+- `off`: all planning and validation toggles disabled
+
 ### `ralph-teams init`
 
 Creates a new `prd.json` interactively in the current directory by launching an AI PRD-creator session. If `ralph.config.yml` does not already exist, `init` first runs interactive setup so you can configure Ralph for the repository.
 
 ```bash
-ralph-teams setup
 ralph-teams init
 ralph-teams init --backend claude
 ralph-teams init --backend copilot
 ralph-teams init --backend codex
+ralph-teams init --backend opencode
 ```
 
 Flow:
@@ -420,6 +453,20 @@ Notes:
 - Codex follows the same scoped planning/validation contract as Claude and Copilot; the runtime prompt in `ralph.sh` enforces that policy for Codex Team Leads
 - Edit `prompts/agents/*.md` and run `npm run sync:agents` to regenerate the backend-specific worker agent files
 
+### OpenCode Backend
+
+Uses:
+
+- `opencode` CLI
+- canonical worker prompts in `prompts/agents/`
+- `.opencode/agents/`
+
+Example:
+
+```bash
+./ralph.sh prd.json --backend opencode
+```
+
 ## PRD Format
 
 Example:
@@ -494,7 +541,7 @@ The current execution contract is:
 - blocked epics are skipped until dependencies are complete
 - runs sequentially by default
 - experimental wave parallelism is enabled only with `--parallel <n>`
-- at run start Ralph creates a fresh loop branch from your current branch
+- at run start Ralph auto-commits any dirty worktree changes, then creates a fresh loop branch from your current branch
 - each epic gets its own worktree and branch rooted from that loop branch
 - when an epic completes, its branch is merged back into the loop branch
 - the backend team processes one epic per session
@@ -538,6 +585,10 @@ Install GitHub CLI and ensure `gh` is on your `PATH`.
 ### `Error: 'codex' CLI not found`
 
 Install Codex CLI and ensure `codex` is on your `PATH`.
+
+### `Error: 'opencode' CLI not found`
+
+Install OpenCode CLI and ensure `opencode` is on your `PATH`.
 
 ### `Error: GitHub Copilot CLI not available`
 

@@ -49,6 +49,7 @@ Responsibilities:
 
 Important commands:
 
+- `setup`: `src/commands/setup.ts`
 - `run`: `src/commands/run.ts`
 - `resume`: `src/commands/resume.ts`
 - `init`: `src/commands/init.ts`
@@ -86,10 +87,17 @@ The Bash layer is stateful and process-oriented. That is why it owns:
 Core shared modules:
 
 - `src/prd-utils.ts`: PRD types and simple load/save helpers
-- `src/config.ts`: `ralph.config.yml` parsing, validation, defaults, CLI override merge
+- `src/config.ts`: `ralph.config.yml` parsing, validation, defaults, CLI override merge, workflow presets
 - `src/token-parser.ts`: backend log token extraction
+- `src/commands/setup.ts`: interactive repository configuration
 - `src/commands/plan.ts`: guided epic planning entrypoint and prompt builder
 - `src/discuss.ts`: shared agent spawning and discussion helpers
+
+Workflow presets in `ralph.config.yml`:
+
+- `default`: epic planning + epic validation + final validation enabled
+- `thorough`: all planning and validation toggles enabled
+- `off`: all planning and validation toggles disabled
 
 These modules are mostly synchronous and file-oriented. That matches the rest of the codebase, which prefers simple filesystem contracts over in-memory services.
 
@@ -120,9 +128,10 @@ The shell runtime then:
 
 1. Validates the PRD structure with `rjq`.
 2. Detects circular dependencies.
-3. Establishes the run loop branch.
-4. Normalizes retryable PRD state.
-5. Repeatedly computes the next wave of runnable epics.
+3. Auto-commits any dirty worktree changes.
+4. Establishes the run loop branch.
+5. Normalizes retryable PRD state.
+6. Repeatedly computes the next wave of runnable epics.
 6. Spawns each epic in its own worktree and backend process.
 7. Watches logs, timeout thresholds, and PRD progress.
 8. Updates `prd.json`, `.ralph-teams/progress.txt`, and stats after completion.
@@ -243,11 +252,12 @@ This gives the system a simple mental model:
 
 ## Backend Integration
 
-Backend selection is centralized around three modes:
+Backend selection is centralized around four modes:
 
 - `claude`
 - `copilot`
 - `codex`
+- `opencode`
 
 Integration points:
 
@@ -322,11 +332,17 @@ This makes failure modes inspectable after the fact because evidence is left on 
 - `.opencode/agents/`
 - `.codex/agents/`
 
+Scoped roles:
+- Planning: `epic-planner`, `story-planner`
+- Implementation: `builder`
+- Validation: `story-validator`, `epic-validator`, `final-validator`
+- Integration: `merger`
+
 For Codex specifically, `.codex/agents/` defines the spawned teammate roles. The Codex Team Lead policy itself is injected by `ralph.sh` at runtime rather than coming from a separate `.codex/agents/team-lead.toml` file.
 
-For Claude and Copilot, the Team Lead contract lives in `.claude/agents/team-lead.md` and `.github/agents/team-lead.agent.md`. All three backends now share the same coordination rule: planning and validation are scope-specific and configurable, while Builder attempts remain one-shot and are never reused as persistent teammates.
+For Claude, Copilot, and OpenCode, the Team Lead contract lives in `.claude/agents/team-lead.md`, `.github/agents/team-lead.agent.md`, and `.opencode/agents/team-lead.md`. All backends now share the same coordination rule: planning and validation are scope-specific and configurable, while Builder attempts remain one-shot and are never reused as persistent teammates.
 
-The worker-role instruction bodies are canonicalized in `prompts/agents/*.md` and rendered into the backend-specific agent files. The backend directories remain the runtime contract, but contributors should edit the canonical prompts and regenerate the rendered files instead of hand-editing every backend copy.
+The worker-role instruction bodies are canonicalized in `prompts/agents/*.md` and rendered into the backend-specific agent files via `npm run sync:agents`. The backend directories remain the runtime contract, but contributors should edit the canonical prompts and regenerate the rendered files instead of hand-editing every backend copy.
 
 ### Tests
 

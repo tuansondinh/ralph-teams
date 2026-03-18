@@ -41,6 +41,7 @@ fi
 EPIC_TIMEOUT="${RALPH_EPIC_TIMEOUT:-3600}"
 IDLE_TIMEOUT="${RALPH_IDLE_TIMEOUT:-600}"
 MAX_CRASH_RETRIES="${RALPH_MAX_CRASH_RETRIES:-2}"
+POLL_INTERVAL_SECONDS="${RALPH_POLL_INTERVAL_SECONDS:-0.2}"
 STORY_PLANNING_ENABLED="${RALPH_STORY_PLANNING_ENABLED:-0}"
 STORY_VALIDATION_ENABLED="${RALPH_STORY_VALIDATION_ENABLED:-0}"
 STORY_VALIDATION_MAX_FIX_CYCLES="${RALPH_STORY_VALIDATION_MAX_FIX_CYCLES:-1}"
@@ -1125,6 +1126,11 @@ process.stdout.write(String(passed));
 NODE
 }
 
+read_epic_prd_passed() {
+  local epic_index="$1"
+  rjq count-where "$PRD_FILE" ".epics[$epic_index].userStories" "passes=true"
+}
+
 project_state_to_prd() {
   local epic_id="$1"
   local state_file="${STATE_DIR}/${epic_id}.json"
@@ -1353,6 +1359,8 @@ merge_wave() {
     else
       local conflicted_files
       conflicted_files=$(git diff --name-only --diff-filter=U 2>/dev/null || true)
+      local conflict_count
+      conflict_count=$(printf '%s\n' "$conflicted_files" | sed '/^$/d' | wc -l | tr -d ' ')
 
       if [ -z "$conflicted_files" ] && [ ! -f ".git/MERGE_HEAD" ]; then
         local merge_error
@@ -1369,6 +1377,19 @@ merge_wave() {
         fi
 
         git merge --abort 2>/dev/null || true
+        git branch -d "${branch_name}" 2>/dev/null || true
+        continue
+      fi
+
+      # The loop branch PRD is already authoritative because epic state has been
+      # projected before merge. If the only conflict is prd.json metadata, keep
+      # the loop branch version and complete the merge without spawning a merger.
+      if [ "$conflict_count" -eq 1 ] && printf '%s\n' "$conflicted_files" | grep -qx 'prd\.json'; then
+        git checkout --ours -- prd.json
+        git add prd.json
+        git commit --no-edit >/dev/null 2>&1 || true
+        echo "  [$epic_id] Merge successful (kept projected prd.json)"
+        echo "[$epic_id] MERGED (projected prd.json) — $(date)" >> "$PROGRESS_FILE"
         git branch -d "${branch_name}" 2>/dev/null || true
         continue
       fi
@@ -1715,9 +1736,12 @@ while true; do
           terminate_process_tree "${active_pids[$slot]}"
           wait "${active_pids[$slot]}" 2>/dev/null || true
           # Check progress and retry if possible
-          local _to_total _to_passed
+          local _to_total _to_state_passed _to_prd_passed _to_passed
           _to_total=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories")
-          _to_passed=$(read_epic_state_passed "$finished_epic_id")
+          _to_state_passed=$(read_epic_state_passed "$finished_epic_id")
+          _to_prd_passed=$(read_epic_prd_passed "${active_indices[$slot]}")
+          _to_passed="$_to_state_passed"
+          [ "$_to_prd_passed" -gt "$_to_passed" ] && _to_passed="$_to_prd_passed"
           local _to_retry_count
           _to_retry_count="$(get_crash_retry_count "$finished_epic_id")"
           if [ "$_to_retry_count" -lt "$MAX_CRASH_RETRIES" ] && [ "$_to_passed" -lt "$_to_total" ]; then
@@ -1770,9 +1794,12 @@ while true; do
           terminate_process_tree "${active_pids[$slot]}"
           wait "${active_pids[$slot]}" 2>/dev/null || true
           # Check progress and retry if possible
-          local _it_total _it_passed
+          local _it_total _it_state_passed _it_prd_passed _it_passed
           _it_total=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories")
-          _it_passed=$(read_epic_state_passed "$finished_epic_id")
+          _it_state_passed=$(read_epic_state_passed "$finished_epic_id")
+          _it_prd_passed=$(read_epic_prd_passed "${active_indices[$slot]}")
+          _it_passed="$_it_state_passed"
+          [ "$_it_prd_passed" -gt "$_it_passed" ] && _it_passed="$_it_prd_passed"
           local _it_retry_count
           _it_retry_count="$(get_crash_retry_count "$finished_epic_id")"
           if [ "$_it_retry_count" -lt "$MAX_CRASH_RETRIES" ] && [ "$_it_passed" -lt "$_it_total" ]; then
@@ -1811,9 +1838,12 @@ while true; do
           process_finished=true
         fi
 
-        local total_s passed_s
+        local total_s passed_s_state passed_s_prd passed_s
         total_s=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories")
-        passed_s=$(read_epic_state_passed "$finished_epic_id")
+        passed_s_state=$(read_epic_state_passed "$finished_epic_id")
+        passed_s_prd=$(read_epic_prd_passed "${active_indices[$slot]}")
+        passed_s="$passed_s_state"
+        [ "$passed_s_prd" -gt "$passed_s" ] && passed_s="$passed_s_prd"
         local all_done=false
         [ "$passed_s" -eq "$total_s" ] && [ "$total_s" -gt 0 ] && all_done=true
 
@@ -1874,7 +1904,7 @@ while true; do
         fi
 
       done
-      sleep 1
+      sleep "$POLL_INTERVAL_SECONDS"
     done
   }
 
@@ -1941,9 +1971,12 @@ echo "  Failed: $FAILED"
 echo "  Remaining: $REMAINING"
 echo "========================================================"
 
-if [ "$COMPLETED" -eq "$TOTAL_EPICS" ]; then
+if [ "$COMPLETED" -eq "$TOTAL_EPICS" ] && [ "$FAILED" -eq 0 ]; then
   echo "All epics completed!"
   exit 0
+elif [ "$COMPLETED" -eq "$TOTAL_EPICS" ]; then
+  echo "All epics completed, but one or more validation or merge checks failed."
+  exit 1
 elif [ "$REMAINING" -gt 0 ]; then
   echo "Some epics remaining. Run ralph.sh again to continue."
   exit 0

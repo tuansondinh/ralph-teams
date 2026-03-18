@@ -7,7 +7,7 @@ import { createDefaultSpawner, type AgentSpawner } from '../discuss';
 import { loadPrd, type Epic } from '../prd-utils';
 import { getRalphPlansDir } from '../runtime-paths';
 
-type SupportedBackend = 'claude' | 'copilot' | 'codex';
+type SupportedBackend = 'claude' | 'copilot' | 'codex' | 'opencode';
 
 interface PlanOptions {
   backend?: string;
@@ -68,9 +68,18 @@ function ensureBackendAvailable(backend: SupportedBackend): void {
     return;
   }
 
-  const codexResult = spawnSync('command', ['-v', 'codex'], { shell: true, stdio: 'ignore' });
-  if (codexResult.status !== 0) {
-    console.error(chalk.red('Error: codex CLI is not installed or not in PATH.'));
+  if (backend === 'codex') {
+    const codexResult = spawnSync('command', ['-v', 'codex'], { shell: true, stdio: 'ignore' });
+    if (codexResult.status !== 0) {
+      console.error(chalk.red('Error: codex CLI is not installed or not in PATH.'));
+      process.exit(1);
+    }
+    return;
+  }
+
+  const opencodeResult = spawnSync('command', ['-v', 'opencode'], { shell: true, stdio: 'ignore' });
+  if (opencodeResult.status !== 0) {
+    console.error(chalk.red('Error: opencode CLI is not installed or not in PATH.'));
     process.exit(1);
   }
 }

@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const scriptPath = path.join(repoRoot, 'ralph.sh');
+process.env.RALPH_POLL_INTERVAL_SECONDS ??= '0.05';
 
 // ralph.sh requires bash 4+ (uses declare -A). On macOS the system /bin/bash is 3.2,
 // so we use the Homebrew bash 5 if available, otherwise fall back to PATH resolution.
@@ -320,7 +321,7 @@ function setupTempRepo() {
   const binDir = path.join(tempDir, 'bin');
   fs.mkdirSync(binDir);
 
-  fs.writeFileSync(path.join(binDir, 'claude'), '#!/bin/sh\nexit 0\n');
+  fs.writeFileSync(path.join(binDir, 'claude'), '#!/bin/sh\nprintf "VERDICT: PASS\\n"\n');
   fs.chmodSync(path.join(binDir, 'claude'), 0o755);
 
   execFileSync('git', ['init', '-b', 'main'], { cwd: tempDir });
@@ -379,6 +380,8 @@ function setupUnbornRepo() {
       "if(e)e.userStories.forEach(s=>{s.passes=true;});" +
       "fs.writeFileSync(f,JSON.stringify(p,null,2)+'\\n');" +
       '" "$EPIC_ID" "$PRD_PATH"',
+    'else',
+    '  printf "VERDICT: PASS\\n"',
     'fi',
     'exit 0',
   ].join('\n');
@@ -546,8 +549,10 @@ function setupMultiEpicRepo(
     '    fi',
     '  fi',
     '  if [ "$HANG_VAL" = "1" ]; then',
-    '    sleep 30',
+    '    sleep 5',
     '  fi',
+    'else',
+    '  printf "VERDICT: PASS\\n"',
     'fi',
     'exit 0',
   ].join('\n');
@@ -592,7 +597,10 @@ function runRalph(tempDir: string, env: Record<string, string>, args: string[] =
   return spawnSync(BASH, [scriptPath, 'prd.json', ...args], {
     cwd: tempDir,
     encoding: 'utf-8',
-    env,
+    env: {
+      ...env,
+      RALPH_POLL_INTERVAL_SECONDS: env.RALPH_POLL_INTERVAL_SECONDS ?? '0.05',
+    },
   });
 }
 
@@ -605,10 +613,23 @@ test('codex backend suppresses bare file-path chatter in stdout while keeping ou
     '#!/bin/sh',
     'STDIN=$(cat)',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
+    'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
-    'printf "./src/config.ts\\n"',
-    'printf "./src/index.ts\\n"',
-    'node -e "' +
+    'if [ -n "$EPIC_ID" ]; then',
+    '  printf "./src/config.ts\\n"',
+    '  printf "./src/index.ts\\n"',
+    '  node -e "' +
+      "const fs=require('fs');" +
+      "const f=process.argv[1];" +
+      "if (f && fs.existsSync(f)) {" +
+      " const s=JSON.parse(fs.readFileSync(f,'utf8'));" +
+      " for (const v of Object.values(s.stories||{})) { v.passes=true; v.failureReason=null; }" +
+      " const t=f+'.tmp.'+process.pid;" +
+      " fs.writeFileSync(t,JSON.stringify(s,null,2)+'\\n');" +
+      " fs.renameSync(t,f);" +
+      "}" +
+    '" "$STATE_PATH"',
+    '  node -e "' +
       "const fs=require('fs');" +
       "const f=process.argv[2];" +
       "const p=JSON.parse(fs.readFileSync(f,'utf8'));" +
@@ -618,7 +639,10 @@ test('codex backend suppresses bare file-path chatter in stdout while keeping ou
       "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
       "fs.renameSync(t,f);" +
     '" "$EPIC_ID" "$PRD_PATH"',
-    'printf "PASS\\n"',
+    '  printf "PASS\\n"',
+    'else',
+    '  printf "VERDICT: PASS\\n"',
+    'fi',
   ].join('\n');
   fs.writeFileSync(path.join(binDir, 'codex'), mockCodex);
   fs.chmodSync(path.join(binDir, 'codex'), 0o755);
@@ -1075,6 +1099,8 @@ function setupMergeRepo(
       "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
       "fs.renameSync(t,f);" +
     '" "$EPIC_ID" "$PRD_PATH"',
+    'else',
+    '  printf "VERDICT: PASS\\n"',
     'fi',
     'exit 0',
   ].join('\n');
@@ -1136,10 +1162,23 @@ test('US-004: epic success is preserved when only the worktree PRD is updated', 
     '#!/bin/sh',
     'STDIN=$(cat)',
     'WORKTREE=$(printf "%s" "$STDIN" | awk \'/ALL work for this epic MUST happen in this directory:/ {sub(/^.*directory: /, ""); print; exit}\')',
+    'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
-    'cd "$WORKTREE" || exit 1',
-    'node -e "' +
+    'if [ -n "$EPIC_ID" ] && [ -n "$WORKTREE" ]; then',
+    '  cd "$WORKTREE" || exit 1',
+    '  node -e "' +
+      "const fs=require('fs');" +
+      "const f=process.argv[1];" +
+      "if (f && fs.existsSync(f)) {" +
+      " const s=JSON.parse(fs.readFileSync(f,'utf8'));" +
+      " for (const v of Object.values(s.stories||{})) { v.passes=true; v.failureReason=null; }" +
+      " const t=f+'.tmp.'+process.pid;" +
+      " fs.writeFileSync(t,JSON.stringify(s,null,2)+'\\n');" +
+      " fs.renameSync(t,f);" +
+      "}" +
+    '" "$STATE_PATH"',
+    '  node -e "' +
       "const fs=require('fs');" +
       "const f=process.argv[1];" +
       "const epicId=process.argv[2];" +
@@ -1150,8 +1189,11 @@ test('US-004: epic success is preserved when only the worktree PRD is updated', 
       "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
       "fs.renameSync(t,f);" +
     '" "$PRD_PATH" "$EPIC_ID"',
-    'git add prd.json',
-    'git commit -m "feat: mark story passed in worktree PRD"',
+    '  git add prd.json',
+    '  git commit -m "feat: mark story passed in worktree PRD"',
+    'else',
+    '  printf "VERDICT: PASS\\n"',
+    'fi',
     'exit 0',
   ].join('\n');
   fs.writeFileSync(path.join(binDir, 'claude'), mockClaude);
@@ -1312,6 +1354,7 @@ function setupConflictRepo(options?: { resolveWithMerger?: boolean }) {
     'STDIN=$(cat)',
     'ARGS="$*"',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
+    'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
     '# Only act as team-lead (prompt contains Working Directory)',
     'WORKTREE=$(printf "%s" "$STDIN" | grep -oE "[^ ]*\\.worktrees/[^ ]*" | head -1)',
@@ -1329,6 +1372,17 @@ function setupConflictRepo(options?: { resolveWithMerger?: boolean }) {
     '    git -C "$MAIN_ROOT" add README.md',
     '    git -C "$MAIN_ROOT" -c user.name="Ralph Test" -c user.email="ralph@example.com" commit -m "chore: main change to README"',
     '  fi',
+    '  node -e "' +
+      "const fs=require('fs');" +
+      "const f=process.argv[1];" +
+      "if (f && fs.existsSync(f)) {" +
+      " const s=JSON.parse(fs.readFileSync(f,'utf8'));" +
+      " for (const v of Object.values(s.stories||{})) { v.passes=true; v.failureReason=null; }" +
+      " const t=f+'.tmp.'+process.pid;" +
+      " fs.writeFileSync(t,JSON.stringify(s,null,2)+'\\n');" +
+      " fs.renameSync(t,f);" +
+      "}" +
+    '" "$STATE_PATH"',
     '  node -e "' +
       "const fs=require('fs');" +
       "const f=process.argv[2];" +
@@ -1351,6 +1405,7 @@ function setupConflictRepo(options?: { resolveWithMerger?: boolean }) {
     '    exit 0',
     '  fi',
     'fi',
+    'printf "VERDICT: PASS\\n"',
     'exit 0',
   ].join('\n');
   fs.writeFileSync(path.join(binDir, 'claude'), mockClaude);
@@ -1641,14 +1696,14 @@ test('US-008: ralph-state.json includes interruptedStoryId field', { timeout: 15
 
 // ─── US-004 (Epic Timeout) Tests ──────────────────────────────────────────────
 
-test('US-004 (timeout): epic is killed and marked failed after RALPH_EPIC_TIMEOUT seconds', { timeout: 15000 }, () => {
+test('US-004 (timeout): epic is killed and marked failed after RALPH_EPIC_TIMEOUT seconds', { timeout: 10000 }, () => {
   const { tempDir, env } = setupMultiEpicRepo(
     [{ id: 'EPIC-001', title: 'Alpha' }],
     {},  // No PRD progress — mock will hang
   );
-  // Make mock agent hang (sleep 30) and set a very short timeout (2s)
+  // Make mock agent hang (sleep 5) and set a very short timeout (1s)
   env['MOCK_HANG_EPIC_001'] = '1';
-  env['RALPH_EPIC_TIMEOUT'] = '2';
+  env['RALPH_EPIC_TIMEOUT'] = '1';
 
   const start = Date.now();
   const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
@@ -1667,16 +1722,16 @@ test('US-004 (timeout): epic is killed and marked failed after RALPH_EPIC_TIMEOU
   assert.equal(prd.epics[0].status, 'failed', `Expected failed status, got: ${prd.epics[0].status}`);
 
   // TIMED OUT message should appear in stdout
-  assert.match(result.stdout, /\[EPIC-001\] TIMED OUT after 2s/);
+  assert.match(result.stdout, /\[EPIC-001\] TIMED OUT after 1s/);
 });
 
-test('US-004 (timeout): timeout event is logged to progress.txt', { timeout: 15000 }, () => {
+test('US-004 (timeout): timeout event is logged to progress.txt', { timeout: 10000 }, () => {
   const { tempDir, env } = setupMultiEpicRepo(
     [{ id: 'EPIC-001', title: 'Alpha' }],
     {},
   );
   env['MOCK_HANG_EPIC_001'] = '1';
-  env['RALPH_EPIC_TIMEOUT'] = '2';
+  env['RALPH_EPIC_TIMEOUT'] = '1';
 
   spawnSync(BASH, [scriptPath, 'prd.json'], {
     cwd: tempDir,
@@ -1686,16 +1741,16 @@ test('US-004 (timeout): timeout event is logged to progress.txt', { timeout: 150
   });
 
   const progress = fs.readFileSync(path.join(tempDir, '.ralph-teams', 'progress.txt'), 'utf-8');
-  assert.match(progress, /\[EPIC-001\] FAILED \(epic timeout after 2s\)/);
+  assert.match(progress, /\[EPIC-001\] FAILED \(epic timeout after 1s\)/);
 });
 
-test('US-004 (timeout): timed-out epic log file contains timeout message', { timeout: 15000 }, () => {
+test('US-004 (timeout): timed-out epic log file contains timeout message', { timeout: 10000 }, () => {
   const { tempDir, env } = setupMultiEpicRepo(
     [{ id: 'EPIC-001', title: 'Alpha' }],
     {},
   );
   env['MOCK_HANG_EPIC_001'] = '1';
-  env['RALPH_EPIC_TIMEOUT'] = '2';
+  env['RALPH_EPIC_TIMEOUT'] = '1';
 
   spawnSync(BASH, [scriptPath, 'prd.json'], {
     cwd: tempDir,
@@ -1710,7 +1765,7 @@ test('US-004 (timeout): timed-out epic log file contains timeout message', { tim
   assert.ok(logFiles.length > 0, 'should have a log file for EPIC-001');
 
   const logContent = fs.readFileSync(path.join(logsDir, logFiles[0]), 'utf-8');
-  assert.match(logContent, /TIMEOUT: Epic exceeded 2s limit/);
+  assert.match(logContent, /TIMEOUT: Epic exceeded 1s limit/);
 });
 
 test('US-004 (timeout): with two independent epics, one times out and the other completes', { timeout: 15000 }, () => {
@@ -1723,7 +1778,7 @@ test('US-004 (timeout): with two independent epics, one times out and the other 
   );
   // EPIC-001 hangs, EPIC-002 completes normally; short timeout
   env['MOCK_HANG_EPIC_001'] = '1';
-  env['RALPH_EPIC_TIMEOUT'] = '2';
+  env['RALPH_EPIC_TIMEOUT'] = '1';
 
   const result = spawnSync(BASH, [scriptPath, 'prd.json', '--parallel', '2'], {
     cwd: tempDir,
@@ -1755,7 +1810,7 @@ function setupIdleTimeoutRepo(
   const binDir = path.join(tempDir, 'bin');
   fs.mkdirSync(binDir);
 
-  // Mock claude: if MOCK_SILENT_<EPIC_ID> is set, sleep 30 without writing any output.
+  // Mock claude: if MOCK_SILENT_<EPIC_ID> is set, sleep 5 without writing any output.
   // Otherwise, if MOCK_RESULT_<EPIC_ID> is set, update prd.json.
   // The key difference from setupMultiEpicRepo: silent mode writes nothing to stdout,
   // so the log file has no output (simulating an idle/stuck agent).
@@ -1763,6 +1818,7 @@ function setupIdleTimeoutRepo(
     '#!/bin/sh',
     'STDIN=$(cat)',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
+    'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
     'if [ -n "$EPIC_ID" ]; then',
     '  SILENT_KEY="MOCK_SILENT_$(printf "%s" "$EPIC_ID" | tr - _)"',
@@ -1771,9 +1827,20 @@ function setupIdleTimeoutRepo(
     '  RESULT_VAL=$(printenv "$RESULT_KEY" 2>/dev/null || true)',
     '  if [ "$SILENT_VAL" = "1" ]; then',
     '    # Sleep without writing any output — simulates idle/stuck agent',
-    '    sleep 30',
+    '    sleep 5',
     '  elif [ -n "$RESULT_VAL" ]; then',
     '    if [ "$RESULT_VAL" = "PASS" ]; then',
+    '      node -e "' +
+      "const fs=require('fs');" +
+      "const f=process.argv[1];" +
+      "if (f && fs.existsSync(f)) {" +
+      " const s=JSON.parse(fs.readFileSync(f,'utf8'));" +
+      " for (const v of Object.values(s.stories||{})) { v.passes=true; v.failureReason=null; }" +
+      " const t=f+'.tmp.'+process.pid;" +
+      " fs.writeFileSync(t,JSON.stringify(s,null,2)+'\\n');" +
+      " fs.renameSync(t,f);" +
+      "}" +
+    '" "$STATE_PATH"',
     '      node -e "' +
       "const fs=require('fs');" +
       "const f=process.argv[2];" +
@@ -1786,6 +1853,8 @@ function setupIdleTimeoutRepo(
     '" "$EPIC_ID" "$PRD_PATH"',
     '    fi',
     '  fi',
+    'else',
+    '  printf "VERDICT: PASS\\n"',
     'fi',
     'exit 0',
   ].join('\n');
@@ -1823,13 +1892,13 @@ function setupIdleTimeoutRepo(
   return { tempDir, binDir, env };
 }
 
-test('US-005 (idle timeout): idle epic is killed and marked failed after RALPH_IDLE_TIMEOUT seconds', { timeout: 15000 }, () => {
+test('US-005 (idle timeout): idle epic is killed and marked failed after RALPH_IDLE_TIMEOUT seconds', { timeout: 10000 }, () => {
   const { tempDir, env } = setupIdleTimeoutRepo(
     [{ id: 'EPIC-001', title: 'Alpha' }],
   );
   // Make mock agent sleep silently (no output) — triggers idle timeout
   env['MOCK_SILENT_EPIC_001'] = '1';
-  env['RALPH_IDLE_TIMEOUT'] = '2';
+  env['RALPH_IDLE_TIMEOUT'] = '1';
 
   const start = Date.now();
   const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
@@ -1840,7 +1909,7 @@ test('US-005 (idle timeout): idle epic is killed and marked failed after RALPH_I
   });
   const elapsed = Date.now() - start;
 
-  // Should finish well before the 30s mock hang (killed by idle timeout after ~2s)
+  // Should finish well before the mock hang (killed by idle timeout after ~1s)
   assert.ok(elapsed < 10000, `Expected to finish quickly after idle timeout, took ${elapsed}ms`);
 
   // Epic should be marked as failed in PRD
@@ -1848,15 +1917,15 @@ test('US-005 (idle timeout): idle epic is killed and marked failed after RALPH_I
   assert.equal(prd.epics[0].status, 'failed', `Expected failed status, got: ${prd.epics[0].status}`);
 
   // IDLE TIMEOUT message should appear in stdout
-  assert.match(result.stdout, /\[EPIC-001\] IDLE TIMEOUT — no output for 2s/);
+  assert.match(result.stdout, /\[EPIC-001\] IDLE TIMEOUT — no output for 1s/);
 });
 
-test('US-005 (idle timeout): GNU stat -f output does not break log mtime parsing', { timeout: 15000 }, () => {
+test('US-005 (idle timeout): GNU stat -f output does not break log mtime parsing', { timeout: 10000 }, () => {
   const { tempDir, binDir, env } = setupIdleTimeoutRepo(
     [{ id: 'EPIC-001', title: 'Alpha' }],
   );
   env['MOCK_SILENT_EPIC_001'] = '1';
-  env['RALPH_IDLE_TIMEOUT'] = '2';
+  env['RALPH_IDLE_TIMEOUT'] = '1';
 
   const mockStat = [
     '#!/bin/sh',
@@ -1884,12 +1953,12 @@ test('US-005 (idle timeout): GNU stat -f output does not break log mtime parsing
   assert.equal(prd.epics[0].status, 'failed', `Expected failed status, got: ${prd.epics[0].status}`);
 });
 
-test('US-005 (idle timeout): idle timeout event is logged to progress.txt', { timeout: 15000 }, () => {
+test('US-005 (idle timeout): idle timeout event is logged to progress.txt', { timeout: 10000 }, () => {
   const { tempDir, env } = setupIdleTimeoutRepo(
     [{ id: 'EPIC-001', title: 'Alpha' }],
   );
   env['MOCK_SILENT_EPIC_001'] = '1';
-  env['RALPH_IDLE_TIMEOUT'] = '2';
+  env['RALPH_IDLE_TIMEOUT'] = '1';
 
   spawnSync(BASH, [scriptPath, 'prd.json'], {
     cwd: tempDir,
@@ -1899,7 +1968,7 @@ test('US-005 (idle timeout): idle timeout event is logged to progress.txt', { ti
   });
 
   const progress = fs.readFileSync(path.join(tempDir, '.ralph-teams', 'progress.txt'), 'utf-8');
-  assert.match(progress, /\[EPIC-001\] FAILED \(idle timeout — no output for 2s\)/);
+  assert.match(progress, /\[EPIC-001\] FAILED \(idle timeout — no output for 1s\)/);
 });
 
 test('US-005 (idle timeout): with two epics, only idle one is killed while active one completes', { timeout: 15000 }, () => {
@@ -1912,7 +1981,7 @@ test('US-005 (idle timeout): with two epics, only idle one is killed while activ
   );
   // EPIC-001 is silent (idle), EPIC-002 writes output and completes
   env['MOCK_SILENT_EPIC_001'] = '1';
-  env['RALPH_IDLE_TIMEOUT'] = '2';
+  env['RALPH_IDLE_TIMEOUT'] = '1';
 
   const result = spawnSync(BASH, [scriptPath, 'prd.json', '--parallel', '2'], {
     cwd: tempDir,
