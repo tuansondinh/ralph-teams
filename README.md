@@ -26,59 +26,28 @@ ralph-teams plan
 
 ## Flow
 
+This diagram shows the default `balanced` workflow only.
+
 ```mermaid
-flowchart TB
-    subgraph Setup
-        A[Validate PRD & tools] --> B[Create loop branch]
-    end
-
-    subgraph Epic["Epic Loop"]
-        C[Pick ready epic] --> D[Create worktree & branch]
-        D --> E[Start agent team]
-
-        E --> F{Epic planning?}
-        F -->|Yes| G[Epic planner]
-        F -->|No| H[Build stories]
-        G --> H
-
-        H --> I{More stories?}
-        I -->|Yes| H
-        I -->|No| J{Epic validation?}
-
-        J -->|Yes| K[Epic validator]
-        J -->|No| L[Merge to loop]
-
-        K --> M{Pass?}
-        M -->|Yes| L
-        M -->|No| N{Fix cycles?}
-        N -->|Yes| O[Builder fixes]
-        N -->|No| P[Log failure]
-        O --> K
-
-        L --> Q{Conflict?}
-        Q -->|Yes| R[Merger agent]
-        Q -->|No| S[Epic done]
-        R --> S
-    end
-
-    subgraph Final
-        T{Final validation?}
-        T -->|Yes| U[Final validator]
-        T -->|No| V[Finish]
-
-        U --> W{Pass?}
-        W -->|Yes| V
-        W -->|No| X{Fix cycles?}
-        X -->|Yes| Y[Builder fixes]
-        X -->|No| Z[Log failure]
-        Y --> U
-    end
-
-    B --> C
-    S --> AA{More epics?}
-    AA -->|Yes| C
-    AA -->|No| T
+flowchart TD
+    A[Start run] --> B[Validate PRD and create loop branch]
+    B --> C[Pick ready epic]
+    C --> D[Create worktree and epic branch]
+    D --> E[Optional epic planner]
+    E --> F[Team Lead runs stories with builder]
+    F --> G[Optional epic validator]
+    G --> H[Merge epic branch]
+    H --> I[If needed, run merger]
+    I --> J{More epics?}
+    J -->|Yes| C
+    J -->|No| K[If 2+ epics and enabled, run final validator]
+    K --> L[Finish]
 ```
+
+Other presets:
+
+- `full`: adds optional story planner and optional story validator decisions inside each epic.
+- `minimal`: disables planner and validator subagent stages. The Team Lead still coordinates builders and records per-story pass/fail results.
 
 ## What It Does
 
@@ -96,9 +65,9 @@ The system has two layers:
   - `merger` resolves merge conflicts when they occur
 
 Scoped planning and validation are configurable via `ralph.config.yml`. Workflow presets provide sensible defaults:
-- `balanced`: epic planning + epic validation enabled, plus final validation for multi-epic runs
-- `full`: all planning and validation toggles enabled
-- `minimal`: all planning and validation toggles disabled
+- `balanced`: epic planning enabled, heuristic epic validation enabled, plus final validation for multi-epic runs
+- `full`: `balanced`, plus story planning and heuristic story validation
+- `minimal`: planning and validation toggles disabled; no planner or validator subagents are spawned
 
 Across all backends, `builder` work is one-shot per attempt. A build attempt only counts when the Builder returns a concrete commit SHA and the Team Lead persists the story result to the epic state file at `.ralph-teams/state/{epic-id}.json`.
 
@@ -242,9 +211,9 @@ Prompts for:
 - Agent model overrides (optional)
 
 Workflow presets:
-- `balanced`: epic planning + epic validation enabled, plus final validation for multi-epic runs
-- `full`: all planning and validation toggles enabled
-- `minimal`: all planning and validation toggles disabled
+- `balanced`: epic planning enabled, heuristic epic validation enabled, plus final validation for multi-epic runs
+- `full`: `balanced`, plus story planning and heuristic story validation
+- `minimal`: planning and validation toggles disabled; no planner or validator subagents are spawned
 
 ### `ralph-teams init`
 
