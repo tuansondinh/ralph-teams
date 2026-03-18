@@ -1,7 +1,7 @@
 # ralph-teams
 
 
-`ralph-teams` is a CLI for running Ralph Teams: a shell-based orchestrator that initializes and reads a `prd.json`, loops through epics (not user stories), and spawns AI coding agent teams to implement work story by story. One Agent Team per Epic with fresh context. Ralph-Teams can even work on multiple epics in parallel, if there are no dependencies
+`ralph-teams` is a lightweight and budgetfriendly CLI for running Ralph Teams: a shell-based orchestrator that initializes and reads a `prd.json`, loops through epics (not user stories), and spawns AI coding agent teams to implement work story by story. One Agent Team per Epic with fresh context. Ralph-Teams can even work on multiple epics in parallel, if there are no dependencies
 ```bash
 ralph-teams run --parallel={max_parallel_epics}
 ```
