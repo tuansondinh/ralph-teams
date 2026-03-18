@@ -220,6 +220,9 @@ test('rjq helper re-resolves to a working binary when the cached path is stale',
     `PATH="${binDir}:${process.env.PATH ?? ''}"`,
     `SCRIPT_DIR="${tempDir}"`,
     'command() {',
+    '  if [ "$1" = "-v" ] && { [ "$2" = "realpath" ] || [ "$2" = "readlink" ] || [ "$2" = "ralph-teams" ]; }; then',
+    '    return 1',
+    '  fi',
     '  if [ "$1" = "-v" ] && [ "$2" = "node" ]; then',
     '    return 1',
     '  fi',
@@ -262,6 +265,9 @@ test('resolve_rjq_bin falls back to the node sibling bin when PATH lacks rjq', (
     `SCRIPT_DIR="${tempDir}"`,
     `PATH="${process.env.PATH ?? ''}"`,
     'command() {',
+    '  if [ "$1" = "-v" ] && { [ "$2" = "realpath" ] || [ "$2" = "readlink" ] || [ "$2" = "ralph-teams" ]; }; then',
+    '    return 1',
+    '  fi',
     '  if [ "$1" = "-v" ] && [ "$2" = "node" ]; then',
     `    printf '%s\\n' "${fakeNodeBinDir}/node"`,
     '    return 0',
@@ -283,6 +289,72 @@ test('resolve_rjq_bin falls back to the node sibling bin when PATH lacks rjq', (
 
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
   assert.match(result.stdout, /NODEBIN:read sample\.json \.value/);
+});
+
+test('resolve_rjq_bin falls back to the ralph-teams sibling bin when node and PATH rjq are unavailable', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-rjq-ralph-bin-'));
+  const fakeGlobalBinDir = path.join(tempDir, 'global-bin');
+  fs.mkdirSync(fakeGlobalBinDir);
+
+  const fallbackRjq = [
+    '#!/bin/sh',
+    'printf "RALPHBIN:%s\\n" "$*"',
+  ].join('\n');
+  fs.writeFileSync(path.join(fakeGlobalBinDir, 'rjq'), fallbackRjq);
+  fs.chmodSync(path.join(fakeGlobalBinDir, 'rjq'), 0o755);
+
+  const fakeRalphTeams = [
+    '#!/bin/sh',
+    'exit 0',
+  ].join('\n');
+  fs.writeFileSync(path.join(fakeGlobalBinDir, 'ralph-teams'), fakeRalphTeams);
+  fs.chmodSync(path.join(fakeGlobalBinDir, 'ralph-teams'), 0o755);
+
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+  const resolveMatch = script.match(/resolve_rjq_bin\(\) \{[\s\S]*?^}/m);
+  const rjqMatch = script.match(/rjq\(\) \{[\s\S]*?^}/m);
+
+  assert.ok(resolveMatch, 'expected resolve_rjq_bin to exist in ralph.sh');
+  assert.ok(rjqMatch, 'expected rjq helper to exist in ralph.sh');
+
+  const result = spawnSync(BASH, ['-c', [
+    `SCRIPT_DIR="${tempDir}"`,
+    `FAKE_RALPH_BIN="${path.join(fakeGlobalBinDir, 'ralph-teams')}"`,
+    `PATH="${process.env.PATH ?? ''}"`,
+    'command() {',
+    '  if [ "$1" = "-v" ] && { [ "$2" = "realpath" ] || [ "$2" = "readlink" ]; }; then',
+    '    return 1',
+    '  fi',
+    '  if [ "$1" = "-v" ] && [ "$2" = "node" ]; then',
+    '    return 1',
+    '  fi',
+    '  if [ "$1" = "-v" ] && [ "$2" = "ralph-teams" ]; then',
+    '    printf "%s\\n" "$FAKE_RALPH_BIN"',
+    '    return 0',
+    '  fi',
+    '  if [ "$1" = "-v" ] && [ "$2" = "rjq" ]; then',
+    '    return 1',
+    '  fi',
+    '  builtin command "$@"',
+    '}',
+    'type() {',
+    '  if [ "$1" = "-P" ] && [ "$2" = "rjq" ]; then',
+    '    return 1',
+    '  fi',
+    '  builtin type "$@"',
+    '}',
+    'RJQ_BIN=""',
+    resolveMatch[0],
+    rjqMatch[0],
+    'rjq read sample.json .value',
+  ].join('\n')], {
+    cwd: tempDir,
+    encoding: 'utf-8',
+    env: { ...process.env },
+  });
+
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.match(result.stdout, /RALPHBIN:read sample\.json \.value/);
 });
 
 test('US-001: sequential mode processes one independent epic per iteration', () => {

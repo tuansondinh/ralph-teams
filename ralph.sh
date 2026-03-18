@@ -118,6 +118,9 @@ resolve_rjq_bin() {
   local candidates=()
   local script_realpath=""
   local script_real_dir=""
+  local ralph_bin_path=""
+  local ralph_realpath=""
+  local ralph_real_dir=""
 
   if [ -n "${RALPH_RJQ_BIN:-}" ]; then
     candidates+=("${RALPH_RJQ_BIN}")
@@ -131,6 +134,25 @@ resolve_rjq_bin() {
 
   if [ -n "$script_realpath" ]; then
     script_real_dir="$(cd "$(dirname "$script_realpath")" && pwd)"
+  fi
+
+  if command -v ralph-teams >/dev/null 2>&1; then
+    ralph_bin_path="$(command -v ralph-teams 2>/dev/null || true)"
+  fi
+
+  if [ -n "$ralph_bin_path" ]; then
+    candidates+=("$(cd "$(dirname "$ralph_bin_path")" && pwd)/rjq")
+
+    if command -v realpath >/dev/null 2>&1; then
+      ralph_realpath="$(realpath "$ralph_bin_path" 2>/dev/null || true)"
+    elif command -v readlink >/dev/null 2>&1; then
+      ralph_realpath="$(readlink "$ralph_bin_path" 2>/dev/null || true)"
+    fi
+
+    if [ -n "$ralph_realpath" ]; then
+      ralph_real_dir="$(cd "$(dirname "$ralph_realpath")" && pwd)"
+      candidates+=("${ralph_real_dir}/json-tool.js")
+    fi
   fi
 
   candidates+=(
