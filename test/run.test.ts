@@ -14,7 +14,7 @@ function createRunDeps(overrides: Partial<Parameters<typeof runCommand>[2]> = {}
   return {
     existsSync: fs.existsSync,
     chmodSync: fs.chmodSync,
-    unlinkSync: fs.unlinkSync,
+    rmSync: fs.rmSync,
     spawnSync: () => ({ status: 0 }) as ReturnType<NonNullable<Parameters<typeof runCommand>[2]>['spawnSync']>,
     exit: (code?: number) => {
       throw new ExitSignal(code);
@@ -152,24 +152,31 @@ test('runCommand passes configured timeout env vars to ralph.sh', async () => {
   assert.equal(capturedEnv?.RALPH_LOOP_TIMEOUT, '33');
 });
 
-test('runCommand removes stale ralph-state.json before a fresh run', async () => {
+test('runCommand removes stale Ralph runtime artifacts before a fresh run', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
   const prdPath = path.join(tempDir, 'prd.json');
   fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
-  const stateFile = path.join(tempDir, '.ralph-teams', 'ralph-state.json');
+  const runtimeDir = path.join(tempDir, '.ralph-teams');
+  const stateFile = path.join(runtimeDir, 'ralph-state.json');
+  const planFile = path.join(runtimeDir, 'plans', 'plan-EPIC-001.md');
+  const logFile = path.join(runtimeDir, 'logs', 'epic-EPIC-001.log');
   fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.mkdirSync(path.dirname(planFile), { recursive: true });
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
   fs.writeFileSync(stateFile, JSON.stringify({ sourceBranch: 'stale' }));
+  fs.writeFileSync(planFile, '# stale plan\n');
+  fs.writeFileSync(logFile, 'stale log\n');
 
   const tempRalphSh = path.join(tempDir, 'ralph.sh');
   fs.writeFileSync(tempRalphSh, '#!/bin/sh\n');
 
-  let unlinkedPath: string | undefined;
+  let removedPath: string | undefined;
   const deps = createRunDeps({
     existsSync: (target: fs.PathLike) => fs.existsSync(target),
-    unlinkSync: ((target: fs.PathLike) => {
-      unlinkedPath = String(target);
-      fs.unlinkSync(target);
-    }) as typeof fs.unlinkSync,
+    rmSync: ((target: fs.PathLike, options?: fs.RmOptions) => {
+      removedPath = String(target);
+      fs.rmSync(target, options);
+    }) as typeof fs.rmSync,
     spawnSync: (() => ({ status: 0 })) as NonNullable<Parameters<typeof runCommand>[2]>['spawnSync'],
     chmodSync: (() => {}) as typeof fs.chmodSync,
     cwd: () => tempDir,
@@ -181,8 +188,8 @@ test('runCommand removes stale ralph-state.json before a fresh run', async () =>
     return true;
   });
 
-  assert.equal(unlinkedPath, stateFile);
-  assert.equal(fs.existsSync(stateFile), false, 'stale state file should be removed before run');
+  assert.equal(removedPath, runtimeDir);
+  assert.equal(fs.existsSync(runtimeDir), false, 'stale runtime dir should be removed before run');
 });
 
 test('runCommand with --parallel passes flag to ralph.sh', async () => {

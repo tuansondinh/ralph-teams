@@ -3,13 +3,13 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import chalk from 'chalk';
 import { loadConfig, loadExplicitAgentModelOverrides, mergeCliOverrides } from '../config';
-import { getRalphStatePath } from '../runtime-paths';
+import { getRalphRuntimeDir } from '../runtime-paths';
 import packageJson from '../../package.json';
 
 interface RunDeps {
   existsSync: typeof fs.existsSync;
   chmodSync: typeof fs.chmodSync;
-  unlinkSync: typeof fs.unlinkSync;
+  rmSync: typeof fs.rmSync;
   spawnSync: typeof spawnSync;
   exit: (code?: number) => never;
   cwd: () => string;
@@ -21,7 +21,7 @@ interface RunDeps {
 const defaultDeps: RunDeps = {
   existsSync: fs.existsSync,
   chmodSync: fs.chmodSync,
-  unlinkSync: fs.unlinkSync,
+  rmSync: fs.rmSync,
   spawnSync,
   exit: (code?: number) => process.exit(code),
   cwd: () => process.cwd(),
@@ -65,7 +65,8 @@ export async function runCommand(
   deps: RunDeps = defaultDeps,
 ): Promise<void> {
   const resolved = path.resolve(prdPath);
-  const stateFile = getRalphStatePath(path.dirname(resolved));
+  const projectRoot = path.dirname(resolved);
+  const runtimeDir = getRalphRuntimeDir(projectRoot);
   const parallel = options.parallel;
 
   if (!deps.existsSync(resolved)) {
@@ -194,13 +195,13 @@ export async function runCommand(
     RALPH_MODEL_MERGER_EXPLICIT: explicitAgentOverrides?.merger !== undefined ? '1' : '0',
   };
 
-  if (deps.existsSync(stateFile)) {
+  if (deps.existsSync(runtimeDir)) {
     try {
-      deps.unlinkSync(stateFile);
-      console.log(chalk.dim(`Removed stale resume state: ${stateFile}`));
+      deps.rmSync(runtimeDir, { recursive: true, force: true });
+      console.log(chalk.dim(`Removed stale Ralph runtime artifacts: ${runtimeDir}`));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(chalk.red(`Error: failed to remove stale Ralph resume state: ${msg}`));
+      console.error(chalk.red(`Error: failed to remove stale Ralph runtime artifacts: ${msg}`));
       deps.exit(1);
     }
   }
