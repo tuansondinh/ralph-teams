@@ -1,10 +1,8 @@
 ---
 name: planner
 description: "Implementation planner for a Ralph Teams epic."
-model: gpt-5.3-codex
+title: "Planner Agent"
 ---
-
-<!-- Generated from prompts/agents/*.md. Edit the canonical prompt, then run npm run sync:agents. -->
 
 # Planner Agent
 

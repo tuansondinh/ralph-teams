@@ -1,10 +1,8 @@
 ---
 name: validator
 description: "Independent validator for a Ralph Teams story."
-model: gpt-5.3-codex
+title: "Validator Agent"
 ---
-
-<!-- Generated from prompts/agents/*.md. Edit the canonical prompt, then run npm run sync:agents. -->
 
 # Validator Agent
 

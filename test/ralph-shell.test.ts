@@ -13,8 +13,21 @@ const scriptPath = path.join(repoRoot, 'ralph.sh');
 // so we use the Homebrew bash 5 if available, otherwise fall back to PATH resolution.
 const BASH = fs.existsSync('/opt/homebrew/bin/bash') ? '/opt/homebrew/bin/bash' : 'bash';
 
+function readMarkdownPromptBody(relativePath: string): string {
+  const content = fs.readFileSync(path.join(repoRoot, relativePath), 'utf-8');
+  return content.replace(/^---\n[\s\S]*?\n---\n\n(?:<!--.*?-->\n\n)?/, '').trim();
+}
+
+function readCodexPromptBody(relativePath: string): string {
+  const content = fs.readFileSync(path.join(repoRoot, relativePath), 'utf-8');
+  const match = content.match(/developer_instructions = """\n([\s\S]*?)\n"""/);
+  assert.ok(match, `${relativePath} should contain developer_instructions`);
+  return match[1].trim();
+}
+
 test('planner prompt assets require writing the epic plan markdown file', () => {
   const promptFiles = [
+    'prompts/agents/planner.md',
     '.opencode/agents/planner.md',
     '.codex/agents/planner.toml',
     '.github/agents/planner.agent.md',
@@ -43,6 +56,7 @@ test('planner prompt assets require writing the epic plan markdown file', () => 
 
 test('planner prompt assets require designing story-level tests', () => {
   const promptFiles = [
+    'prompts/agents/planner.md',
     '.opencode/agents/planner.md',
     '.codex/agents/planner.toml',
     '.github/agents/planner.agent.md',
@@ -62,6 +76,7 @@ test('planner prompt assets require designing story-level tests', () => {
 
 test('planner prompt assets require design-level plans instead of code dumps', () => {
   const promptFiles = [
+    'prompts/agents/planner.md',
     '.opencode/agents/planner.md',
     '.codex/agents/planner.toml',
     '.github/agents/planner.agent.md',
@@ -86,6 +101,7 @@ test('planner prompt assets require design-level plans instead of code dumps', (
 
 test('builder prompt assets require reading the epic plan markdown file', () => {
   const promptFiles = [
+    'prompts/agents/builder.md',
     '.opencode/agents/builder.md',
     '.codex/agents/builder.toml',
     '.github/agents/builder.agent.md',
@@ -109,6 +125,7 @@ test('builder prompt assets require reading the epic plan markdown file', () => 
 
 test('builder prompt assets require test creation and TDD fallback when planning is skipped', () => {
   const promptFiles = [
+    'prompts/agents/builder.md',
     '.opencode/agents/builder.md',
     '.codex/agents/builder.toml',
     '.github/agents/builder.agent.md',
@@ -128,6 +145,18 @@ test('builder prompt assets require test creation and TDD fallback when planning
       /TDD|define.*tests first|make them fail/i,
       `${relativePath} should require TDD fallback when no planner is used`,
     );
+  }
+});
+
+test('generated worker agent prompts stay in sync with canonical shared prompts', () => {
+  const roles = ['planner', 'builder', 'validator', 'merger'];
+
+  for (const role of roles) {
+    const canonical = readMarkdownPromptBody(`prompts/agents/${role}.md`);
+    assert.equal(readMarkdownPromptBody(`.claude/agents/${role}.md`), canonical);
+    assert.equal(readMarkdownPromptBody(`.opencode/agents/${role}.md`), canonical);
+    assert.equal(readMarkdownPromptBody(`.github/agents/${role}.agent.md`), canonical);
+    assert.equal(readCodexPromptBody(`.codex/agents/${role}.toml`), canonical);
   }
 });
 

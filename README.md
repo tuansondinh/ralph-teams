@@ -74,6 +74,7 @@ Current backends:
 - `claude` via the `claude` CLI and `.claude/agents/*.md`
 - `copilot` via `gh copilot` and `.github/agents/*.agent.md`
 - `codex` via the `codex` CLI, repo-local `.codex/agents/*.toml`, and Codex multi-agent mode
+- shared worker-agent prompt source in `prompts/agents/*.md`, rendered to those backend-specific files via `npm run sync:agents`
 
 The runtime is file-based. During a run, Ralph treats these files as the working state of the system:
 
@@ -357,6 +358,7 @@ Shows:
 Uses:
 
 - `claude` CLI
+- canonical worker prompts in `prompts/agents/`
 - `.claude/agents/`
 - structured JSON streaming from the Claude CLI
 
@@ -371,6 +373,7 @@ Example:
 Uses:
 
 - `gh copilot`
+- canonical worker prompts in `prompts/agents/`
 - `.github/agents/`
 - PTY-backed execution so live Copilot output is visible during runs
 
@@ -391,6 +394,7 @@ Notes:
 Uses:
 
 - `codex exec`
+- canonical worker prompts in `prompts/agents/`
 - `.codex/agents/*.toml`
 - Codex multi-agent mode with repo-local planner, builder, and validator roles
 
@@ -406,6 +410,7 @@ Notes:
 - Codex runs from each epic worktree and is granted write access to the repo root so it can update the shared PRD
 - Codex does not use a separate repo-local Team Lead role file; the Team Lead policy comes from the runtime prompt assembled in `ralph.sh`, while `.codex/agents/*.toml` define the spawned planner, builder, validator, and merger roles
 - Codex follows the same one-shot story-scoped Builder/Validator contract as Claude and Copilot; the runtime prompt in `ralph.sh` enforces that policy for Codex Team Leads
+- Edit `prompts/agents/*.md` and run `npm run sync:agents` to regenerate the backend-specific worker agent files
 
 ## PRD Format
 

@@ -1,8 +1,9 @@
-# Generated from prompts/agents/*.md. Edit the canonical prompt, then run npm run sync:agents.
-name = "merger"
-description = "Merge specialist for Ralph Teams epic branches."
-sandbox_mode = "workspace-write"
-developer_instructions = """
+---
+name: merger
+description: "Merge specialist for Ralph Teams epic branches."
+title: "Merger Agent"
+---
+
 # Merger Agent
 
 You are the merge specialist. Your job is to merge an epic branch back to its target branch and resolve conflicts safely when needed.
@@ -42,4 +43,3 @@ You will receive:
 - Your final line must be exactly one of:
   - `MERGE_SUCCESS`
   - `MERGE_FAILED`
-"""

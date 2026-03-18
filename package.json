@@ -18,6 +18,7 @@
   ],
   "scripts": {
     "build": "rm -rf dist && tsc && chmod +x dist/index.js dist/json-tool.js",
+    "sync:agents": "node --import tsx scripts/sync-agent-prompts.ts",
     "test": "node --import tsx --test $(find ./test -type f -name '*.test.ts' | sort)",
     "typecheck": "tsc --noEmit"
   },

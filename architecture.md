@@ -316,6 +316,7 @@ This makes failure modes inspectable after the fact because evidence is left on 
 
 ### Backend role definitions
 
+- `prompts/agents/`
 - `.claude/agents/`
 - `.github/agents/`
 - `.codex/agents/`
@@ -323,6 +324,8 @@ This makes failure modes inspectable after the fact because evidence is left on 
 For Codex specifically, `.codex/agents/` defines the spawned teammate roles. The Codex Team Lead policy itself is injected by `ralph.sh` at runtime rather than coming from a separate `.codex/agents/team-lead.toml` file.
 
 For Claude and Copilot, the Team Lead contract lives in `.claude/agents/team-lead.md` and `.github/agents/team-lead.agent.md`. All three backends now share the same coordination rule: Builder and Validator are one-shot story-scoped workers, not persistent teammates reused across stories.
+
+The worker-role instruction bodies are canonicalized in `prompts/agents/*.md` and rendered into the backend-specific agent files. The backend directories remain the runtime contract, but contributors should edit the canonical prompts and regenerate the rendered files instead of hand-editing every backend copy.
 
 ### Tests
 
