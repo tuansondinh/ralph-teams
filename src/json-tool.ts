@@ -546,6 +546,43 @@ function cmdExtractStreamText(): void {
           }
         }
       }
+      return;
+    }
+
+    const extractNestedMessage = (value: unknown): string | null => {
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        return null;
+      }
+      const nested = value as Record<string, unknown>;
+      if (typeof nested['message'] === 'string' && nested['message'].trim() !== '') {
+        return nested['message'];
+      }
+      return null;
+    };
+
+    const directError = extractNestedMessage(record['error']);
+    if (directError !== null) {
+      process.stdout.write(`ERROR: ${directError}\n`);
+      return;
+    }
+
+    const dataError = extractNestedMessage(record['data']);
+    if (dataError !== null) {
+      process.stdout.write(`ERROR: ${dataError}\n`);
+      return;
+    }
+
+    if (typeof record['responseBody'] === 'string') {
+      try {
+        const responseParsed = JSON.parse(record['responseBody']);
+        const responseError = extractNestedMessage((responseParsed as Record<string, unknown>)['error']);
+        if (responseError !== null) {
+          process.stdout.write(`ERROR: ${responseError}\n`);
+          return;
+        }
+      } catch {
+        // ignore malformed nested response bodies
+      }
     }
   }
 }

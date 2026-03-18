@@ -665,7 +665,7 @@ emit_new_log_output() {
               | while IFS= read -r text_line; do
                   [ -n "$text_line" ] && echo "  [$epic_id] $text_line"
                 done
-          elif [ "$STREAM_FORMAT" = "text" ]; then
+          elif [ "$STREAM_FORMAT" = "text" ] || [ "$BACKEND" = "opencode" ]; then
             if [ "$BACKEND" = "codex" ] && is_codex_noise_line "$log_line"; then
               continue
             fi
