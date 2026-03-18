@@ -178,9 +178,10 @@ Run `ralph.sh` directly when you want shell-level flags:
 
 ### `ralph-teams init`
 
-Creates a new `prd.json` interactively in the current directory by launching an AI PRD-creator session. If `ralph.config.yml` does not already exist, `init` also creates it as a commented default template.
+Creates a new `prd.json` interactively in the current directory by launching an AI PRD-creator session. If `ralph.config.yml` does not already exist, `init` first runs interactive setup so you can configure Ralph for the repository.
 
 ```bash
+ralph-teams setup
 ralph-teams init
 ralph-teams init --backend claude
 ralph-teams init --backend copilot
@@ -193,7 +194,7 @@ Flow:
 2. the agent discusses the product with you directly
 3. the agent asks follow-up questions until the requirements are clear
 4. the agent generates the full `prd.json` with project metadata, epics, and user stories
-5. `init` bootstraps `./ralph.config.yml` with the default commented configuration if the file is missing
+5. if `./ralph.config.yml` is missing, `init` first runs `ralph-teams setup` interactively and writes the chosen config
 6. the agent writes `./prd.json`
 7. after writing the PRD, the init agent can either continue into implementation planning with you or stop there if you want to skip planning for now
 
@@ -201,9 +202,10 @@ Notes:
 
 - `init` is grounded by `prd.json.example`
 - `init` does not overwrite an existing `ralph.config.yml`
+- `setup` lets you choose the default backend, workflow preset, parallelism, and optional per-role model overrides
 - the agent generates epics and user stories automatically
 - the agent should aim for about 5 user stories per epic when the scope supports it
-- `--backend` controls whether the interview/generation uses `claude`, `copilot`, or `codex`
+- `--backend` controls whether the interview/generation uses `claude`, `copilot`, `codex`, or `opencode`
 - the discussion itself is handled by the agent, not by a hardcoded questionnaire in the CLI
 
 ### `ralph-teams run [path]`

@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { buildInitPrompt, ensureDefaultConfigFile } from '../src/commands/init';
+import { buildInitPrompt } from '../src/commands/init';
 import { DEFAULT_CONFIG, loadConfig } from '../src/config';
+import { setupCommand } from '../src/commands/setup';
 
 const SAMPLE_EXAMPLE = '{"project": "example", "epics": []}';
 const SAMPLE_OUTPUT = '/tmp/prd.json';
@@ -80,32 +81,84 @@ test('buildInitPrompt asks whether to move into planning or skip', () => {
   assert.ok(prompt.includes('Do NOT ask for permission to "kick off" planning as a separate command'));
 });
 
-test('ensureDefaultConfigFile creates a commented default ralph.config.yml template', () => {
-  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-init-'));
+test('setupCommand writes a configured ralph.config.yml from interactive answers', async () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-setup-'));
+  const answers = [
+    'codex',
+    'thorough',
+    '3',
+    'n',
+    'opus',
+    'haiku',
+    'sonnet',
+    'sonnet',
+    'haiku',
+    'sonnet',
+    'opus',
+    'haiku',
+  ];
+  const logs: string[] = [];
 
-  const result = ensureDefaultConfigFile(projectRoot);
+  const result = await setupCommand({}, {
+    cwd: () => projectRoot,
+    pathExists: (target) => fs.existsSync(target),
+    readFile: (target) => fs.readFileSync(target, 'utf-8'),
+    writeFile: (target, content) => fs.writeFileSync(target, content, 'utf-8'),
+    log: (...args) => { logs.push(args.join(' ')); },
+    error: (...args) => { throw new Error(args.join(' ')); },
+    exit: ((code?: number) => { throw new Error(`exit:${code}`); }) as never,
+    ask: async () => answers.shift() ?? '',
+  });
 
   assert.equal(result.created, true);
-  assert.equal(path.basename(result.configPath), 'ralph.config.yml');
-
-  const contents = fs.readFileSync(result.configPath, 'utf-8');
-  assert.ok(contents.includes('# Ralph Teams configuration'));
-  assert.ok(contents.includes('# execution:'));
-  assert.ok(contents.includes('#   backend: claude'));
-  assert.ok(!contents.includes('inputTokenCostPer1k'));
-  assert.ok(!contents.includes('outputTokenCostPer1k'));
-  assert.deepEqual(loadConfig(projectRoot), DEFAULT_CONFIG);
+  const config = loadConfig(projectRoot);
+  assert.equal(config.execution.backend, 'codex');
+  assert.equal(config.workflow.preset, 'thorough');
+  assert.equal(config.execution.parallel, 3);
+  assert.equal(config.execution.storyPlanning.enabled, true);
+  assert.equal(config.execution.finalValidation.enabled, true);
+  assert.equal(config.agents.teamLead, 'opus');
+  assert.equal(config.agents.storyPlanner, 'haiku');
+  assert.equal(config.agents.finalValidator, 'opus');
+  assert.ok(logs.some(line => line.includes('Wrote')));
 });
 
-test('ensureDefaultConfigFile preserves an existing ralph.config.yml', () => {
-  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-init-'));
+test('setupCommand keeps the existing config when init uses ifMissingOnly', async () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-setup-'));
   const configPath = path.join(projectRoot, 'ralph.config.yml');
-  const existing = 'execution:\n  backend: codex\n';
+  fs.writeFileSync(configPath, 'execution:\n  backend: codex\n', 'utf-8');
 
-  fs.writeFileSync(configPath, existing, 'utf-8');
-
-  const result = ensureDefaultConfigFile(projectRoot);
+  const result = await setupCommand({ ifMissingOnly: true }, {
+    cwd: () => projectRoot,
+    pathExists: (target) => fs.existsSync(target),
+    readFile: (target) => fs.readFileSync(target, 'utf-8'),
+    writeFile: (target, content) => fs.writeFileSync(target, content, 'utf-8'),
+    log: () => {},
+    error: (...args) => { throw new Error(args.join(' ')); },
+    exit: ((code?: number) => { throw new Error(`exit:${code}`); }) as never,
+    ask: async () => {
+      throw new Error('should not prompt when ifMissingOnly is true and config exists');
+    },
+  });
 
   assert.equal(result.created, false);
-  assert.equal(fs.readFileSync(configPath, 'utf-8'), existing);
+  assert.equal(loadConfig(projectRoot).execution.backend, 'codex');
+});
+
+test('setupCommand uses defaults when the user accepts them', async () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-setup-'));
+  const answers = ['', '', '', ''];
+
+  await setupCommand({}, {
+    cwd: () => projectRoot,
+    pathExists: (target) => fs.existsSync(target),
+    readFile: (target) => fs.readFileSync(target, 'utf-8'),
+    writeFile: (target, content) => fs.writeFileSync(target, content, 'utf-8'),
+    log: () => {},
+    error: (...args) => { throw new Error(args.join(' ')); },
+    exit: ((code?: number) => { throw new Error(`exit:${code}`); }) as never,
+    ask: async () => answers.shift() ?? '',
+  });
+
+  assert.deepEqual(loadConfig(projectRoot), DEFAULT_CONFIG);
 });

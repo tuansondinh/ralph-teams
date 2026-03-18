@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawn, spawnSync } from 'child_process';
 import chalk from 'chalk';
-import { renderCommentedConfigTemplate } from '../config';
+import { setupCommand } from './setup';
 
 interface InitOptions {
   backend?: string;
@@ -137,18 +137,17 @@ function ensureBackendAvailable(backend: string): void {
     return;
   }
 
-  console.error(chalk.red(`Error: unsupported backend "${backend}"`));
-  process.exit(1);
-}
-
-export function ensureDefaultConfigFile(projectRoot: string): { configPath: string; created: boolean } {
-  const configPath = path.join(projectRoot, 'ralph.config.yml');
-  if (fs.existsSync(configPath)) {
-    return { configPath, created: false };
+  if (backend === 'opencode') {
+    const opencodeResult = spawnSync('command', ['-v', 'opencode'], { shell: true, stdio: 'ignore' });
+    if (opencodeResult.status !== 0) {
+      console.error(chalk.red('Error: opencode CLI is not installed or not in PATH.'));
+      process.exit(1);
+    }
+    return;
   }
 
-  fs.writeFileSync(configPath, renderCommentedConfigTemplate(), 'utf-8');
-  return { configPath, created: true };
+  console.error(chalk.red(`Error: unsupported backend "${backend}"`));
+  process.exit(1);
 }
 
 export async function initCommand(options: InitOptions = {}): Promise<void> {
@@ -169,13 +168,16 @@ export async function initCommand(options: InitOptions = {}): Promise<void> {
   console.log(chalk.dim(`The agent will discuss requirements with you and write ${outputPath}`));
   console.log(chalk.dim('The agent will discuss design decisions and dependencies before generating.\n'));
 
-  ensureBackendAvailable(backend);
-  const { configPath, created } = ensureDefaultConfigFile(process.cwd());
+  const { configPath, created } = await setupCommand({
+    backend,
+    ifMissingOnly: true,
+  });
   if (created) {
-    console.log(chalk.dim(`Bootstrapped ${configPath} with the default commented template.\n`));
+    console.log(chalk.dim(`Configured ${configPath}.\n`));
   } else {
     console.log(chalk.dim(`Using existing ${configPath}.\n`));
   }
+  ensureBackendAvailable(backend);
 
   let child;
   if (backend === 'claude') {
@@ -188,6 +190,10 @@ export async function initCommand(options: InitOptions = {}): Promise<void> {
     });
   } else if (backend === 'codex') {
     child = spawn('codex', ['-a', 'never', '-s', 'workspace-write', prompt], {
+      stdio: 'inherit',
+    });
+  } else if (backend === 'opencode') {
+    child = spawn('opencode', ['run', prompt], {
       stdio: 'inherit',
     });
   } else {

@@ -12,6 +12,7 @@ import { summaryCommand } from './commands/summary';
 import { resumeCommand } from './commands/resume';
 import { planCommand } from './commands/plan';
 import { taskCommand } from './commands/task';
+import { setupCommand } from './commands/setup';
 import packageJson from '../package.json';
 
 const program = new Command();
@@ -31,15 +32,23 @@ program
 program
   .command('init')
   .description('Interactively create a new prd.json file')
-  .option('--backend <backend>', 'AI backend to use for story generation (claude, copilot, or codex)', 'claude')
+  .option('--backend <backend>', 'AI backend to use for story generation (claude, copilot, codex, or opencode)', 'claude')
   .action(async (options: { backend?: string }) => {
     await initCommand(options);
   });
 
 program
+  .command('setup')
+  .description('Interactively configure ralph.config.yml for the current repository')
+  .option('--backend <backend>', 'Default backend to preselect in setup (claude, copilot, codex, or opencode)')
+  .action(async (options: { backend?: string }) => {
+    await setupCommand(options);
+  });
+
+program
   .command('run [path]')
   .description('Run ralph.sh with the given prd.json')
-  .option('--backend <backend>', 'AI backend to use (claude, copilot, or codex)', 'claude')
+  .option('--backend <backend>', 'AI backend to use (claude, copilot, codex, or opencode)', 'claude')
   .option('--parallel <n>', 'Max epics to run in parallel per wave (default: sequential)')
   .action(async (prdPath: string = './prd.json', options: { backend?: string; parallel?: string }) => {
     await runCommand(prdPath, options);
@@ -77,7 +86,7 @@ program
 program
   .command('plan [path]')
   .description('Discuss and create implementation plans for unplanned epics')
-  .option('--backend <backend>', 'AI backend to use (claude, copilot, or codex)')
+  .option('--backend <backend>', 'AI backend to use (claude, copilot, codex, or opencode)')
   .action(async (prdPath: string = './prd.json', options: { backend?: string }) => {
     await planCommand(prdPath, options);
   });
@@ -85,7 +94,7 @@ program
 program
   .command('task <prompt>')
   .description('Run an ad hoc task on the current branch with the Ralph team')
-  .option('--backend <backend>', 'AI backend to use (claude, copilot, or codex)')
+  .option('--backend <backend>', 'AI backend to use (claude, copilot, codex, or opencode)')
   .action(async (prompt: string, options: { backend?: string }) => {
     await taskCommand(prompt, options);
   });
@@ -93,7 +102,7 @@ program
 program
   .command('resume')
   .description('Resume an interrupted run from saved state')
-  .option('--backend <backend>', 'Override the backend from saved state (claude | copilot | codex)')
+  .option('--backend <backend>', 'Override the backend from saved state (claude | copilot | codex | opencode)')
   .action((opts: { backend?: string }) => resumeCommand(undefined, opts.backend));
 
 program.parse(process.argv);
