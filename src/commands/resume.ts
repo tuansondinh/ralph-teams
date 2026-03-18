@@ -58,6 +58,22 @@ function findRalphSh(deps: ResumeDeps): string | null {
   return null;
 }
 
+function findBundledRjq(deps: ResumeDeps): string | null {
+  const candidates = [
+    path.resolve(__dirname, '../../dist/json-tool.js'),
+    path.resolve(__dirname, '../json-tool.js'),
+    path.resolve(__dirname, '../../node_modules/.bin/rjq'),
+    path.resolve(deps.cwd(), 'dist/json-tool.js'),
+  ];
+
+  for (const candidate of candidates) {
+    if (deps.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 export function resumeCommand(deps: ResumeDeps = defaultDeps, backendOverride?: string): void {
   const cwd = deps.cwd();
   const stateFile = getRalphStatePath(cwd);
@@ -114,6 +130,7 @@ export function resumeCommand(deps: ResumeDeps = defaultDeps, backendOverride?: 
     console.error(chalk.red('Error: ralph.sh not found. Cannot resume.'));
     deps.exit(1);
   }
+  const bundledRjq = findBundledRjq(deps);
 
   // Ensure ralph.sh is executable
   try {
@@ -166,6 +183,7 @@ export function resumeCommand(deps: ResumeDeps = defaultDeps, backendOverride?: 
     RALPH_MODEL_EPIC_VALIDATOR: resolvedConfig.agents.epicValidator,
     RALPH_MODEL_FINAL_VALIDATOR: resolvedConfig.agents.finalValidator,
     RALPH_MODEL_MERGER: resolvedConfig.agents.merger,
+    ...(bundledRjq ? { RALPH_RJQ_BIN: bundledRjq } : {}),
   };
 
   const result = deps.spawnSync(ralphSh, args, {

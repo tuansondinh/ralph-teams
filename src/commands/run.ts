@@ -46,6 +46,22 @@ function findRalphSh(deps: RunDeps): string | null {
   return null;
 }
 
+function findBundledRjq(deps: RunDeps): string | null {
+  const candidates = [
+    path.resolve(__dirname, '../../dist/json-tool.js'),
+    path.resolve(__dirname, '../json-tool.js'),
+    path.resolve(__dirname, '../../node_modules/.bin/rjq'),
+    path.resolve(deps.cwd(), 'dist/json-tool.js'),
+  ];
+
+  for (const candidate of candidates) {
+    if (deps.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 function isCommandInstalled(cmd: string, deps: RunDeps): boolean {
   const result = deps.spawnSync('command', ['-v', cmd], { shell: true });
   return result.status === 0;
@@ -121,6 +137,7 @@ export async function runCommand(
     console.error(chalk.red('Error: ralph.sh not found. Cannot run.'));
     deps.exit(1);
   }
+  const bundledRjq = findBundledRjq(deps);
 
   // Ensure ralph.sh is executable
   try {
@@ -193,6 +210,7 @@ export async function runCommand(
     RALPH_MODEL_EPIC_VALIDATOR_EXPLICIT: explicitAgentOverrides?.epicValidator !== undefined ? '1' : '0',
     RALPH_MODEL_FINAL_VALIDATOR_EXPLICIT: explicitAgentOverrides?.finalValidator !== undefined ? '1' : '0',
     RALPH_MODEL_MERGER_EXPLICIT: explicitAgentOverrides?.merger !== undefined ? '1' : '0',
+    ...(bundledRjq ? { RALPH_RJQ_BIN: bundledRjq } : {}),
   };
 
   if (deps.existsSync(runtimeDir)) {

@@ -138,6 +138,43 @@ test('resumeCommand passes configured timeout env vars to ralph.sh', () => {
   assert.equal(capturedEnv?.RALPH_LOOP_TIMEOUT, '66');
 });
 
+test('resumeCommand passes RALPH_RJQ_BIN to ralph.sh when bundled json tool exists', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-resume-'));
+  const prdPath = path.join(tempDir, 'prd.json');
+  fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
+  const stateFile = path.join(tempDir, '.ralph-teams', 'ralph-state.json');
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.writeFileSync(stateFile, makeState({ prdFile: prdPath }));
+
+  let capturedEnv: NodeJS.ProcessEnv | undefined;
+  const deps = createResumeDeps({
+    existsSync: (p: fs.PathLike) => {
+      const value = String(p);
+      if (value.endsWith('dist/json-tool.js')) return true;
+      return fs.existsSync(p);
+    },
+    readFileSync: (p: fs.PathOrFileDescriptor, opts?: BufferEncoding | (fs.ObjectEncodingOptions & { flag?: string }) | null) =>
+      fs.readFileSync(p, opts as BufferEncoding),
+    spawnSync: ((command: string, args?: readonly string[], options?: { env?: NodeJS.ProcessEnv }) => {
+      if (command.endsWith('ralph.sh')) {
+        capturedEnv = options?.env;
+      }
+      return { status: 0 } as ReturnType<ResumeDeps['spawnSync']>;
+    }) as ResumeDeps['spawnSync'],
+    unlinkSync: fs.unlinkSync,
+    chmodSync: (() => {}) as typeof fs.chmodSync,
+    cwd: () => tempDir,
+  });
+
+  assert.throws(() => resumeCommand(deps), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 0);
+    return true;
+  });
+
+  assert.ok(capturedEnv?.RALPH_RJQ_BIN?.endsWith('dist/json-tool.js'));
+});
+
 test('resumeCommand deletes ralph-state.json after successful run', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-resume-'));
   const prdPath = path.join(tempDir, 'prd.json');

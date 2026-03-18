@@ -152,6 +152,37 @@ test('runCommand passes configured timeout env vars to ralph.sh', async () => {
   assert.equal(capturedEnv?.RALPH_LOOP_TIMEOUT, '33');
 });
 
+test('runCommand passes RALPH_RJQ_BIN to ralph.sh when bundled json tool exists', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
+  const prdPath = path.join(tempDir, 'prd.json');
+  fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
+
+  let capturedEnv: NodeJS.ProcessEnv | undefined;
+  const deps = createRunDeps({
+    existsSync: (target: fs.PathLike) => {
+      const value = String(target);
+      if (value.endsWith('dist/json-tool.js')) return true;
+      return fs.existsSync(target);
+    },
+    spawnSync: ((command: string, args?: readonly string[], options?: { env?: NodeJS.ProcessEnv }) => {
+      if (command === path.resolve('ralph.sh')) {
+        capturedEnv = options?.env;
+      }
+      return { status: 0 } as ReturnType<NonNullable<Parameters<typeof runCommand>[2]>['spawnSync']>;
+    }) as NonNullable<Parameters<typeof runCommand>[2]>['spawnSync'],
+    chmodSync: (() => {}) as typeof fs.chmodSync,
+    cwd: () => tempDir,
+  });
+
+  await assert.rejects(runCommand(prdPath, { backend: 'claude' }, deps), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 0);
+    return true;
+  });
+
+  assert.ok(capturedEnv?.RALPH_RJQ_BIN?.endsWith('dist/json-tool.js'));
+});
+
 test('runCommand removes stale Ralph runtime artifacts before a fresh run', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
   const prdPath = path.join(tempDir, 'prd.json');
