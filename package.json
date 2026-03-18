@@ -1,6 +1,6 @@
 {
   "name": "ralph-teams",
-  "version": "1.0.25",
+  "version": "1.0.26",
   "description": "CLI tool for Ralph Teams",
   "bin": {
     "ralph-teams": "dist/index.js",
