@@ -33,9 +33,9 @@ flowchart TD
     A[Start run] --> B[Validate PRD and create loop branch]
     B --> C[Pick ready epic]
     C --> D[Create worktree and epic branch]
-    D --> E[Optional epic planner]
+    D --> E[Team Lead decides on epic planner]
     E --> F[Team Lead runs stories with builder]
-    F --> G[Optional epic validator]
+    F --> G[Team Lead decides on epic validator]
     G --> H[Merge epic branch]
     H --> I[If needed, run merger]
     I --> J{More epics?}
