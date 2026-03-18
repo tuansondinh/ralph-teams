@@ -253,11 +253,13 @@ test('copilot shell launch relies on agent markdown models instead of forcing CL
   assert.doesNotMatch(script, /gh copilot -- --agent "\$0" --model /);
 });
 
-test('ralph.sh launches opencode from the repo root so named agents remain discoverable', () => {
+test('ralph.sh injects opencode agent definitions into the workdir before launching', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
-  assert.match(script, /run_opencode_exec\(\)[\s\S]*cd "\$ROOT_DIR"[\s\S]*opencode run/);
-  assert.match(script, /run_opencode_exec\(\)[\s\S]*--dir "\$workdir"/);
+  assert.match(script, /inject_opencode_agents\(\)/);
+  assert.match(script, /run_opencode_exec\(\)[\s\S]*inject_opencode_agents "\$workdir"/);
+  assert.match(script, /run_opencode_exec\(\)[\s\S]*cd "\$workdir"[\s\S]*opencode run/);
+  assert.doesNotMatch(script, /run_opencode_exec\(\)[\s\S]*--dir "\$workdir"/);
 });
 
 test('ralph.sh prepares codex teammate variants so the team lead can choose per-task models', () => {
@@ -279,6 +281,17 @@ test('codex shell launches add the Ralph package directory alongside the project
   assert.match(script, /run_codex_exec "\$WORKTREE_ABS_PATH" "\$TEAM_PROMPT" --add-dir "\$ROOT_DIR" --add-dir "\$SCRIPT_DIR"/);
   assert.match(script, /codex[\s\S]*--add-dir "\$SCRIPT_DIR"/);
   assert.match(script, /codex[\s\S]*--add-dir "\$ROOT_DIR"[\s\S]*--add-dir "\$SCRIPT_DIR"[\s\S]*- > "\$log_file"/);
+});
+
+test('ralph.sh stages a runtime-local rjq binary inside .ralph-teams/bin and prepends it to PATH', () => {
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+
+  assert.match(script, /ensure_runtime_rjq_bin\(\)/);
+  assert.match(script, /local runtime_bin_dir="\$\{RALPH_RUNTIME_DIR\}\/bin"/);
+  assert.match(script, /local runtime_rjq_bin="\$\{runtime_bin_dir\}\/rjq"/);
+  assert.match(script, /cp "\$source_rjq_bin" "\$runtime_rjq_bin"/);
+  assert.match(script, /export RALPH_RJQ_BIN="\$runtime_rjq_bin"/);
+  assert.match(script, /export PATH="\$\{runtime_bin_dir\}:\$PATH"/);
 });
 
 test('ralph.sh requires one-shot builder and validator runs for shared team-lead prompt backends', () => {

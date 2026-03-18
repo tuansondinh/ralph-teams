@@ -307,6 +307,34 @@ STATE_DIR="${RALPH_RUNTIME_DIR}/state"
 WORKTREES_DIR="${RALPH_RUNTIME_DIR}/.worktrees"
 mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$STATE_DIR" "$WORKTREES_DIR"
 
+ensure_runtime_rjq_bin() {
+  local runtime_bin_dir="${RALPH_RUNTIME_DIR}/bin"
+  local runtime_rjq_bin="${runtime_bin_dir}/rjq"
+  local source_rjq_bin=""
+
+  mkdir -p "$runtime_bin_dir"
+
+  if [ -f "${SCRIPT_DIR}/dist/json-tool.js" ]; then
+    source_rjq_bin="${SCRIPT_DIR}/dist/json-tool.js"
+  elif [ -n "${RJQ_BIN:-}" ] && [ -f "$RJQ_BIN" ]; then
+    source_rjq_bin="$RJQ_BIN"
+  fi
+
+  if [ -z "$source_rjq_bin" ]; then
+    echo "Error: could not stage a runtime-local rjq binary." >&2
+    exit 1
+  fi
+
+  cp "$source_rjq_bin" "$runtime_rjq_bin"
+  chmod +x "$runtime_rjq_bin"
+
+  RJQ_BIN="$runtime_rjq_bin"
+  export RALPH_RJQ_BIN="$runtime_rjq_bin"
+  export PATH="${runtime_bin_dir}:$PATH"
+}
+
+ensure_runtime_rjq_bin
+
 # --- Validate PRD structure ---
 echo "Validating PRD structure..."
 
@@ -937,6 +965,15 @@ run_codex_exec() {
     -
 }
 
+inject_opencode_agents() {
+  local workdir="$1"
+  local dest="${workdir}/.opencode/agents"
+  local src="${SCRIPT_DIR}/.opencode/agents"
+  [ -d "$src" ] || return 0
+  mkdir -p "$dest"
+  cp -f "${src}"/*.md "$dest/" 2>/dev/null || true
+}
+
 run_opencode_exec() {
   local workdir="$1"
   local prompt="$2"
@@ -944,11 +981,10 @@ run_opencode_exec() {
   local model="$4"
   shift 4
 
+  inject_opencode_agents "$workdir"
   (
-    cd "$ROOT_DIR"
+    cd "$workdir"
     opencode run \
-      --format json \
-      --dir "$workdir" \
       --agent "$agent_name" \
       --model "$model" \
       "$@" \
