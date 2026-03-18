@@ -70,7 +70,7 @@ test('buildInitPrompt enforces dependsOn on every epic including parallel ones',
 
 test('buildInitPrompt asks whether to move into planning or skip', () => {
   const prompt = getPrompt();
-  assert.ok(prompt.includes('plan the implementation now or skip for later'));
+  assert.ok(prompt.includes('plan the implementation now or let Ralph Teams do it automatically later'));
   assert.ok(prompt.includes('continue in the same session'));
   assert.ok(prompt.includes('Planning must be collaborative'));
   assert.ok(prompt.includes('ask follow-up questions whenever scope, architecture, sequencing, ownership, or verification is ambiguous'));
@@ -85,8 +85,12 @@ test('setupCommand writes a configured ralph.config.yml from interactive answers
   const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-setup-'));
   const answers = [
     'codex',
-    'thorough',
+    'y',
+    'full',
+    'y',
     '3',
+    'y',
+    '7200',
     'n',
     'opus',
     'haiku',
@@ -113,8 +117,9 @@ test('setupCommand writes a configured ralph.config.yml from interactive answers
   assert.equal(result.created, true);
   const config = loadConfig(projectRoot);
   assert.equal(config.execution.backend, 'codex');
-  assert.equal(config.workflow.preset, 'thorough');
+  assert.equal(config.workflow.preset, 'full');
   assert.equal(config.execution.parallel, 3);
+  assert.equal(config.timeouts.loopTimeout, 7200);
   assert.equal(config.execution.storyPlanning.enabled, true);
   assert.equal(config.execution.finalValidation.enabled, true);
   assert.equal(config.agents.teamLead, 'opus');
@@ -147,7 +152,7 @@ test('setupCommand keeps the existing config when init uses ifMissingOnly', asyn
 
 test('setupCommand uses defaults when the user accepts them', async () => {
   const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-setup-'));
-  const answers = ['', '', '', ''];
+  const answers = ['', '', '', '', ''];
 
   await setupCommand({}, {
     cwd: () => projectRoot,
@@ -161,4 +166,99 @@ test('setupCommand uses defaults when the user accepts them', async () => {
   });
 
   assert.deepEqual(loadConfig(projectRoot), DEFAULT_CONFIG);
+});
+
+test('setupCommand explains workflow presets before prompting for one', async () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-setup-'));
+  const answers = ['', '', '', '', ''];
+  const logs: string[] = [];
+
+  await setupCommand({}, {
+    cwd: () => projectRoot,
+    pathExists: (target) => fs.existsSync(target),
+    readFile: (target) => fs.readFileSync(target, 'utf-8'),
+    writeFile: (target, content) => fs.writeFileSync(target, content, 'utf-8'),
+    log: (...args) => { logs.push(args.join(' ')); },
+    error: (...args) => { throw new Error(args.join(' ')); },
+    exit: ((code?: number) => { throw new Error(`exit:${code}`); }) as never,
+    ask: async () => answers.shift() ?? '',
+  });
+
+  const joined = logs.join('\n');
+  assert.match(joined, /balanced: plan and validate epics, plus final validation/i);
+  assert.match(joined, /full: plan and validate stories and epics, plus final validation/i);
+  assert.match(joined, /minimal: disable automated planning and validation steps/i);
+});
+
+test('setupCommand supports manual planning/validation workflow configuration', async () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-setup-'));
+  const answers = [
+    '',
+    'n',
+    'y',
+    'y',
+    '2',
+    'n',
+    'y',
+    '3',
+    'y',
+    '1',
+    'n',
+    'n',
+    '',
+    '',
+  ];
+
+  await setupCommand({}, {
+    cwd: () => projectRoot,
+    pathExists: (target) => fs.existsSync(target),
+    readFile: (target) => fs.readFileSync(target, 'utf-8'),
+    writeFile: (target, content) => fs.writeFileSync(target, content, 'utf-8'),
+    log: () => {},
+    error: (...args) => { throw new Error(args.join(' ')); },
+    exit: ((code?: number) => { throw new Error(`exit:${code}`); }) as never,
+    ask: async () => answers.shift() ?? '',
+  });
+
+  const config = loadConfig(projectRoot);
+  assert.equal(config.workflow.preset, 'balanced');
+  assert.equal(config.execution.storyPlanning.enabled, true);
+  assert.equal(config.execution.storyValidation.enabled, true);
+  assert.equal(config.execution.storyValidation.maxFixCycles, 2);
+  assert.equal(config.execution.epicPlanning.enabled, false);
+  assert.equal(config.execution.epicValidation.enabled, true);
+  assert.equal(config.execution.epicValidation.maxFixCycles, 3);
+  assert.equal(config.execution.finalValidation.enabled, true);
+  assert.equal(config.execution.finalValidation.maxFixCycles, 1);
+  assert.equal(config.execution.parallel, 0);
+  assert.equal(config.timeouts.loopTimeout, 0);
+});
+
+test('setupCommand asks whether to enable parallel execution and stores the limit', async () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-setup-'));
+  const answers = [
+    '',
+    '',
+    '',
+    'y',
+    '4',
+    'y',
+    '3600',
+    '',
+  ];
+
+  await setupCommand({}, {
+    cwd: () => projectRoot,
+    pathExists: (target) => fs.existsSync(target),
+    readFile: (target) => fs.readFileSync(target, 'utf-8'),
+    writeFile: (target, content) => fs.writeFileSync(target, content, 'utf-8'),
+    log: () => {},
+    error: (...args) => { throw new Error(args.join(' ')); },
+    exit: ((code?: number) => { throw new Error(`exit:${code}`); }) as never,
+    ask: async () => answers.shift() ?? '',
+  });
+
+  const config = loadConfig(projectRoot);
+  assert.equal(config.execution.parallel, 4);
+  assert.equal(config.timeouts.loopTimeout, 3600);
 });

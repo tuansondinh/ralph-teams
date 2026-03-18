@@ -68,7 +68,7 @@ export function buildInitPrompt(prdExample: string, outputPath: string): string 
     '- Generate the full prd.json and write it.',
     '',
     '### Phase 5: Planning Handoff',
-    '- After writing the PRD, ask the user whether they want to plan the implementation now or skip for later.',
+    '- After writing the PRD, ask the user whether they want to plan the implementation now or let Ralph Teams do it automatically later.',
     '- If they want to plan now, continue in the same session and discuss the implementation plan with the user.',
     '- Planning must be collaborative: discuss the approach with the user and ask follow-up questions whenever scope, architecture, sequencing, ownership, or verification is ambiguous.',
     '- Do not jump straight to writing plans if important implementation details are unclear. Resolve ambiguity through discussion first.',
@@ -193,7 +193,7 @@ export async function initCommand(options: InitOptions = {}): Promise<void> {
       stdio: 'inherit',
     });
   } else if (backend === 'opencode') {
-    child = spawn('opencode', ['run', prompt], {
+    child = spawn('opencode', ['.', '--prompt', prompt], {
       stdio: 'inherit',
     });
   } else {
