@@ -15,7 +15,7 @@ const BASH = fs.existsSync('/opt/homebrew/bin/bash') ? '/opt/homebrew/bin/bash' 
 
 test('planner prompt assets require writing the epic plan markdown file', () => {
   const promptFiles = [
-    'agent/planner.md',
+    '.opencode/agents/planner.md',
     '.codex/agents/planner.toml',
     '.github/agents/planner.agent.md',
     '.claude/agents/planner.md',
@@ -43,7 +43,7 @@ test('planner prompt assets require writing the epic plan markdown file', () => 
 
 test('planner prompt assets require designing story-level tests', () => {
   const promptFiles = [
-    'agent/planner.md',
+    '.opencode/agents/planner.md',
     '.codex/agents/planner.toml',
     '.github/agents/planner.agent.md',
     '.claude/agents/planner.md',
@@ -62,7 +62,7 @@ test('planner prompt assets require designing story-level tests', () => {
 
 test('planner prompt assets require design-level plans instead of code dumps', () => {
   const promptFiles = [
-    'agent/planner.md',
+    '.opencode/agents/planner.md',
     '.codex/agents/planner.toml',
     '.github/agents/planner.agent.md',
     '.claude/agents/planner.md',
@@ -86,7 +86,7 @@ test('planner prompt assets require design-level plans instead of code dumps', (
 
 test('builder prompt assets require reading the epic plan markdown file', () => {
   const promptFiles = [
-    'agent/builder.md',
+    '.opencode/agents/builder.md',
     '.codex/agents/builder.toml',
     '.github/agents/builder.agent.md',
     '.claude/agents/builder.md',
@@ -109,7 +109,7 @@ test('builder prompt assets require reading the epic plan markdown file', () => 
 
 test('builder prompt assets require test creation and TDD fallback when planning is skipped', () => {
   const promptFiles = [
-    'agent/builder.md',
+    '.opencode/agents/builder.md',
     '.codex/agents/builder.toml',
     '.github/agents/builder.agent.md',
     '.claude/agents/builder.md',
@@ -287,6 +287,59 @@ function setupTempRepo() {
   return { tempDir, binDir };
 }
 
+function setupUnbornRepo() {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-unborn-'));
+  const binDir = path.join(tempDir, 'bin');
+  fs.mkdirSync(binDir);
+
+  const mockClaude = [
+    '#!/bin/sh',
+    'STDIN=$(cat)',
+    'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
+    'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
+    'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
+    'if [ -n "$EPIC_ID" ]; then',
+    '  node -e "' +
+      "const fs=require('fs');" +
+      "const f=process.argv[1];" +
+      "const s=JSON.parse(fs.readFileSync(f,'utf8'));" +
+      "for (const v of Object.values(s.stories||{})) { v.passes=true; v.failureReason=null; }" +
+      "fs.writeFileSync(f,JSON.stringify(s,null,2)+'\\n');" +
+      '" "$STATE_PATH"',
+    '  node -e "' +
+      "const fs=require('fs');" +
+      "const epic=process.argv[1];" +
+      "const f=process.argv[2];" +
+      "const p=JSON.parse(fs.readFileSync(f,'utf8'));" +
+      "const e=p.epics.find(x=>x.id===epic);" +
+      "if(e)e.userStories.forEach(s=>{s.passes=true;});" +
+      "fs.writeFileSync(f,JSON.stringify(p,null,2)+'\\n');" +
+      '" "$EPIC_ID" "$PRD_PATH"',
+    'fi',
+    'exit 0',
+  ].join('\n');
+  fs.writeFileSync(path.join(binDir, 'claude'), mockClaude);
+  fs.chmodSync(path.join(binDir, 'claude'), 0o755);
+
+  execFileSync('git', ['init', '-b', 'main'], { cwd: tempDir });
+  execFileSync('git', ['config', 'user.name', 'Ralph Test'], { cwd: tempDir });
+  execFileSync('git', ['config', 'user.email', 'ralph@example.com'], { cwd: tempDir });
+
+  fs.writeFileSync(path.join(tempDir, 'prd.json'), JSON.stringify({
+    project: 'Unborn Test',
+    epics: [
+      {
+        id: 'EPIC-001',
+        title: 'Bootstrap repo',
+        status: 'pending',
+        userStories: [{ id: 'US-001', title: 'Story', passes: false }],
+      },
+    ],
+  }, null, 2));
+
+  return { tempDir, binDir };
+}
+
 test('ralph.sh auto-commits dirty changes without prompting before switching branches', () => {
   const { tempDir, binDir } = setupTempRepo();
   const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
@@ -323,6 +376,25 @@ test('ralph.sh auto-commits dirty changes and continues', () => {
   assert.match(execFileSync('git', ['log', '-1', '--pretty=%s'], { cwd: tempDir, encoding: 'utf-8' }), /chore: auto-commit changes before ralph run/);
   assert.equal(execFileSync('git', ['status', '--short'], { cwd: tempDir, encoding: 'utf-8' }).trim(), '');
   assert.match(execFileSync('git', ['branch', '--show-current'], { cwd: tempDir, encoding: 'utf-8' }).trim(), /^ralph\/loop\//);
+});
+
+test('ralph.sh creates an initial commit automatically for an unborn repo', () => {
+  const { tempDir, binDir } = setupUnbornRepo();
+  const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
+    cwd: tempDir,
+    env: {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ''}`,
+      RALPH_MAX_CRASH_RETRIES: '0',
+    },
+    encoding: 'utf-8',
+  });
+
+  const combined = `${result.stdout}\n${result.stderr}`;
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.match(combined, /Repository has no commits yet\. Ralph will create an initial commit before creating worktrees\./);
+  assert.doesNotMatch(combined, /invalid reference:/);
+  assert.notEqual(execFileSync('git', ['rev-list', '--count', 'HEAD'], { cwd: tempDir, encoding: 'utf-8' }).trim(), '0');
 });
 
 test('ralph.sh fails early with the real error when loop branch creation fails', () => {

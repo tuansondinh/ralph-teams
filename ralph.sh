@@ -430,6 +430,24 @@ prompt_to_commit_dirty_worktree() {
   git commit -m "chore: auto-commit changes before ralph run"
 }
 
+ensure_repo_has_initial_commit() {
+  if git rev-parse --verify HEAD >/dev/null 2>&1; then
+    return
+  fi
+
+  echo "Repository has no commits yet. Ralph will create an initial commit before creating worktrees."
+  git status --short
+  git add -A
+
+  if git diff --cached --quiet >/dev/null 2>&1; then
+    echo "Error: repository has no commits and there is nothing to commit." >&2
+    echo "Create an initial commit or add files before running Ralph." >&2
+    exit 1
+  fi
+
+  git commit -m "chore: initialize repo for ralph run" >/dev/null 2>&1
+}
+
 auto_remove_stale_worktree_dir() {
   local worktree_path="$1"
   local branch_name="$2"
@@ -462,6 +480,7 @@ cleanup_epic_worktree_artifacts() {
 
 # --- Ensure loop branch exists and is checked out ---
 ensure_runtime_gitignore_entries
+ensure_repo_has_initial_commit
 
 mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$STATE_DIR" "$WORKTREES_DIR"
 
