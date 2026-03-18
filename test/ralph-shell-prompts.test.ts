@@ -163,6 +163,7 @@ test('ralph.sh loads the canonical Team Lead policy for runtime prompts', () => 
 test('canonical Team Lead policy covers scoped planner and validator heuristics', () => {
   const content = fs.readFileSync(`${repoRoot}/prompts/team-lead-policy.md`, 'utf-8');
 
+  assert.match(content, /If a usable canonical plan file already exists at the path provided in the prompt, do not spawn the epic planner/i);
   assert.match(content, /If `epicPlanning\.enabled = 1`, spawn the epic planner/i);
   assert.match(content, /explicitly tell the epic planner the exact output path/i);
   assert.match(content, /Treat an epic planner response as incomplete/i);
@@ -278,7 +279,6 @@ test('ralph.sh team lead prompt forbids epic replanning when the PRD already mar
   assert.match(script, /## Planning Status/);
   assert.match(script, /epic\.planned = \$\{EPIC_PLANNED\}/);
   assert.match(script, /canonical_plan\.exists = \$\{WORKTREE_PLAN_EXISTS\}/);
-  assert.match(script, /If epic\.planned = true, do NOT spawn the epic planner/);
-  assert.match(script, /If epic\.planned = true and canonical_plan\.exists = true, read the canonical plan file above and execute against it/);
-  assert.match(script, /Only spawn the epic planner when epic\.planned is not true and epicPlanning\.enabled = 1/);
+  assert.match(script, /If a usable canonical plan already exists, do NOT spawn the epic planner\. Use it even if epic\.planned is false/);
+  assert.match(script, /Only spawn the epic planner when epicPlanning\.enabled = 1 and there is no usable canonical plan for this epic/);
 });

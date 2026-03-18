@@ -1279,9 +1279,8 @@ $WORKTREE_PLAN_FILE
 ## Planning Status
 - epic.planned = ${EPIC_PLANNED}
 - canonical_plan.exists = ${WORKTREE_PLAN_EXISTS}
-- If epic.planned = true, do NOT spawn the epic planner.
-- If epic.planned = true and canonical_plan.exists = true, read the canonical plan file above and execute against it.
-- Only spawn the epic planner when epic.planned is not true and epicPlanning.enabled = 1.
+- If a usable canonical plan already exists, do NOT spawn the epic planner. Use it even if epic.planned is false.
+- Only spawn the epic planner when epicPlanning.enabled = 1 and there is no usable canonical plan for this epic.
 
 ## Stories To Plan And Execute
 Only these stories should be planned or worked in this run. Stories omitted here are already passed and must be treated as done context only.

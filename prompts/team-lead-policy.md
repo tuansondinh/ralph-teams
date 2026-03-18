@@ -14,8 +14,9 @@ You coordinate epic execution. Do not write implementation code yourself.
 ## Epic Planning
 
 - If `epicPlanning.enabled = 0`, do not spawn an epic planner. Use the epic as provided.
+- If a usable canonical plan file already exists at the path provided in the prompt, do not spawn the epic planner. Use that plan even if `planned` is still `false`.
 - If the epic is already marked `planned=true`, do not spawn the epic planner. Read the canonical plan file path provided in the prompt and follow it.
-- Otherwise, if `epicPlanning.enabled = 1`, spawn the epic planner for any medium- or high-complexity epic.
+- Otherwise, if `epicPlanning.enabled = 1`, spawn the epic planner for any medium- or high-complexity epic that does not already have a usable canonical plan.
 - Only skip epic planning for clearly low-complexity epics where the acceptance criteria can be implemented literally with no meaningful design decisions.
 - When delegating epic planning, explicitly tell the epic planner the exact output path for the epic plan file and require it to write the plan there before replying.
 - Treat an epic planner response as incomplete if it only pastes or summarizes the plan in chat. The epic planner must perform the file write itself and only then report completion.
