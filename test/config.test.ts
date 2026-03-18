@@ -22,11 +22,11 @@ test('loadConfig returns defaults when ralph.config.yml is absent', () => {
   assert.deepEqual(loadConfig(dir), DEFAULT_CONFIG);
 });
 
-test('loadConfig applies the default preset and allows explicit execution overrides', () => {
+test('loadConfig applies the balanced preset and allows explicit execution overrides', () => {
   const dir = makeTempDir();
   writeConfig(dir, `
 workflow:
-  preset: default
+  preset: balanced
 execution:
   storyValidation:
     enabled: true
@@ -34,7 +34,7 @@ execution:
 `);
 
   const config = loadConfig(dir);
-  assert.equal(config.workflow.preset, 'default');
+  assert.equal(config.workflow.preset, 'balanced');
   assert.equal(config.execution.epicPlanning.enabled, true);
   assert.equal(config.execution.epicValidation.enabled, true);
   assert.equal(config.execution.finalValidation.enabled, true);
@@ -43,11 +43,11 @@ execution:
   assert.equal(config.execution.storyValidation.maxFixCycles, 2);
 });
 
-test('loadConfig applies the thorough preset', () => {
+test('loadConfig applies the full preset', () => {
   const dir = makeTempDir();
   writeConfig(dir, `
 workflow:
-  preset: thorough
+  preset: full
 `);
 
   const config = loadConfig(dir);
@@ -58,11 +58,11 @@ workflow:
   assert.equal(config.execution.finalValidation.enabled, true);
 });
 
-test('loadConfig applies the off preset', () => {
+test('loadConfig applies the minimal preset', () => {
   const dir = makeTempDir();
   writeConfig(dir, `
 workflow:
-  preset: off
+  preset: minimal
 `);
 
   const config = loadConfig(dir);
@@ -71,6 +71,39 @@ workflow:
   assert.equal(config.execution.epicPlanning.enabled, false);
   assert.equal(config.execution.epicValidation.enabled, false);
   assert.equal(config.execution.finalValidation.enabled, false);
+});
+
+test('loadConfig accepts legacy preset aliases', () => {
+  const dir = makeTempDir();
+  writeConfig(dir, `
+workflow:
+  preset: default
+`);
+  const defaultAlias = loadConfig(dir);
+  assert.equal(defaultAlias.workflow.preset, 'balanced');
+
+  writeConfig(dir, `
+workflow:
+  preset: epic-focused
+`);
+  const epicFocusedAlias = loadConfig(dir);
+  assert.equal(epicFocusedAlias.workflow.preset, 'balanced');
+
+  writeConfig(dir, `
+workflow:
+  preset: thorough
+`);
+  const thoroughAlias = loadConfig(dir);
+  assert.equal(thoroughAlias.workflow.preset, 'full');
+
+  writeConfig(dir, `
+workflow:
+  preset: off
+`);
+  const offAlias = loadConfig(dir);
+  assert.equal(offAlias.workflow.preset, 'minimal');
+  assert.equal(offAlias.execution.storyPlanning.enabled, false);
+  assert.equal(offAlias.execution.finalValidation.enabled, false);
 });
 
 test('loadConfig supports planner and validator aliases for backward compatibility', () => {
@@ -108,7 +141,7 @@ workflow:
 test('validateConfig returns descriptive errors for invalid fields', () => {
   const { errors } = validateConfig({
     workflow: { preset: 'bad' },
-    timeouts: { epicTimeout: 'abc', idleTimeout: -5 },
+    timeouts: { epicTimeout: 'abc', idleTimeout: -5, loopTimeout: -1 },
     execution: {
       parallel: 1.5,
       backend: 'unknown',
@@ -125,6 +158,7 @@ test('validateConfig returns descriptive errors for invalid fields', () => {
   assert.match(joined, /workflow\.preset/);
   assert.match(joined, /timeouts\.epicTimeout/);
   assert.match(joined, /timeouts\.idleTimeout/);
+  assert.match(joined, /timeouts\.loopTimeout/);
   assert.match(joined, /execution\.parallel/);
   assert.match(joined, /execution\.backend/);
   assert.match(joined, /execution\.storyPlanning\.enabled/);
@@ -137,8 +171,8 @@ test('validateConfig returns descriptive errors for invalid fields', () => {
 
 test('validateConfig accepts a full valid object', () => {
   const { errors, config } = validateConfig({
-    workflow: { preset: 'thorough' },
-    timeouts: { epicTimeout: 1800, idleTimeout: 120 },
+    workflow: { preset: 'full' },
+    timeouts: { epicTimeout: 1800, idleTimeout: 120, loopTimeout: 7200 },
     execution: {
       parallel: 2,
       backend: 'claude',
@@ -150,20 +184,21 @@ test('validateConfig accepts a full valid object', () => {
     },
     agents: {
       teamLead: 'opus',
-      storyPlanner: 'haiku',
+      storyPlanner: 'opus',
       epicPlanner: 'opus',
       builder: 'sonnet',
       storyValidator: 'sonnet',
-      epicValidator: 'sonnet',
-      finalValidator: 'sonnet',
+      epicValidator: 'opus',
+      finalValidator: 'opus',
       merger: 'sonnet',
     },
   });
 
   assert.equal(errors.length, 0);
-  assert.equal(config.workflow.preset, 'thorough');
+  assert.equal(config.workflow.preset, 'full');
+  assert.equal(config.timeouts.loopTimeout, 7200);
   assert.equal(config.execution.storyValidation.maxFixCycles, 2);
-  assert.equal(config.agents.finalValidator, 'sonnet');
+  assert.equal(config.agents.finalValidator, 'opus');
 });
 
 test('loadConfig accepts codex as a valid backend', () => {

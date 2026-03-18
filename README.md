@@ -28,26 +28,56 @@ ralph-teams plan
 
 ```mermaid
 flowchart TB
-    A[User runs Ralph] --> B[Validate PRD and tools]
-    B --> C[Create loop branch]
-    C --> D[Pick next ready epic]
-    D --> E[Create epic worktree & branch]
-    E --> F[Start one agent team for that epic]
-    F --> G[Plan if needed]
-    G --> H[Build and validate each story]
-    H --> I{Story result?}
-    I -->|Pass| J[Update PRD state]
-    I -->|Fail| K[Log failure, continue]
-    J --> L{More stories in epic?}
-    L -->|Yes| H
-    L -->|No| M[Merge epic branch back to loop]
-    M --> N{Merge conflict?}
-    N -->|Yes| O[Spawn merger agent to resolve]
-    N -->|No| P[Epic complete]
-    O --> P
-    P --> Q{More ready epics?}
-    Q -->|Yes| D
-    Q -->|No| R[Finish run]
+    subgraph Setup
+        A[Validate PRD & tools] --> B[Create loop branch]
+    end
+
+    subgraph Epic["Epic Loop"]
+        C[Pick ready epic] --> D[Create worktree & branch]
+        D --> E[Start agent team]
+
+        E --> F{Epic planning?}
+        F -->|Yes| G[Epic planner]
+        F -->|No| H[Build stories]
+        G --> H
+
+        H --> I{More stories?}
+        I -->|Yes| H
+        I -->|No| J{Epic validation?}
+
+        J -->|Yes| K[Epic validator]
+        J -->|No| L[Merge to loop]
+
+        K --> M{Pass?}
+        M -->|Yes| L
+        M -->|No| N{Fix cycles?}
+        N -->|Yes| O[Builder fixes]
+        N -->|No| P[Log failure]
+        O --> K
+
+        L --> Q{Conflict?}
+        Q -->|Yes| R[Merger agent]
+        Q -->|No| S[Epic done]
+        R --> S
+    end
+
+    subgraph Final
+        T{Final validation?}
+        T -->|Yes| U[Final validator]
+        T -->|No| V[Finish]
+
+        U --> W{Pass?}
+        W -->|Yes| V
+        W -->|No| X{Fix cycles?}
+        X -->|Yes| Y[Builder fixes]
+        X -->|No| Z[Log failure]
+        Y --> U
+    end
+
+    B --> C
+    S --> AA{More epics?}
+    AA -->|Yes| C
+    AA -->|No| T
 ```
 
 ## What It Does
@@ -66,21 +96,26 @@ The system has two layers:
   - `merger` resolves merge conflicts when they occur
 
 Scoped planning and validation are configurable via `ralph.config.yml`. Workflow presets provide sensible defaults:
-- `default`: epic planning + epic validation + final validation enabled
-- `thorough`: all planning and validation toggles enabled
-- `off`: all planning and validation toggles disabled
+- `balanced`: epic planning + epic validation + final validation enabled
+- `full`: all planning and validation toggles enabled
+- `minimal`: all planning and validation toggles disabled
 
 Across all backends, `builder` work is one-shot per attempt. A build attempt only counts when the Builder returns a concrete commit SHA and the Team Lead persists the story result to the epic state file at `.ralph-teams/state/{epic-id}.json`.
 
-Workflow presets:
-- `default`: epic planning, epic validation, and final validation enabled
-- `thorough`: all planning and validation toggles enabled
-- `off`: all planning and validation toggles disabled
+Default agent model assignments:
+- `teamLead`: `opus`
+- `epicPlanner`: `opus`
+- `epicValidator`: `opus`
+- `finalValidator`: `opus`
+- `builder`: `sonnet`
+- `storyValidator`: `sonnet`
+- `storyPlanner`: `opus`
+- `merger`: `sonnet`
 
-Default Team Lead policy by backend:
-- Claude: keep `team-lead` on `opus`; for spawned work use `haiku` for easy tasks, `sonnet` for medium tasks, `opus` for difficult tasks
-- Copilot: resolve those same tiers to `gpt-5-mini`, `gpt-5.3-codex`, and `gpt-5.4`
-- Codex: resolve those same tiers to `gpt-5-mini`, `gpt-5.3-codex`, and `gpt-5.4`
+Team Lead policy by backend:
+- Claude: keep `team-lead` on `opus`; for spawned work, the Team Lead chooses `haiku` for easy tasks, `sonnet` for medium tasks, `opus` for difficult tasks
+- Copilot: difficulty-based defaults use `claude-haiku-4.5`, `claude-sonnet-4.6`, and `claude-opus-4.6`
+- Codex: difficulty-based defaults use `gpt-5-mini`, `gpt-5.3-codex`, and `gpt-5.4`
 
 If `ralph.config.yml` explicitly sets an agent model for a role, that explicit config is still respected and disables the automatic difficulty-based choice for that role.
 
@@ -200,14 +235,16 @@ ralph-teams setup
 
 Prompts for:
 - Default backend (`claude`, `copilot`, `codex`, `opencode`)
-- Workflow preset (`default`, `thorough`, `off`)
-- Max parallel epics
+- Planning/validation workflow setup: use a preset or configure each planning and validation step manually
+- Workflow preset (`balanced`, `full`, `minimal`) with short inline explanations during setup
+- Parallel epic execution and max parallel epics
+- Overall loop timeout
 - Agent model overrides (optional)
 
 Workflow presets:
-- `default`: epic planning + epic validation + final validation enabled
-- `thorough`: all planning and validation toggles enabled
-- `off`: all planning and validation toggles disabled
+- `balanced`: epic planning + epic validation + final validation enabled
+- `full`: all planning and validation toggles enabled
+- `minimal`: all planning and validation toggles disabled
 
 ### `ralph-teams init`
 
@@ -235,7 +272,7 @@ Notes:
 
 - `init` is grounded by `prd.json.example`
 - `init` does not overwrite an existing `ralph.config.yml`
-- `setup` lets you choose the default backend, workflow preset, parallelism, and optional per-role model overrides
+- `setup` lets you choose the default backend, use a planning/validation workflow preset or configure that workflow manually, set parallelism, and optionally override per-role models
 - the agent generates epics and user stories automatically
 - the agent should aim for about 5 user stories per epic when the scope supports it
 - `--backend` controls whether the interview/generation uses `claude`, `copilot`, `codex`, or `opencode`

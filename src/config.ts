@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
 
-export type WorkflowPreset = 'default' | 'thorough' | 'off';
+export type WorkflowPreset = 'balanced' | 'full' | 'minimal';
 
 type ToggleConfig = {
   enabled: boolean;
@@ -15,7 +15,7 @@ type ToggleWithFixCyclesConfig = ToggleConfig & {
 /** Runtime configuration for ralph-teams. */
 export interface RalphConfig {
   workflow: {
-    /** High-level preset for planning/validation toggles. Default: 'default'. */
+    /** High-level preset for planning/validation toggles. Default: 'balanced'. */
     preset: WorkflowPreset;
   };
   timeouts: {
@@ -23,6 +23,8 @@ export interface RalphConfig {
     epicTimeout: number;
     /** Max idle seconds before an epic agent is considered hung. Default: 600. */
     idleTimeout: number;
+    /** Max seconds before the overall Ralph run is forcibly stopped. 0 disables it. Default: 18000. */
+    loopTimeout: number;
   };
   execution: {
     /** Max epics to run in parallel (0 = unlimited). Default: 0. */
@@ -43,7 +45,7 @@ export interface RalphConfig {
   agents: {
     /** Model for the team-lead agent. Default: 'opus'. */
     teamLead: string;
-    /** Model for the story planner agent. Default: 'haiku'. */
+    /** Model for the story planner agent. Default: 'opus'. */
     storyPlanner: string;
     /** Model for the epic planner agent. Default: 'opus'. */
     epicPlanner: string;
@@ -51,9 +53,9 @@ export interface RalphConfig {
     builder: string;
     /** Model for the story validator agent. Default: 'sonnet'. */
     storyValidator: string;
-    /** Model for the epic validator agent. Default: 'sonnet'. */
+    /** Model for the epic validator agent. Default: 'opus'. */
     epicValidator: string;
-    /** Model for the final validator agent. Default: 'sonnet'. */
+    /** Model for the final validator agent. Default: 'opus'. */
     finalValidator: string;
     /** Model for the merger agent. Default: 'sonnet'. */
     merger: string;
@@ -73,11 +75,11 @@ export interface RalphConfig {
 export type AgentModelField = keyof RalphConfig['agents'];
 
 const VALID_MODELS = ['opus', 'sonnet', 'haiku'] as const;
-const VALID_PRESETS = ['default', 'thorough', 'off'] as const;
+const VALID_PRESETS = ['balanced', 'full', 'minimal'] as const;
 
 function presetExecution(preset: WorkflowPreset): RalphConfig['execution'] {
   switch (preset) {
-    case 'thorough':
+    case 'full':
       return {
         parallel: 0,
         backend: 'claude',
@@ -87,7 +89,7 @@ function presetExecution(preset: WorkflowPreset): RalphConfig['execution'] {
         epicValidation: { enabled: true, maxFixCycles: 1 },
         finalValidation: { enabled: true, maxFixCycles: 1 },
       };
-    case 'off':
+    case 'minimal':
       return {
         parallel: 0,
         backend: 'claude',
@@ -97,7 +99,7 @@ function presetExecution(preset: WorkflowPreset): RalphConfig['execution'] {
         epicValidation: { enabled: false, maxFixCycles: 1 },
         finalValidation: { enabled: false, maxFixCycles: 1 },
       };
-    case 'default':
+    case 'balanced':
     default:
       return {
         parallel: 0,
@@ -114,21 +116,22 @@ function presetExecution(preset: WorkflowPreset): RalphConfig['execution'] {
 /** Default configuration values used when no ralph.config.yml is present. */
 export const DEFAULT_CONFIG: RalphConfig = {
   workflow: {
-    preset: 'default',
+    preset: 'balanced',
   },
   timeouts: {
     epicTimeout: 3600,
     idleTimeout: 600,
+    loopTimeout: 18000,
   },
-  execution: presetExecution('default'),
+  execution: presetExecution('balanced'),
   agents: {
     teamLead: 'opus',
-    storyPlanner: 'haiku',
+    storyPlanner: 'opus',
     epicPlanner: 'opus',
     builder: 'sonnet',
     storyValidator: 'sonnet',
-    epicValidator: 'sonnet',
-    finalValidator: 'sonnet',
+    epicValidator: 'opus',
+    finalValidator: 'opus',
     merger: 'sonnet',
   },
   pricing: {
@@ -231,10 +234,17 @@ export function validateConfig(raw: unknown): { config: RalphConfig; errors: str
       const w = workflow as Record<string, unknown>;
       if ('preset' in w) {
         const v = w['preset'];
-        if (!VALID_PRESETS.includes(v as WorkflowPreset)) {
-          errors.push(`workflow.preset must be 'default', 'thorough', or 'off', got '${v}'`);
+        const normalizedPreset = v === 'default' || v === 'epic-focused'
+          ? 'balanced'
+          : v === 'thorough'
+            ? 'full'
+            : v === 'off'
+              ? 'minimal'
+              : v;
+        if (!VALID_PRESETS.includes(normalizedPreset as WorkflowPreset)) {
+          errors.push(`workflow.preset must be 'balanced', 'full', or 'minimal' (legacy 'epic-focused', 'default', 'thorough', and 'off' also accepted), got '${v}'`);
         } else {
-          applyPreset(config, v as WorkflowPreset);
+          applyPreset(config, normalizedPreset as WorkflowPreset);
         }
       }
     }
@@ -262,6 +272,15 @@ export function validateConfig(raw: unknown): { config: RalphConfig; errors: str
           errors.push(`timeouts.idleTimeout must be a positive number, got '${v}'`);
         } else {
           config.timeouts.idleTimeout = v;
+        }
+      }
+
+      if ('loopTimeout' in t) {
+        const v = t['loopTimeout'];
+        if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) {
+          errors.push(`timeouts.loopTimeout must be a non-negative number, got '${v}'`);
+        } else {
+          config.timeouts.loopTimeout = v;
         }
       }
     }

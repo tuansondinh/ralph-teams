@@ -1,9 +1,10 @@
 workflow:
-  preset: default
+  preset: balanced
 
 timeouts:
   epicTimeout: 3600
   idleTimeout: 600
+  loopTimeout: 18000
 
 execution:
   backend: claude
@@ -24,7 +25,7 @@ execution:
 
 agents:
   teamLead: haiku
-  storyPlanner: haiku
+  storyPlanner: opus
   epicPlanner: haiku
   builder: haiku
   storyValidator: haiku

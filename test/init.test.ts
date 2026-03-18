@@ -93,7 +93,7 @@ test('setupCommand writes a configured ralph.config.yml from interactive answers
     '7200',
     'n',
     'opus',
-    'haiku',
+    'opus',
     'sonnet',
     'sonnet',
     'haiku',
@@ -123,7 +123,7 @@ test('setupCommand writes a configured ralph.config.yml from interactive answers
   assert.equal(config.execution.storyPlanning.enabled, true);
   assert.equal(config.execution.finalValidation.enabled, true);
   assert.equal(config.agents.teamLead, 'opus');
-  assert.equal(config.agents.storyPlanner, 'haiku');
+  assert.equal(config.agents.storyPlanner, 'opus');
   assert.equal(config.agents.finalValidator, 'opus');
   assert.ok(logs.some(line => line.includes('Wrote')));
 });
