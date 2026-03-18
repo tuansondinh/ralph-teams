@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import chalk from 'chalk';
-import { loadConfig } from '../config';
+import { loadConfig, loadExplicitAgentModelOverrides } from '../config';
 import { getRalphStatePath } from '../runtime-paths';
 
 /** Shape of the saved state file written by ralph.sh on interrupt. */
@@ -28,6 +28,8 @@ export interface ResumeDeps {
   cwd: () => string;
   /** Override for config loading — used in tests to inject a mock loader. */
   loadConfig?: typeof loadConfig;
+  /** Override for explicit agent model overrides loading — used in tests. */
+  loadExplicitAgentModelOverrides?: typeof loadExplicitAgentModelOverrides;
 }
 
 const defaultDeps: ResumeDeps = {
@@ -39,6 +41,7 @@ const defaultDeps: ResumeDeps = {
   exit: (code?: number) => process.exit(code),
   cwd: () => process.cwd(),
   loadConfig,
+  loadExplicitAgentModelOverrides,
 };
 
 function findRalphSh(deps: ResumeDeps): string | null {
@@ -96,11 +99,16 @@ export function resumeCommand(deps: ResumeDeps = defaultDeps, backendOverride?: 
     deps.exit(1);
   }
 
+  const projectRoot = path.dirname(resolvedPrd);
+
   // Load config for env vars (timeouts, etc.)
   const configLoader = deps.loadConfig ?? loadConfig;
+  const explicitOverridesLoader = deps.loadExplicitAgentModelOverrides ?? loadExplicitAgentModelOverrides;
   let config;
+  let explicitAgentOverrides;
   try {
     config = configLoader(cwd);
+    explicitAgentOverrides = explicitOverridesLoader(projectRoot);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(chalk.red(`Error: ${msg}`));
@@ -150,6 +158,16 @@ export function resumeCommand(deps: ResumeDeps = defaultDeps, backendOverride?: 
     RALPH_VALIDATOR_MAX_PUSHBACKS: String(resolvedConfig.execution.validatorMaxPushbacks),
     RALPH_PARALLEL: String(resolvedConfig.execution.parallel),
     RALPH_BACKEND: resolvedConfig.execution.backend,
+    RALPH_MODEL_TEAM_LEAD: resolvedConfig.agents.teamLead,
+    RALPH_MODEL_PLANNER: resolvedConfig.agents.planner,
+    RALPH_MODEL_BUILDER: resolvedConfig.agents.builder,
+    RALPH_MODEL_VALIDATOR: resolvedConfig.agents.validator,
+    RALPH_MODEL_MERGER: resolvedConfig.agents.merger,
+    RALPH_MODEL_TEAM_LEAD_EXPLICIT: explicitAgentOverrides?.teamLead !== undefined ? '1' : '0',
+    RALPH_MODEL_PLANNER_EXPLICIT: explicitAgentOverrides?.planner !== undefined ? '1' : '0',
+    RALPH_MODEL_BUILDER_EXPLICIT: explicitAgentOverrides?.builder !== undefined ? '1' : '0',
+    RALPH_MODEL_VALIDATOR_EXPLICIT: explicitAgentOverrides?.validator !== undefined ? '1' : '0',
+    RALPH_MODEL_MERGER_EXPLICIT: explicitAgentOverrides?.merger !== undefined ? '1' : '0',
   };
 
   const result = deps.spawnSync(ralphSh, args, {

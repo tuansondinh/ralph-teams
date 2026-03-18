@@ -189,6 +189,113 @@ test('resumeCommand validates required fields in state file', () => {
   );
 });
 
+test('resumeCommand forwards RALPH_MODEL_* env vars to ralph.sh', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-resume-'));
+  const prdPath = path.join(tempDir, 'prd.json');
+  fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
+  const stateFile = path.join(tempDir, '.ralph-teams', 'ralph-state.json');
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.writeFileSync(stateFile, makeState({ prdFile: prdPath }));
+
+  const tempRalphSh = path.join(tempDir, 'ralph.sh');
+  fs.writeFileSync(tempRalphSh, '#!/bin/sh\n');
+
+  const calls: Array<{ command: string; args?: readonly string[]; env?: NodeJS.ProcessEnv }> = [];
+  const deps = createResumeDeps({
+    existsSync: (p: fs.PathLike) => fs.existsSync(p),
+    readFileSync: (p: fs.PathOrFileDescriptor, opts?: BufferEncoding | (fs.ObjectEncodingOptions & { flag?: string }) | null) =>
+      fs.readFileSync(p, opts as BufferEncoding),
+    spawnSync: ((command: string, args?: readonly string[], options?: { env?: NodeJS.ProcessEnv }) => {
+      calls.push({ command, args, env: options?.env });
+      return { status: 0 } as ReturnType<ResumeDeps['spawnSync']>;
+    }) as ResumeDeps['spawnSync'],
+    unlinkSync: fs.unlinkSync,
+    chmodSync: (() => {}) as typeof fs.chmodSync,
+    cwd: () => tempDir,
+    loadConfig: () => ({
+      timeouts: { epicTimeout: 3600, idleTimeout: 600 },
+      execution: { validatorMaxPushbacks: 1, parallel: 0, backend: 'claude' },
+      agents: { teamLead: 'opus', planner: 'haiku', builder: 'opus', validator: 'sonnet', merger: 'sonnet' },
+      pricing: { inputTokenCostPer1k: 0.015, outputTokenCostPer1k: 0.075, cacheReadCostPer1k: 0.0015, cacheCreationCostPer1k: 0.01875 },
+    }),
+    loadExplicitAgentModelOverrides: () => ({ planner: 'haiku' }),
+  });
+
+  assert.throws(() => resumeCommand(deps), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 0);
+    return true;
+  });
+
+  const ralphCall = calls.find(c => c.command.endsWith('ralph.sh'));
+  assert.ok(ralphCall, 'ralph.sh was not called');
+  const env = ralphCall!.env!;
+
+  // Agent model values from config
+  assert.equal(env['RALPH_MODEL_TEAM_LEAD'], 'opus');
+  assert.equal(env['RALPH_MODEL_PLANNER'], 'haiku');
+  assert.equal(env['RALPH_MODEL_BUILDER'], 'opus');
+  assert.equal(env['RALPH_MODEL_VALIDATOR'], 'sonnet');
+  assert.equal(env['RALPH_MODEL_MERGER'], 'sonnet');
+
+  // Explicit flags: only planner was in explicitAgentOverrides
+  assert.equal(env['RALPH_MODEL_TEAM_LEAD_EXPLICIT'], '0');
+  assert.equal(env['RALPH_MODEL_PLANNER_EXPLICIT'], '1');
+  assert.equal(env['RALPH_MODEL_BUILDER_EXPLICIT'], '0');
+  assert.equal(env['RALPH_MODEL_VALIDATOR_EXPLICIT'], '0');
+  assert.equal(env['RALPH_MODEL_MERGER_EXPLICIT'], '0');
+});
+
+test('resumeCommand sets RALPH_MODEL_*_EXPLICIT=0 when no config file', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-resume-'));
+  const prdPath = path.join(tempDir, 'prd.json');
+  fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
+  const stateFile = path.join(tempDir, '.ralph-teams', 'ralph-state.json');
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.writeFileSync(stateFile, makeState({ prdFile: prdPath }));
+
+  const tempRalphSh = path.join(tempDir, 'ralph.sh');
+  fs.writeFileSync(tempRalphSh, '#!/bin/sh\n');
+
+  const calls: Array<{ command: string; args?: readonly string[]; env?: NodeJS.ProcessEnv }> = [];
+  const deps = createResumeDeps({
+    existsSync: (p: fs.PathLike) => fs.existsSync(p),
+    readFileSync: (p: fs.PathOrFileDescriptor, opts?: BufferEncoding | (fs.ObjectEncodingOptions & { flag?: string }) | null) =>
+      fs.readFileSync(p, opts as BufferEncoding),
+    spawnSync: ((command: string, args?: readonly string[], options?: { env?: NodeJS.ProcessEnv }) => {
+      calls.push({ command, args, env: options?.env });
+      return { status: 0 } as ReturnType<ResumeDeps['spawnSync']>;
+    }) as ResumeDeps['spawnSync'],
+    unlinkSync: fs.unlinkSync,
+    chmodSync: (() => {}) as typeof fs.chmodSync,
+    cwd: () => tempDir,
+    loadConfig: () => ({
+      timeouts: { epicTimeout: 3600, idleTimeout: 600 },
+      execution: { validatorMaxPushbacks: 1, parallel: 0, backend: 'claude' },
+      agents: { teamLead: 'opus', planner: 'opus', builder: 'sonnet', validator: 'sonnet', merger: 'sonnet' },
+      pricing: { inputTokenCostPer1k: 0.015, outputTokenCostPer1k: 0.075, cacheReadCostPer1k: 0.0015, cacheCreationCostPer1k: 0.01875 },
+    }),
+    loadExplicitAgentModelOverrides: () => ({}),
+  });
+
+  assert.throws(() => resumeCommand(deps), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 0);
+    return true;
+  });
+
+  const ralphCall = calls.find(c => c.command.endsWith('ralph.sh'));
+  assert.ok(ralphCall, 'ralph.sh was not called');
+  const env = ralphCall!.env!;
+
+  // All EXPLICIT flags should be '0' when no config file (empty overrides)
+  assert.equal(env['RALPH_MODEL_TEAM_LEAD_EXPLICIT'], '0');
+  assert.equal(env['RALPH_MODEL_PLANNER_EXPLICIT'], '0');
+  assert.equal(env['RALPH_MODEL_BUILDER_EXPLICIT'], '0');
+  assert.equal(env['RALPH_MODEL_VALIDATOR_EXPLICIT'], '0');
+  assert.equal(env['RALPH_MODEL_MERGER_EXPLICIT'], '0');
+});
+
 test('resumeCommand passes --parallel to ralph.sh when present in state', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-resume-'));
   const prdPath = path.join(tempDir, 'prd.json');
