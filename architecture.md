@@ -53,12 +53,26 @@ Important commands:
 - `setup`: `src/commands/setup.ts`
 - `run`: `src/commands/run.ts`
 - `resume`: `src/commands/resume.ts`
+- `task`: `src/commands/task.ts` — ad hoc task planning and execution (non-PRD workflow)
 - `init`: `src/commands/init.ts`
 - `plan`: `src/commands/plan.ts`
 - `validate`: `src/commands/validate.ts`
-- `status`, `summary`, `logs`, `reset`, `task`
+- `status`, `summary`, `logs`, `reset`
 
 The CLI does not directly implement epic execution. It either prepares inputs for `ralph.sh` or renders derived views over files that `ralph.sh` maintains.
+
+### Ad hoc task mode
+
+The `task` command (`src/commands/task.ts`) provides an alternative execution path for one-off work outside the PRD/epic workflow:
+
+- Interactive prompt for planning or execution
+- Optional planning phase with guided scoping
+- Direct execution mode for simple, unambiguous tasks
+- Backend-agnostic task runtime with model selection
+- Respects `ralph.config.yml` backend and agent model overrides
+- Runs in current working directory on current branch (no branch switching)
+
+Task execution uses the same backend agents as epic runs but skips the full PRD orchestration layer.
 
 ### 2. Execution engine
 
@@ -256,11 +270,13 @@ This gives the system a simple mental model:
 
 ## Backend Integration
 
-Backend selection is centralized around four modes:
+Backend selection is centralized around five modes:
 
 - `claude`
 - `copilot`
 - `codex`
+- `opencode`
+- `opencode`
 - `opencode`
 
 Integration points:
@@ -313,6 +329,7 @@ This makes failure modes inspectable after the fact because evidence is left on 
 - `src/index.ts`
 - `src/commands/run.ts`
 - `src/commands/resume.ts`
+- `src/commands/task.ts`
 - `ralph.sh`
 
 ### PRD and config
@@ -325,8 +342,7 @@ This makes failure modes inspectable after the fact because evidence is left on 
 ### Planning and discussion helpers
 
 - `src/commands/plan.ts` — interactive planning sessions
-- `src/discuss.ts` — internal module for discuss sessions (used by plan command)
-
+- `src/discuss.ts` — internal module for discuss sessions (used by plan and task commands)
 - `src/runtime-paths.ts` — runtime directory constants
 
 ### Backend role definitions
@@ -345,7 +361,7 @@ Scoped roles:
 
 For Codex specifically, `.codex/agents/` defines the spawned teammate roles. The Codex Team Lead policy itself is injected by `ralph.sh` at runtime rather than coming from a separate `.codex/agents/team-lead.toml` file.
 
-For Claude, Copilot, and OpenCode, the Team Lead contract lives in `.claude/agents/team-lead.md`, `.github/agents/team-lead.agent.md`, and `.opencode/agents/team-lead.md`. All backends now share the same coordination rule: planning and validation are scope-specific and configurable, while Builder attempts remain one-shot and are never reused as persistent teammates.
+For Claude, Copilot, and opencode, the Team Lead contract lives in `.claude/agents/team-lead.md`, `.github/agents/team-lead.agent.md`, and `.opencode/agents/team-lead.md`. All backends now share the same coordination rule: planning and validation are scope-specific and configurable, while Builder attempts remain one-shot and are never reused as persistent teammates.
 
 The worker-role instruction bodies are canonicalized in `prompts/agents/*.md` and rendered into the backend-specific agent files via `npm run sync:agents`. The backend directories remain the runtime contract, but contributors should edit the canonical prompts and regenerate the rendered files instead of hand-editing every backend copy.
 
