@@ -5,6 +5,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { resumeCommand, ResumeDeps } from '../src/commands/resume';
 import { ExitSignal } from './helpers';
+import { loadConfig, loadExplicitAgentModelOverrides } from '../src/config';
 
 afterEach(() => {
   mock.restoreAll();
@@ -339,6 +340,91 @@ test('resumeCommand loads config from PRD directory, not cwd', () => {
   assert.ok(ralphCall, 'ralph.sh was not called');
   // Config must have been loaded from prdDir, so RALPH_EPIC_TIMEOUT should be '9999'
   assert.equal(ralphCall!.env?.['RALPH_EPIC_TIMEOUT'], '9999', 'expected RALPH_EPIC_TIMEOUT from PRD directory config');
+});
+
+test('resumeCommand integration: resumes interrupted run and forwards all model env vars', () => {
+  // Create prdDir as the PRD project root — contains prd.json, ralph.config.yml,
+  // ralph-state.json (in .ralph-teams/), and a stub ralph.sh.
+  const prdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-resume-integration-'));
+
+  // Write minimal prd.json
+  const prdPath = path.join(prdDir, 'prd.json');
+  fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
+
+  // Write ralph.config.yml with all five agent models explicitly set to specific values
+  fs.writeFileSync(
+    path.join(prdDir, 'ralph.config.yml'),
+    [
+      'agents:',
+      '  teamLead: haiku',
+      '  planner: haiku',
+      '  builder: opus',
+      '  validator: opus',
+      '  merger: haiku',
+    ].join('\n') + '\n',
+  );
+
+  // Write ralph-state.json into prdDir/.ralph-teams/
+  const stateDir = path.join(prdDir, '.ralph-teams');
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(stateDir, 'ralph-state.json'),
+    JSON.stringify({ version: '1', prdFile: './prd.json', backend: 'claude' }),
+  );
+
+  // Write a stub ralph.sh into prdDir so findRalphSh can locate it
+  const ralphShPath = path.join(prdDir, 'ralph.sh');
+  fs.writeFileSync(ralphShPath, '#!/bin/sh\n');
+
+  // Use real loadConfig and loadExplicitAgentModelOverrides (statically imported above)
+  const calls: Array<{ command: string; args?: readonly string[]; env?: NodeJS.ProcessEnv }> = [];
+  const deps = createResumeDeps({
+    existsSync: (p: fs.PathLike) => fs.existsSync(p),
+    readFileSync: (
+      p: fs.PathOrFileDescriptor,
+      opts?: BufferEncoding | (fs.ObjectEncodingOptions & { flag?: string }) | null,
+    ) => fs.readFileSync(p, opts as BufferEncoding),
+    spawnSync: ((command: string, args?: readonly string[], options?: { env?: NodeJS.ProcessEnv }) => {
+      calls.push({ command, args, env: options?.env });
+      return { status: 0 } as ReturnType<ResumeDeps['spawnSync']>;
+    }) as ResumeDeps['spawnSync'],
+    unlinkSync: fs.unlinkSync,
+    chmodSync: (() => {}) as typeof fs.chmodSync,
+    // cwd points to prdDir so getRalphStatePath(cwd) finds the state file there
+    cwd: () => prdDir,
+    loadConfig,
+    loadExplicitAgentModelOverrides,
+  });
+
+  assert.throws(
+    () => resumeCommand(deps),
+    (error: unknown) => {
+      assert.ok(error instanceof ExitSignal);
+      assert.equal(error.code, 0);
+      return true;
+    },
+  );
+
+  const ralphCall = calls.find(c => c.command.endsWith('ralph.sh'));
+  assert.ok(ralphCall, 'ralph.sh was not called');
+  const env = ralphCall!.env!;
+
+  // Model values must match what was written to ralph.config.yml
+  assert.equal(env['RALPH_MODEL_TEAM_LEAD'], 'haiku', 'RALPH_MODEL_TEAM_LEAD should be haiku');
+  assert.equal(env['RALPH_MODEL_PLANNER'], 'haiku', 'RALPH_MODEL_PLANNER should be haiku');
+  assert.equal(env['RALPH_MODEL_BUILDER'], 'opus', 'RALPH_MODEL_BUILDER should be opus');
+  assert.equal(env['RALPH_MODEL_VALIDATOR'], 'opus', 'RALPH_MODEL_VALIDATOR should be opus');
+  assert.equal(env['RALPH_MODEL_MERGER'], 'haiku', 'RALPH_MODEL_MERGER should be haiku');
+
+  // All five explicit flags must be '1' since the config lists all five agent fields
+  assert.equal(env['RALPH_MODEL_TEAM_LEAD_EXPLICIT'], '1', 'teamLead should be explicit');
+  assert.equal(env['RALPH_MODEL_PLANNER_EXPLICIT'], '1', 'planner should be explicit');
+  assert.equal(env['RALPH_MODEL_BUILDER_EXPLICIT'], '1', 'builder should be explicit');
+  assert.equal(env['RALPH_MODEL_VALIDATOR_EXPLICIT'], '1', 'validator should be explicit');
+  assert.equal(env['RALPH_MODEL_MERGER_EXPLICIT'], '1', 'merger should be explicit');
+
+  // Must set the resume flag
+  assert.equal(env['RALPH_RESUME'], '1', 'RALPH_RESUME should be 1');
 });
 
 test('resumeCommand passes --parallel to ralph.sh when present in state', () => {
