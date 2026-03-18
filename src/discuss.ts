@@ -409,7 +409,7 @@ export function createDefaultSpawner(
         args = ['-a', 'never', '-s', 'workspace-write', contextPrompt];
       } else {
         command = 'opencode';
-        args = ['run', contextPrompt];
+        args = ['.', '--prompt', contextPrompt];
       }
 
       let agentProcess: ChildProcess;

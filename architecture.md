@@ -24,15 +24,16 @@ Everything else is either a derived view or a recovery artifact.
 
 ```mermaid
 flowchart LR
-    U[User] --> CLI[src/index.ts commands]
-    CLI --> RUN[src/commands/run.ts]
-    RUN --> SH[ralph.sh]
-    SH --> WT[Git worktrees]
-    SH --> AGENTS[Backend agent CLI]
-    AGENTS --> LOGS[.ralph-teams/logs/*.log]
-    SH --> PRD[prd.json]
-    SH --> PROGRESS[.ralph-teams/progress.txt]
-    SH --> STATE[.ralph-teams/ralph-state.json]
+    U[User] --> CLI["src/index.ts commands"]
+    CLI --> RUN["src/commands/run.ts"]
+    RUN --> SH["ralph.sh"]
+    SH --> WT["Git worktrees"]
+    SH --> AGENTS["Backend agent CLI"]
+    AGENTS --> LOGS[".ralph-teams/logs/*.log"]
+    SH --> PRD["prd.json"]
+    SH --> PROGRESS[".ralph-teams/progress.txt"]
+    SH --> STATE[".ralph-teams/ralph-state.json"]
+    note["Balanced preset: epic planning + epic validation + final validation"]
 ```
 
 ## Main Layers
@@ -69,7 +70,7 @@ This is the operational core of the project. It is responsible for:
 - creating or switching to the loop branch
 - creating one git worktree per active epic
 - spawning the team lead agent for each epic
-- enforcing epic timeout and idle timeout
+- enforcing epic timeout, idle timeout, and overall loop timeout
 - reading and mutating `prd.json`
 - writing progress and resume artifacts
 - merging completed epic branches back into the loop branch
@@ -95,9 +96,11 @@ Core shared modules:
 
 Workflow presets in `ralph.config.yml`:
 
-- `default`: epic planning + epic validation + final validation enabled
-- `thorough`: all planning and validation toggles enabled
-- `off`: all planning and validation toggles disabled
+- `balanced`: epic planning + epic validation + final validation enabled (default)
+- `full`: all planning and validation toggles enabled
+- `minimal`: all planning and validation toggles disabled
+
+Legacy preset names (`default`, `thorough`, `off`, `epic-focused`) are accepted for backward compatibility and normalized to their current equivalents.
 
 These modules are mostly synchronous and file-oriented. That matches the rest of the codebase, which prefers simple filesystem contracts over in-memory services.
 
@@ -118,6 +121,7 @@ The command passes runtime settings to `ralph.sh` via environment variables:
 
 - `RALPH_EPIC_TIMEOUT`
 - `RALPH_IDLE_TIMEOUT`
+- `RALPH_LOOP_TIMEOUT`
 - `RALPH_VALIDATOR_MAX_PUSHBACKS`
 - `RALPH_PARALLEL`
 - `RALPH_BACKEND`
@@ -294,6 +298,7 @@ Key mechanisms:
 
 - epic timeout kills long-running work
 - idle timeout kills silent work
+- loop timeout stops the overall run and writes resume state
 - process exit before PRD completion triggers crash handling
 - dependency failure blocks downstream epics
 - merge failure is tracked separately from implementation failure

@@ -184,3 +184,17 @@ test('US-005 (idle timeout): with two epics, only idle one is killed while activ
   assert.equal(epic1Status, 'failed');
   assert.equal(epic2Status, 'completed', `stdout: ${result.stdout}`);
 });
+
+test('US-009 (loop timeout): whole run stops after RALPH_LOOP_TIMEOUT seconds and saves resume state', { timeout: 10000 }, () => {
+  const { tempDir, env } = setupMultiEpicRepo([{ id: 'EPIC-001', title: 'Alpha' }], {});
+  env['MOCK_HANG_EPIC_001'] = '1';
+  env['RALPH_LOOP_TIMEOUT'] = '1';
+  const result = spawnSync(BASH, [scriptPath, 'prd.json'], { cwd: tempDir, encoding: 'utf-8', env, timeout: 12000 });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /Overall loop timeout reached after 1s/);
+  assert.ok(fs.existsSync(path.join(tempDir, '.ralph-teams', 'ralph-state.json')));
+
+  const progress = fs.readFileSync(path.join(tempDir, '.ralph-teams', 'progress.txt'), 'utf-8');
+  assert.match(progress, /\[loop\] FAILED \(overall loop timeout after 1s\)/);
+});

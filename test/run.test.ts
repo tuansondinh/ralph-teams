@@ -116,6 +116,42 @@ test('runCommand invokes ralph.sh with the resolved PRD path and backend', async
   assert.ok(logs.some(line => line.includes('Using backend: copilot')));
 });
 
+test('runCommand passes configured timeout env vars to ralph.sh', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
+  const prdPath = path.join(tempDir, 'prd.json');
+  fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
+  fs.writeFileSync(path.join(tempDir, 'ralph.config.yml'), [
+    'timeouts:',
+    '  epicTimeout: 11',
+    '  idleTimeout: 22',
+    '  loopTimeout: 33',
+    '',
+  ].join('\n'));
+
+  let capturedEnv: NodeJS.ProcessEnv | undefined;
+  const deps = createRunDeps({
+    existsSync: (target: fs.PathLike) => fs.existsSync(target),
+    spawnSync: ((command: string, args?: readonly string[], options?: { env?: NodeJS.ProcessEnv }) => {
+      if (command === path.resolve('ralph.sh')) {
+        capturedEnv = options?.env;
+      }
+      return { status: 0 } as ReturnType<NonNullable<Parameters<typeof runCommand>[2]>['spawnSync']>;
+    }) as NonNullable<Parameters<typeof runCommand>[2]>['spawnSync'],
+    chmodSync: (() => {}) as typeof fs.chmodSync,
+    cwd: () => tempDir,
+  });
+
+  await assert.rejects(runCommand(prdPath, { backend: 'claude' }, deps), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 0);
+    return true;
+  });
+
+  assert.equal(capturedEnv?.RALPH_EPIC_TIMEOUT, '11');
+  assert.equal(capturedEnv?.RALPH_IDLE_TIMEOUT, '22');
+  assert.equal(capturedEnv?.RALPH_LOOP_TIMEOUT, '33');
+});
+
 test('runCommand removes stale ralph-state.json before a fresh run', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
   const prdPath = path.join(tempDir, 'prd.json');

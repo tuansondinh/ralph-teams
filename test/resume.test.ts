@@ -96,6 +96,48 @@ test('resumeCommand with valid state invokes ralph.sh with correct PRD path and 
   assert.equal(ralphCall!.env?.RALPH_RESUME, '1');
 });
 
+test('resumeCommand passes configured timeout env vars to ralph.sh', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-resume-'));
+  const prdPath = path.join(tempDir, 'prd.json');
+  fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
+  fs.writeFileSync(path.join(tempDir, 'ralph.config.yml'), [
+    'timeouts:',
+    '  epicTimeout: 44',
+    '  idleTimeout: 55',
+    '  loopTimeout: 66',
+    '',
+  ].join('\n'));
+  const stateFile = path.join(tempDir, '.ralph-teams', 'ralph-state.json');
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.writeFileSync(stateFile, makeState({ prdFile: prdPath }));
+
+  let capturedEnv: NodeJS.ProcessEnv | undefined;
+  const deps = createResumeDeps({
+    existsSync: (p: fs.PathLike) => fs.existsSync(p),
+    readFileSync: (p: fs.PathOrFileDescriptor, opts?: BufferEncoding | (fs.ObjectEncodingOptions & { flag?: string }) | null) =>
+      fs.readFileSync(p, opts as BufferEncoding),
+    spawnSync: ((command: string, args?: readonly string[], options?: { env?: NodeJS.ProcessEnv }) => {
+      if (command.endsWith('ralph.sh')) {
+        capturedEnv = options?.env;
+      }
+      return { status: 0 } as ReturnType<ResumeDeps['spawnSync']>;
+    }) as ResumeDeps['spawnSync'],
+    unlinkSync: fs.unlinkSync,
+    chmodSync: (() => {}) as typeof fs.chmodSync,
+    cwd: () => tempDir,
+  });
+
+  assert.throws(() => resumeCommand(deps), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 0);
+    return true;
+  });
+
+  assert.equal(capturedEnv?.RALPH_EPIC_TIMEOUT, '44');
+  assert.equal(capturedEnv?.RALPH_IDLE_TIMEOUT, '55');
+  assert.equal(capturedEnv?.RALPH_LOOP_TIMEOUT, '66');
+});
+
 test('resumeCommand deletes ralph-state.json after successful run', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-resume-'));
   const prdPath = path.join(tempDir, 'prd.json');

@@ -82,6 +82,16 @@ async function askChoice(
   }
 }
 
+async function askYesNo(
+  deps: SetupDeps,
+  label: string,
+  defaultYes: boolean,
+): Promise<boolean> {
+  const suffix = defaultYes ? '[Y/n]' : '[y/N]';
+  const answer = await deps.ask(`${label} ${suffix}: `);
+  return isYes(answer, defaultYes);
+}
+
 async function askNonNegativeInteger(
   deps: SetupDeps,
   label: string,
@@ -150,6 +160,89 @@ async function promptForAgentModels(
   }
 }
 
+function applyWorkflowPreset(config: RalphConfig, preset: RalphConfig['workflow']['preset']): void {
+  config.workflow.preset = preset;
+
+  if (preset === 'balanced') {
+    config.execution.storyPlanning.enabled = false;
+    config.execution.storyValidation.enabled = false;
+    config.execution.storyValidation.maxFixCycles = 1;
+    config.execution.epicPlanning.enabled = true;
+    config.execution.epicValidation.enabled = true;
+    config.execution.epicValidation.maxFixCycles = 1;
+    config.execution.finalValidation.enabled = true;
+    config.execution.finalValidation.maxFixCycles = 1;
+    return;
+  }
+
+  if (preset === 'full') {
+    config.execution.storyPlanning.enabled = true;
+    config.execution.storyValidation.enabled = true;
+    config.execution.storyValidation.maxFixCycles = 1;
+    config.execution.epicPlanning.enabled = true;
+    config.execution.epicValidation.enabled = true;
+    config.execution.epicValidation.maxFixCycles = 1;
+    config.execution.finalValidation.enabled = true;
+    config.execution.finalValidation.maxFixCycles = 1;
+    return;
+  }
+
+  config.execution.storyPlanning.enabled = false;
+  config.execution.storyValidation.enabled = false;
+  config.execution.storyValidation.maxFixCycles = 1;
+  config.execution.epicPlanning.enabled = false;
+  config.execution.epicValidation.enabled = false;
+  config.execution.epicValidation.maxFixCycles = 1;
+  config.execution.finalValidation.enabled = false;
+  config.execution.finalValidation.maxFixCycles = 1;
+}
+
+async function promptForManualWorkflow(deps: SetupDeps, config: RalphConfig): Promise<void> {
+  deps.log(chalk.dim('\nManual planning/validation workflow configuration.\n'));
+
+  config.workflow.preset = 'balanced';
+  config.execution.storyPlanning.enabled = await askYesNo(
+    deps,
+    'Enable story planning before implementation?',
+    config.execution.storyPlanning.enabled,
+  );
+  config.execution.storyValidation.enabled = await askYesNo(
+    deps,
+    'Enable story validation after implementation?',
+    config.execution.storyValidation.enabled,
+  );
+  config.execution.storyValidation.maxFixCycles = await askNonNegativeInteger(
+    deps,
+    'Story validation max fix cycles',
+    config.execution.storyValidation.maxFixCycles,
+  );
+  config.execution.epicPlanning.enabled = await askYesNo(
+    deps,
+    'Enable epic planning before execution?',
+    config.execution.epicPlanning.enabled,
+  );
+  config.execution.epicValidation.enabled = await askYesNo(
+    deps,
+    'Enable epic validation after story completion?',
+    config.execution.epicValidation.enabled,
+  );
+  config.execution.epicValidation.maxFixCycles = await askNonNegativeInteger(
+    deps,
+    'Epic validation max fix cycles',
+    config.execution.epicValidation.maxFixCycles,
+  );
+  config.execution.finalValidation.enabled = await askYesNo(
+    deps,
+    'Enable final validation after all epics finish?',
+    config.execution.finalValidation.enabled,
+  );
+  config.execution.finalValidation.maxFixCycles = await askNonNegativeInteger(
+    deps,
+    'Final validation max fix cycles',
+    config.execution.finalValidation.maxFixCycles,
+  );
+}
+
 export async function setupCommand(
   options: SetupOptions = {},
   deps: SetupDeps = defaultDeps,
@@ -173,51 +266,70 @@ export async function setupCommand(
     options.backend ?? config.execution.backend,
   );
 
-  config.workflow.preset = await askChoice(
+  const usePreset = await askYesNo(
     deps,
-    'Workflow preset',
-    ['default', 'thorough', 'off'],
-    config.workflow.preset,
-  ) as RalphConfig['workflow']['preset'];
+    'Use a workflow preset (recommended) instead of configuring each step manually?',
+    true,
+  );
 
-  if (config.workflow.preset === 'default') {
-    config.execution.storyPlanning.enabled = false;
-    config.execution.storyValidation.enabled = false;
-    config.execution.storyValidation.maxFixCycles = 1;
-    config.execution.epicPlanning.enabled = true;
-    config.execution.epicValidation.enabled = true;
-    config.execution.epicValidation.maxFixCycles = 1;
-    config.execution.finalValidation.enabled = true;
-    config.execution.finalValidation.maxFixCycles = 1;
-  } else if (config.workflow.preset === 'thorough') {
-    config.execution.storyPlanning.enabled = true;
-    config.execution.storyValidation.enabled = true;
-    config.execution.storyValidation.maxFixCycles = 1;
-    config.execution.epicPlanning.enabled = true;
-    config.execution.epicValidation.enabled = true;
-    config.execution.epicValidation.maxFixCycles = 1;
-    config.execution.finalValidation.enabled = true;
-    config.execution.finalValidation.maxFixCycles = 1;
+  if (usePreset) {
+    deps.log(chalk.dim('Workflow presets:'));
+    deps.log(chalk.dim('  balanced: plan and validate epics, plus final validation after the full run.'));
+    deps.log(chalk.dim('  full: plan and validate stories and epics, plus final validation after the full run.'));
+    deps.log(chalk.dim('  minimal: disable automated planning and validation steps.'));
+    const preset = await askChoice(
+      deps,
+      'Planning/validation workflow preset',
+      ['balanced', 'full', 'minimal'],
+      config.workflow.preset,
+    ) as RalphConfig['workflow']['preset'];
+    applyWorkflowPreset(config, preset);
   } else {
-    config.execution.storyPlanning.enabled = false;
-    config.execution.storyValidation.enabled = false;
-    config.execution.storyValidation.maxFixCycles = 1;
-    config.execution.epicPlanning.enabled = false;
-    config.execution.epicValidation.enabled = false;
-    config.execution.epicValidation.maxFixCycles = 1;
-    config.execution.finalValidation.enabled = false;
-    config.execution.finalValidation.maxFixCycles = 1;
+    await promptForManualWorkflow(deps, config);
   }
 
-  config.execution.parallel = await askNonNegativeInteger(
+  const enableParallelExecution = await askYesNo(
     deps,
-    'Max epics to run in parallel (0 = unlimited)',
-    config.execution.parallel,
+    'Enable parallel epic execution when dependencies allow it?',
+    config.execution.parallel > 0,
   );
+  if (enableParallelExecution) {
+    const defaultParallel = config.execution.parallel > 0 ? config.execution.parallel : 2;
+    config.execution.parallel = await askNonNegativeInteger(
+      deps,
+      'Max epics to run in parallel',
+      defaultParallel,
+    );
+    if (config.execution.parallel === 0) {
+      config.execution.parallel = 2;
+    }
+  } else {
+    config.execution.parallel = 0;
+  }
+
+  const enableLoopTimeout = await askYesNo(
+    deps,
+    'Enable an overall Ralph run timeout so the whole workflow stops if it runs too long?',
+    config.timeouts.loopTimeout > 0,
+  );
+  if (enableLoopTimeout) {
+    const defaultLoopTimeout = config.timeouts.loopTimeout > 0 ? config.timeouts.loopTimeout : 18000;
+    config.timeouts.loopTimeout = await askNonNegativeInteger(
+      deps,
+      'Overall Ralph run timeout in seconds',
+      defaultLoopTimeout,
+    );
+    if (config.timeouts.loopTimeout === 0) {
+      config.timeouts.loopTimeout = 18000;
+    }
+  } else {
+    config.timeouts.loopTimeout = 0;
+  }
 
   await promptForAgentModels(deps, config);
 
   deps.writeFile(configPath, renderConfigYaml(config));
   deps.log(chalk.green(`\nWrote ${configPath}\n`));
+  deps.log(chalk.dim('Your Ralph Teams configuration is stored in ralph.config.yml.'));
   return { configPath, created: true };
 }
