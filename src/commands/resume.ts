@@ -107,7 +107,7 @@ export function resumeCommand(deps: ResumeDeps = defaultDeps, backendOverride?: 
   let config;
   let explicitAgentOverrides;
   try {
-    config = configLoader(cwd);
+    config = configLoader(projectRoot);
     explicitAgentOverrides = explicitOverridesLoader(projectRoot);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);

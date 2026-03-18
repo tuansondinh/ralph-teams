@@ -78,14 +78,15 @@ export async function runCommand(
   let config;
   let explicitAgentOverrides;
   try {
-    const baseConfig = configLoader(deps.cwd());
+    const prdDir = path.dirname(resolved);
+    const baseConfig = configLoader(prdDir);
     const parallelNum = parallel !== undefined ? parseParallel(parallel) : undefined;
     config = mergeCliOverrides(baseConfig, {
       ...(options.backend !== undefined ? { backend: options.backend } : {}),
       ...(parallelNum !== null && parallelNum !== undefined ? { parallel: parallelNum } : {}),
     });
     const explicitOverridesLoader = deps.loadExplicitAgentModelOverrides ?? loadExplicitAgentModelOverrides;
-    explicitAgentOverrides = explicitOverridesLoader(deps.cwd());
+    explicitAgentOverrides = explicitOverridesLoader(prdDir);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(chalk.red(`Error: ${msg}`));

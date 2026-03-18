@@ -277,6 +277,44 @@ test('runCommand uses spawnSync for execution', async () => {
   assert.ok(spawnSyncCalls.length >= 2, 'spawnSync should be called at least twice');
 });
 
+test('runCommand loads config from PRD directory, not cwd', async () => {
+  // prdDir contains the prd.json and a ralph.config.yml with a recognizable epicTimeout
+  const prdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-prddir-'));
+  const prdPath = path.join(prdDir, 'prd.json');
+  fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
+  // Write config with a distinctive epicTimeout in prdDir
+  fs.writeFileSync(path.join(prdDir, 'ralph.config.yml'), 'timeouts:\n  epicTimeout: 9999\n');
+  // Write ralph.sh into prdDir so findRalphSh can locate it
+  const tempRalphSh = path.join(prdDir, 'ralph.sh');
+  fs.writeFileSync(tempRalphSh, '#!/bin/sh\n');
+
+  // Run from a different directory that has no ralph.config.yml
+  const otherDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-other-'));
+
+  const calls: Array<{ command: string; args?: readonly string[]; env?: NodeJS.ProcessEnv }> = [];
+  const deps = createRunDeps({
+    existsSync: (target: fs.PathLike) => fs.existsSync(target),
+    spawnSync: ((command: string, args?: readonly string[], options?: { env?: NodeJS.ProcessEnv }) => {
+      calls.push({ command, args, env: options?.env });
+      return { status: 0 } as ReturnType<NonNullable<Parameters<typeof runCommand>[2]>['spawnSync']>;
+    }) as NonNullable<Parameters<typeof runCommand>[2]>['spawnSync'],
+    chmodSync: (() => {}) as typeof fs.chmodSync,
+    // cwd points to a directory without any ralph.config.yml
+    cwd: () => otherDir,
+  });
+
+  await assert.rejects(runCommand(prdPath, { backend: 'claude' }, deps), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 0);
+    return true;
+  });
+
+  const ralphCall = calls.find(c => c.command.endsWith('ralph.sh'));
+  assert.ok(ralphCall, 'ralph.sh was not called');
+  // Config must have been loaded from prdDir, so RALPH_EPIC_TIMEOUT should be '9999'
+  assert.equal(ralphCall!.env?.['RALPH_EPIC_TIMEOUT'], '9999', 'expected RALPH_EPIC_TIMEOUT from PRD directory config');
+});
+
 test('runCommand checks for the codex CLI when codex backend is selected', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
   const prdPath = path.join(tempDir, 'prd.json');

@@ -296,6 +296,51 @@ test('resumeCommand sets RALPH_MODEL_*_EXPLICIT=0 when no config file', () => {
   assert.equal(env['RALPH_MODEL_MERGER_EXPLICIT'], '0');
 });
 
+test('resumeCommand loads config from PRD directory, not cwd', () => {
+  // prdDir contains the prd.json, ralph.config.yml with a recognizable epicTimeout, and state
+  const prdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-resume-prddir-'));
+  const prdPath = path.join(prdDir, 'prd.json');
+  fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
+  // Write config with a distinctive epicTimeout in prdDir
+  fs.writeFileSync(path.join(prdDir, 'ralph.config.yml'), 'timeouts:\n  epicTimeout: 9999\n');
+  // Write ralph.sh into prdDir so findRalphSh can locate it
+  const tempRalphSh = path.join(prdDir, 'ralph.sh');
+  fs.writeFileSync(tempRalphSh, '#!/bin/sh\n');
+
+  // Write state file in a different directory (the cwd)
+  const otherDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-resume-other-'));
+  const stateFile = path.join(otherDir, '.ralph-teams', 'ralph-state.json');
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  // State references prdPath in prdDir (absolute path so resolve works from otherDir)
+  fs.writeFileSync(stateFile, makeState({ prdFile: prdPath }));
+
+  const calls: Array<{ command: string; args?: readonly string[]; env?: NodeJS.ProcessEnv }> = [];
+  const deps = createResumeDeps({
+    existsSync: (p: fs.PathLike) => fs.existsSync(p),
+    readFileSync: (p: fs.PathOrFileDescriptor, opts?: BufferEncoding | (fs.ObjectEncodingOptions & { flag?: string }) | null) =>
+      fs.readFileSync(p, opts as BufferEncoding),
+    spawnSync: ((command: string, args?: readonly string[], options?: { env?: NodeJS.ProcessEnv }) => {
+      calls.push({ command, args, env: options?.env });
+      return { status: 0 } as ReturnType<ResumeDeps['spawnSync']>;
+    }) as ResumeDeps['spawnSync'],
+    unlinkSync: fs.unlinkSync,
+    chmodSync: (() => {}) as typeof fs.chmodSync,
+    // cwd points to a directory without any ralph.config.yml (state is there, but no config)
+    cwd: () => otherDir,
+  });
+
+  assert.throws(() => resumeCommand(deps), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 0);
+    return true;
+  });
+
+  const ralphCall = calls.find(c => c.command.endsWith('ralph.sh'));
+  assert.ok(ralphCall, 'ralph.sh was not called');
+  // Config must have been loaded from prdDir, so RALPH_EPIC_TIMEOUT should be '9999'
+  assert.equal(ralphCall!.env?.['RALPH_EPIC_TIMEOUT'], '9999', 'expected RALPH_EPIC_TIMEOUT from PRD directory config');
+});
+
 test('resumeCommand passes --parallel to ralph.sh when present in state', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-resume-'));
   const prdPath = path.join(tempDir, 'prd.json');
