@@ -171,6 +171,7 @@ test('canonical Team Lead policy covers scoped planner and validator heuristics'
   assert.match(content, /storyValidation\.enabled = 1/i);
   assert.match(content, /epicValidation\.enabled = 1/i);
   assert.match(content, /If you are unsure, spawn the story validator/i);
+  assert.match(content, /If you are unsure, spawn the epic validator/i);
   assert.match(content, /Print `DONE: X\/Y stories passed` and exit immediately/i);
 });
 

@@ -91,12 +91,12 @@ The system has two layers:
   - `story-planner` creates a story-scoped plan when story planning is enabled
   - `builder` makes changes and runs tests
   - `story-validator` verifies a single story when story validation is enabled
-  - `epic-validator` verifies the full epic after all stories pass when epic validation is enabled
-  - `final-validator` verifies the merged result when final validation is enabled
+  - `epic-validator` verifies the full epic when epic validation is enabled and the Team Lead decides independent epic-level verification is warranted
+  - `final-validator` verifies the merged result in multi-epic runs when final validation is enabled
   - `merger` resolves merge conflicts when they occur
 
 Scoped planning and validation are configurable via `ralph.config.yml`. Workflow presets provide sensible defaults:
-- `balanced`: epic planning + epic validation + final validation enabled
+- `balanced`: epic planning + epic validation enabled, plus final validation for multi-epic runs
 - `full`: all planning and validation toggles enabled
 - `minimal`: all planning and validation toggles disabled
 
@@ -242,7 +242,7 @@ Prompts for:
 - Agent model overrides (optional)
 
 Workflow presets:
-- `balanced`: epic planning + epic validation + final validation enabled
+- `balanced`: epic planning + epic validation enabled, plus final validation for multi-epic runs
 - `full`: all planning and validation toggles enabled
 - `minimal`: all planning and validation toggles disabled
 

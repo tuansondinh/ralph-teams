@@ -292,6 +292,9 @@ export function setupMergeRepo(
       "fs.renameSync(t,f);" +
     '" "$EPIC_ID" "$PRD_PATH"',
     'else',
+    '  if printf "%s" "$STDIN" | grep -q "Validate the final integrated branch"; then',
+    '    touch final-validator-invoked.txt',
+    '  fi',
     '  printf "VERDICT: PASS\\n"',
     'fi',
     'exit 0',

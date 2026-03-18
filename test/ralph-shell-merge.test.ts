@@ -120,6 +120,13 @@ test('US-004: clean merge succeeds without spawning merger agent', () => {
   }
 });
 
+test('US-004: single-epic runs skip final validation', () => {
+  const { tempDir, env } = setupMergeRepo([{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }]);
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.equal(fs.existsSync(path.join(tempDir, 'final-validator-invoked.txt')), false);
+});
+
 test('US-004: dirty loop branch is auto-committed before merge', () => {
   const { tempDir, env } = setupMergeRepo([{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }], { dirtyLoopBranchBeforeMerge: true });
   const result = runRalph(tempDir, env);
@@ -152,6 +159,7 @@ test('US-004: two independent epics both merge cleanly after wave', () => {
   const branches = execFileSync('git', ['branch'], { cwd: tempDir, encoding: 'utf-8' });
   assert.doesNotMatch(branches, /ralph\/EPIC-001/);
   assert.doesNotMatch(branches, /ralph\/EPIC-002/);
+  assert.equal(fs.existsSync(path.join(tempDir, 'final-validator-invoked.txt')), true);
 });
 
 test('US-005: merge-failed status set when conflict cannot be resolved', () => {

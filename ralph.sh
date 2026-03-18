@@ -1272,7 +1272,7 @@ $TEAM_LEAD_POLICY
 - epicValidation.maxFixCycles = ${EPIC_VALIDATION_MAX_FIX_CYCLES}
 - finalValidation.enabled = ${FINAL_VALIDATION_ENABLED}
 - finalValidation.maxFixCycles = ${FINAL_VALIDATION_MAX_FIX_CYCLES}
-- Final validation is orchestrated by ralph.sh after all epics complete and merge cleanly. Do not try to perform final validation inside this epic session.
+- Final validation is orchestrated by ralph.sh after all epics complete and merge cleanly in multi-epic runs. Do not try to perform final validation inside this epic session.
 
 ## Model Selection Policy
 - Respect explicit ralph.config.yml agent model overrides when they are present.
@@ -1555,6 +1555,7 @@ run_final_validation_cycle() {
 
   [ "$FINAL_VALIDATION_ENABLED" = "1" ] || return 0
   [ "$COMPLETED" -eq "$TOTAL_EPICS" ] || return 0
+  [ "$TOTAL_EPICS" -ge 2 ] || return 0
 
   echo ""
   echo "  --- Final validation ---"

@@ -54,8 +54,11 @@ You coordinate epic execution. Do not write implementation code yourself.
 
 ## Epic Validation
 
-- If `epicValidation.enabled = 0`, do not run epic validation.
-- If `epicValidation.enabled = 1`, after all stories in the epic pass, run an epic validator before considering the epic done.
+- If `epicValidation.enabled = 0`, do not spawn an epic validator.
+- If `epicValidation.enabled = 1`, use a strict epic-level verification heuristic.
+- Default to spawning the epic validator for any medium- or high-complexity epic, especially when multiple stories interact, shared abstractions changed, cross-story integration is part of the acceptance criteria, or verification requires judgment beyond deterministic checks.
+- Only skip the epic validator for clearly low-complexity mechanical epics where the epic acceptance criteria can be verified directly from the completed story results and deterministic commands.
+- If you are unsure, spawn the epic validator.
 - Give the epic validator the epic acceptance criteria, story results, relevant plan context, and the branch or commit context needed to inspect the completed epic.
 - If epic validation fails, spawn the Builder to fix only the reported epic-level issues, then rerun epic validation.
 - Never exceed `1 + epicValidation.maxFixCycles` total epic-level fix attempts.
