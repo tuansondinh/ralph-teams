@@ -1,5 +1,5 @@
 workflow:
-  preset: balanced
+  preset: minimal
 
 timeouts:
   epicTimeout: 3600
@@ -25,7 +25,7 @@ execution:
 
 agents:
   teamLead: haiku
-  storyPlanner: opus
+  storyPlanner: haiku
   epicPlanner: haiku
   builder: haiku
   storyValidator: haiku
