@@ -7,7 +7,7 @@ timeouts:
   loopTimeout: 18000
 
 execution:
-  backend: claude
+  backend: codex
   parallel: 3
   storyPlanning:
     enabled: false
@@ -24,11 +24,11 @@ execution:
     maxFixCycles: 1
 
 agents:
-  teamLead: haiku
-  storyPlanner: haiku
-  epicPlanner: haiku
-  builder: haiku
-  storyValidator: haiku
-  epicValidator: haiku
-  finalValidator: haiku
-  merger: haiku
+  teamLead: gpt-5.1-codex-mini
+  storyPlanner: gpt-5.1-codex-mini
+  epicPlanner: gpt-5.1-codex-mini
+  builder: gpt-5.1-codex-mini
+  storyValidator: gpt-5.1-codex-mini
+  epicValidator: gpt-5.1-codex-mini
+  finalValidator: gpt-5.1-codex-mini
+  merger: gpt-5.1-codex-mini
