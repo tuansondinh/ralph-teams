@@ -189,7 +189,7 @@ test('US-004: final validation uses the result artifact instead of scraping the 
   assert.match(progress, /\[FINAL\] FINAL VALIDATION PASSED/);
 });
 
-test('US-004: final validation announces validator and final-fix spawning', () => {
+test('US-004: final validation announces validator spawning and leaves fixes to the validator session', () => {
   const { tempDir, env } = setupMergeRepo(
     [{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }, { id: 'EPIC-002', title: 'Beta', fileName: 'beta.txt' }],
   );
@@ -203,7 +203,7 @@ test('US-004: final validation announces validator and final-fix spawning', () =
   assert.match(result.stdout, /--- Final validation ---/);
   assert.match(result.stdout, /Spawning final validator\.\.\./);
   assert.match(result.stdout, /Final validation FAILED/);
-  assert.match(result.stdout, /Spawning final fix \(cycle 1\/1\)\.\.\./);
+  assert.doesNotMatch(result.stdout, /Spawning final fix/);
 });
 
 test('US-004: resume recovers completed-but-unmerged epic branches before finishing the run', () => {
