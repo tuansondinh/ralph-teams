@@ -1,0 +1,81 @@
+{
+  "project": "test-wave-merge",
+  "branchName": "main",
+  "description": "Minimal test project for wave execution and merger — 3 epics editing the same utils.js file",
+  "epics": [
+    {
+      "id": "EPIC-001",
+      "title": "Bootstrap utils module",
+      "description": "Create the initial utils.js file with a basic add function and a test file",
+      "status": "pending",
+      "planned": false,
+      "dependsOn": [],
+      "userStories": [
+        {
+          "id": "US-001",
+          "title": "Create utils.js with add()",
+          "description": "As a developer, I need a utils.js file with an exported add(a, b) function so other epics have a base to extend.",
+          "acceptanceCriteria": [
+            "utils.js exists at project root",
+            "Exports a function add(a, b) that returns a + b",
+            "utils.test.js exists and tests add()",
+            "Running node utils.test.js exits with code 0"
+          ],
+          "priority": 1,
+          "passes": false,
+          "failureReason": null
+        }
+      ]
+    },
+    {
+      "id": "EPIC-002",
+      "title": "Add multiply function",
+      "description": "Extend utils.js with a multiply(a, b) function",
+      "status": "pending",
+      "planned": false,
+      "dependsOn": [
+        "EPIC-001"
+      ],
+      "userStories": [
+        {
+          "id": "US-002",
+          "title": "multiply() in utils.js",
+          "description": "As a developer, I need a multiply(a, b) function exported from utils.js.",
+          "acceptanceCriteria": [
+            "utils.js exports multiply(a, b) that returns a * b",
+            "utils.test.js includes tests for multiply()",
+            "Running node utils.test.js exits with code 0"
+          ],
+          "priority": 1,
+          "passes": false,
+          "failureReason": null
+        }
+      ]
+    },
+    {
+      "id": "EPIC-003",
+      "title": "Add capitalize function",
+      "description": "Extend utils.js with a capitalize(str) string utility",
+      "status": "pending",
+      "planned": false,
+      "dependsOn": [
+        "EPIC-001"
+      ],
+      "userStories": [
+        {
+          "id": "US-003",
+          "title": "capitalize() in utils.js",
+          "description": "As a developer, I need a capitalize(str) function exported from utils.js.",
+          "acceptanceCriteria": [
+            "utils.js exports capitalize(str) that uppercases the first character and lowercases the rest",
+            "utils.test.js includes tests for capitalize()",
+            "Running node utils.test.js exits with code 0"
+          ],
+          "priority": 1,
+          "passes": false,
+          "failureReason": null
+        }
+      ]
+    }
+  ]
+}
