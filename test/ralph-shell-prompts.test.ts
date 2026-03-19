@@ -341,8 +341,8 @@ test('ralph.sh banner includes workflow preset or enabled execution phases', () 
 
   assert.match(script, /WORKFLOW_PRESET="\$\{RALPH_WORKFLOW_PRESET:-\}"/);
   assert.match(script, /render_enabled_execution_phases\(\)/);
-  assert.match(script, /echo "  Workflow: \$WORKFLOW_PRESET \(\$\(render_enabled_execution_phases\)\)"/);
-  assert.match(script, /echo "  Execution phases: \$\(render_enabled_execution_phases\)"/);
+  assert.match(script, /echo "  Workflow: \$WORKFLOW_PRESET \(enabled phases: \$\(render_enabled_execution_phases\)\)"/);
+  assert.match(script, /echo "  Execution phases enabled: \$\(render_enabled_execution_phases\)"/);
 });
 
 test('ralph.sh final validation reads the machine-readable result artifact', () => {

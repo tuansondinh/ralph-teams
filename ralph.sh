@@ -545,9 +545,9 @@ else
   echo "  Mode: sequential"
 fi
 if [ -n "$WORKFLOW_PRESET" ]; then
-  echo "  Workflow: $WORKFLOW_PRESET ($(render_enabled_execution_phases))"
+  echo "  Workflow: $WORKFLOW_PRESET (enabled phases: $(render_enabled_execution_phases))"
 else
-  echo "  Execution phases: $(render_enabled_execution_phases)"
+  echo "  Execution phases enabled: $(render_enabled_execution_phases)"
 fi
 echo "  Models: team-lead=$MODEL_TEAM_LEAD  story-planner=$MODEL_STORY_PLANNER  epic-planner=$MODEL_EPIC_PLANNER  builder=$MODEL_BUILDER  story-validator=$MODEL_STORY_VALIDATOR  epic-validator=$MODEL_EPIC_VALIDATOR  final-validator=$MODEL_FINAL_VALIDATOR  merger=$MODEL_MERGER"
 echo "========================================================"
