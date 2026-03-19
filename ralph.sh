@@ -1931,6 +1931,7 @@ $validation_result_file
     validation_verdict="$(read_final_validation_verdict "$validation_result_file" || true)"
 
     if [ "$validation_verdict" = "PASS" ]; then
+    echo "  Spawning final validator..."
       echo "  Final validation PASSED"
       echo "[FINAL] FINAL VALIDATION PASSED — $(date)" >> "$PROGRESS_FILE"
       return 0
@@ -1955,6 +1956,7 @@ $validation_result_file
 
 ## Working Directory
 $ROOT_DIR
+    echo "  Spawning final fix (cycle ${final_fix_cycle}/${FINAL_VALIDATION_MAX_FIX_CYCLES})..."
 
 ## Final Validation Log
 $validation_log

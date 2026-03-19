@@ -189,6 +189,23 @@ test('US-004: final validation uses the result artifact instead of scraping the 
   assert.match(progress, /\[FINAL\] FINAL VALIDATION PASSED/);
 });
 
+test('US-004: final validation announces validator and final-fix spawning', () => {
+  const { tempDir, env } = setupMergeRepo(
+    [{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }, { id: 'EPIC-002', title: 'Beta', fileName: 'beta.txt' }],
+  );
+  env.RALPH_FINAL_VALIDATION_ENABLED = '1';
+  env.RALPH_FINAL_VALIDATION_MAX_FIX_CYCLES = '1';
+  env.MOCK_FINAL_VALIDATION_VERDICT = 'fail';
+  env.MOCK_FINAL_VALIDATION_LOG_LINE = 'Final validation failed with actionable findings';
+
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 1, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.match(result.stdout, /--- Final validation ---/);
+  assert.match(result.stdout, /Spawning final validator\.\.\./);
+  assert.match(result.stdout, /Final validation FAILED/);
+  assert.match(result.stdout, /Spawning final fix \(cycle 1\/1\)\.\.\./);
+});
+
 test('US-004: resume recovers completed-but-unmerged epic branches before finishing the run', () => {
   const { tempDir, env } = setupMergeRepo(
     [{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }, { id: 'EPIC-002', title: 'Beta', fileName: 'beta.txt' }],
