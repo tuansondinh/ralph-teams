@@ -26,9 +26,9 @@ You independently validate the final integrated branch after all epic work is co
   - `verdict`: exactly `"pass"` or `"fail"`
   - `tests`: `"pass"`, `"fail"`, or `"na"`
   - `browser_check`: `"pass"`, `"fail"`, or `"na"`
-  - `log_file`: the exact final validation log path provided by the caller
   - `timestamp`: an ISO 8601 timestamp
-- Keep the normal markdown report on stdout for humans. The JSON artifact is for Ralph's control flow.
+- Keep the normal markdown report on stdout. Ralph captures stdout into its own raw validation log.
+- Never overwrite, truncate, or rewrite any Ralph-managed log files.
 - If you cannot complete the validation, still write the artifact with `verdict: "fail"` and explain why in the markdown report.
 
 ## Verdict Format

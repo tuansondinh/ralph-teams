@@ -1894,8 +1894,9 @@ run_final_validation_cycle() {
   echo "  --- Final validation ---"
 
   while true; do
-    local validation_log="${LOGS_DIR}/final-validation-$(date +%s).log"
-    local validation_result_file="${STATE_DIR}/final-validation-result.json"
+    local validation_run_id="$(date +%s)-$$-${final_fix_cycle}"
+    local validation_log="${LOGS_DIR}/final-validation-${validation_run_id}.log"
+    local validation_result_file="${STATE_DIR}/final-validation-result-${validation_run_id}.json"
     local validation_verdict=""
     local validation_prompt="Validate the final integrated branch after all epics have completed.
 
@@ -1909,7 +1910,6 @@ $ROOT_DIR
 - Current branch: $(git branch --show-current 2>/dev/null || echo unknown)
 - Completed epics: $COMPLETED / $TOTAL_EPICS
 - Progress log: $PROGRESS_FILE
-- Final validation log file: $validation_log
 
 ## Result Artifact Path
 $validation_result_file
@@ -1919,10 +1919,10 @@ $validation_result_file
 - Run relevant tests or verification commands yourself.
 - Use browser verification when UI behavior is affected and local verification is possible.
 - Write the final validation result artifact to the exact path above before exiting.
-- The result artifact must be valid JSON and include: phase, verdict, tests, browser_check, log_file, timestamp.
+- The result artifact must be valid JSON and include: phase, verdict, tests, browser_check, timestamp.
 - Set verdict to exactly pass or fail in the result artifact.
-- Set log_file in the result artifact to exactly $validation_log
 - Return a clear PASS or FAIL verdict in the role's required markdown format on stdout.
+- Do not overwrite or rewrite any Ralph log files. Ralph captures your stdout to its own raw log.
 - If you return FAIL, include a concise actionable fix list."
 
     rm -f "$validation_result_file"

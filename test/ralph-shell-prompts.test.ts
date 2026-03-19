@@ -127,6 +127,8 @@ test('scoped validator prompt assets cover story, epic, and final validation', (
     if (relativePath.includes('final-validator')) {
       assert.match(content, /Result Artifact Path|write a JSON file|machine-readable result artifact/i);
       assert.match(content, /"final-validation"|phase.*final-validation|verdict.*pass.*fail/i);
+      assert.match(content, /captures stdout into its own raw validation log|Never overwrite, truncate, or rewrite/i);
+      assert.doesNotMatch(content, /log_file.*final validation log path provided by the caller/i);
     }
     assert.match(content, /NEVER fix code|do not implement fixes/i);
   }
@@ -321,10 +323,14 @@ test('ralph.sh banner includes workflow preset or enabled execution phases', () 
 test('ralph.sh final validation reads the machine-readable result artifact', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
-  assert.match(script, /validation_result_file="\$\{STATE_DIR\}\/final-validation-result\.json"/);
+  assert.match(script, /validation_run_id="\$\(date \+%s\)-\$\$-\$\{final_fix_cycle\}"/);
+  assert.match(script, /validation_result_file="\$\{STATE_DIR\}\/final-validation-result-\$\{validation_run_id\}\.json"/);
+  assert.match(script, /validation_log="\$\{LOGS_DIR\}\/final-validation-\$\{validation_run_id\}\.log"/);
   assert.match(script, /## Result Artifact Path/);
   assert.match(script, /read_final_validation_verdict\(\)/);
   assert.match(script, /verdict="\$\(rjq read "\$result_file" \.verdict ""/);
+  assert.match(script, /Do not overwrite or rewrite any Ralph log files/);
+  assert.doesNotMatch(script, /Set log_file in the result artifact to exactly \$validation_log/);
 });
 
 test('ralph.sh requires one-shot builder and validator runs for shared team-lead prompt backends', () => {

@@ -171,11 +171,19 @@ test('US-004: final validation uses the result artifact instead of scraping the 
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
 
-  const artifactPath = path.join(tempDir, '.ralph-teams', 'state', 'final-validation-result.json');
+  const stateDir = path.join(tempDir, '.ralph-teams', 'state');
+  const artifactName = fs.readdirSync(stateDir).find((name) => /^final-validation-result-.*\.json$/.test(name));
+  assert.ok(artifactName, 'expected final validation result artifact to be written');
+  const artifactPath = path.join(stateDir, artifactName);
   const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf-8'));
   assert.equal(artifact.phase, 'final-validation');
   assert.equal(artifact.verdict, 'pass');
-  assert.match(String(artifact.log_file), /\.ralph-teams\/logs\/final-validation-/);
+
+  const logsDir = path.join(tempDir, '.ralph-teams', 'logs');
+  const validationLogName = fs.readdirSync(logsDir).find((name) => /^final-validation-.*\.log$/.test(name));
+  assert.ok(validationLogName, 'expected final validation raw log to be written');
+  const validationLog = fs.readFileSync(path.join(logsDir, validationLogName), 'utf-8');
+  assert.match(validationLog, /## Final Validation Report/);
 
   const progress = fs.readFileSync(path.join(tempDir, '.ralph-teams', 'progress.txt'), 'utf-8');
   assert.match(progress, /\[FINAL\] FINAL VALIDATION PASSED/);

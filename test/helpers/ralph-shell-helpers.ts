@@ -131,8 +131,8 @@ export function setupMultiEpicRepo(
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
     'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
-    'FINAL_RESULT_PATH=$(printf "%s" "$STDIN" | grep -oE \'[^[:space:]]*final-validation-result\\.json\' | head -1)',
-    'if [ -z "$FINAL_RESULT_PATH" ]; then FINAL_RESULT_PATH="$(pwd)/.ralph-teams/state/final-validation-result.json"; fi',
+    'FINAL_RESULT_PATH=$(printf "%s" "$STDIN" | grep -oE \'[^[:space:]]*final-validation-result[^[:space:]]*\\.json\' | head -1)',
+    'if [ -z "$FINAL_RESULT_PATH" ]; then FINAL_RESULT_PATH="$(pwd)/.ralph-teams/state/final-validation-result-mock.json"; fi',
     'if [ -n "$EPIC_ID" ]; then',
     '  ENV_KEY="MOCK_RESULT_$(printf "%s" "$EPIC_ID" | tr - _)"',
     '  RESULT_VAL=$(printenv "$ENV_KEY" 2>/dev/null || true)',
@@ -183,11 +183,10 @@ export function setupMultiEpicRepo(
       " verdict: verdict === 'fail' ? 'fail' : 'pass'," +
       " tests:'pass'," +
       " browser_check:'na'," +
-      " log_file: process.argv[3]," +
       " timestamp:'2026-03-19T12:27:13+01:00'" +
       "};" +
       "fs.writeFileSync(file,JSON.stringify(artifact,null,2)+'\\n');" +
-      '" "$FINAL_RESULT_PATH" "$FINAL_VERDICT" "log-from-mock"',
+      '" "$FINAL_RESULT_PATH" "$FINAL_VERDICT"',
     '  fi',
     '  printf "%s\\n" "$FINAL_LOG_LINE"',
     'fi',
@@ -272,10 +271,8 @@ export function setupMergeRepo(
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
     'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
-    'FINAL_RESULT_PATH=$(printf "%s" "$STDIN" | grep -oE \'[^[:space:]]*final-validation-result\\.json\' | head -1)',
-    'if [ -z "$FINAL_RESULT_PATH" ]; then FINAL_RESULT_PATH="$(pwd)/.ralph-teams/state/final-validation-result.json"; fi',
-    'FINAL_LOG_PATH=$(printf "%s" "$STDIN" | awk \'/^- Final validation log file:/ {sub(/^- Final validation log file: /, \"\"); print; exit}\' )',
-    'if [ -z "$FINAL_LOG_PATH" ]; then FINAL_LOG_PATH="$(pwd)/.ralph-teams/logs/final-validation-mock.log"; fi',
+    'FINAL_RESULT_PATH=$(printf "%s" "$STDIN" | grep -oE \'[^[:space:]]*final-validation-result[^[:space:]]*\\.json\' | head -1)',
+    'if [ -z "$FINAL_RESULT_PATH" ]; then FINAL_RESULT_PATH="$(pwd)/.ralph-teams/state/final-validation-result-mock.json"; fi',
     'if [ -n "$EPIC_ID" ]; then',
     '  ENV_KEY="MOCK_FILE_$(printf "%s" "$EPIC_ID" | tr - _)"',
     '  FILE_NAME=$(printenv "$ENV_KEY" 2>/dev/null || true)',
@@ -338,11 +335,10 @@ export function setupMergeRepo(
       " verdict: verdict === 'fail' ? 'fail' : 'pass'," +
       " tests:'pass'," +
       " browser_check:'na'," +
-      " log_file: process.argv[3]," +
       " timestamp:'2026-03-19T12:27:13+01:00'" +
       "};" +
       "fs.writeFileSync(file,JSON.stringify(artifact,null,2)+'\\n');" +
-      '" "$FINAL_RESULT_PATH" "$FINAL_VERDICT" "$FINAL_LOG_PATH"',
+      '" "$FINAL_RESULT_PATH" "$FINAL_VERDICT"',
     '    fi',
     '    printf "%s\\n" "$FINAL_LOG_LINE"',
     '  else',
