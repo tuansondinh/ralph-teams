@@ -10,7 +10,7 @@ ralph-teams run --parallel={max_parallel_epics}
 
 Many spec-driven tools are heavy, burn a lot of tokens, and are harder to adapt when the underlying agent capabilities change. Ralph's original idea was to trust the agent more and keep orchestration light. That bias fits the current direction of AI tooling: agents keep getting better, context windows keep growing, and models are increasingly able to coordinate teams of sub-agents on their own.
 
-`ralph-teams` is built around that idea. Instead of heavy process layers, it loops whole epics with small agent teams and keeps the orchestration simple and configurable. In practice, the epic and user-story structure tends to work well because the user-centric view and explicit acceptance criteria give the agents a clearer picture of what "done" means.
+`ralph-teams` is built around that idea. Instead of heavy process layers, it loops whole epics with small agent teams and keeps the orchestration simple and configurable. In my experience, the epic and user-story structure tends to work well because the user-centric view and explicit acceptance criteria give the agents a clearer picture of what "done" means.
 
 The default `balanced` mode is intentionally simple:
 - the Team Lead orchestrates the epic
