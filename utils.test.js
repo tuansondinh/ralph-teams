@@ -19,6 +19,12 @@ assert.strictEqual(add(0, 0), 0, 'add(0, 0) should equal 0');
 // Test 6: capitalize() should be exported as a function
 assert.strictEqual(typeof capitalize, 'function', 'capitalize should be exported as a function');
 
+// Test 6a: capitalize() should be exported on the utils module
+assert.ok(
+  Object.prototype.hasOwnProperty.call(require('./utils'), 'capitalize'),
+  'utils module should export capitalize'
+);
+
 // Test 7: capitalize() should uppercase first character and lowercase the rest
 assert.strictEqual(capitalize('hello'), 'Hello', "capitalize('hello') should equal 'Hello'");
 
@@ -54,6 +60,9 @@ assert.strictEqual(capitalize('   '), '   ', "capitalize('   ') should equal '  
 
 // Test 18: capitalize() should only capitalize the first character of a multi-word string
 assert.strictEqual(capitalize('hello world'), 'Hello world', "capitalize('hello world') should equal 'Hello world'");
+
+// Test 18a: capitalize() should lowercase the remainder of the string
+assert.strictEqual(capitalize('javaScript'), 'Javascript', "capitalize('javaScript') should equal 'Javascript'");
 
 // Test 19: multiply() should return the product of two positive numbers
 assert.strictEqual(multiply(2, 3), 6, 'multiply(2, 3) should equal 6');
