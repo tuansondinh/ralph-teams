@@ -126,6 +126,7 @@ test('scoped validator prompt assets cover story, epic, and final validation', (
     assert.match(content, /VERDICT: PASS \/ FAIL|VERDICT: PASS|PASS \/ FAIL/i);
     if (relativePath.includes('final-validator')) {
       assert.match(content, /Result Artifact Path|write a JSON file|machine-readable result artifact/i);
+      assert.match(content, /PRD File Path|read the PRD|requirements contract|PRD requirement coverage/i);
       assert.match(content, /"final-validation"|phase.*final-validation|verdict.*pass.*fail/i);
       assert.match(content, /captures stdout into its own raw validation log|Never overwrite, truncate, or rewrite/i);
       assert.match(content, /Allowed final-fix retries|spawn the Builder directly|you may spawn the Builder directly/i);
@@ -324,9 +325,11 @@ test('ralph.sh banner includes workflow preset or enabled execution phases', () 
 test('ralph.sh final validation reads the machine-readable result artifact', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
-  assert.match(script, /validation_run_id="\$\(date \+%s\)-\$\$-\$\{final_fix_cycle\}"/);
+  assert.match(script, /validation_run_id="\$\(date \+%s\)-\$\$-0"/);
   assert.match(script, /validation_result_file="\$\{STATE_DIR\}\/final-validation-result-\$\{validation_run_id\}\.json"/);
   assert.match(script, /validation_log="\$\{LOGS_DIR\}\/final-validation-\$\{validation_run_id\}\.log"/);
+  assert.match(script, /## PRD File Path/);
+  assert.match(script, /Validate the final implementation against the PRD, not just the code and tests/);
   assert.match(script, /## Result Artifact Path/);
   assert.match(script, /read_final_validation_verdict\(\)/);
   assert.match(script, /verdict="\$\(rjq read "\$result_file" \.verdict ""/);

@@ -1908,6 +1908,9 @@ $PROJECT
 ## Working Directory
 $ROOT_DIR
 
+## PRD File Path
+$PRD_FILE
+
 ## Context
 - Current branch: $(git branch --show-current 2>/dev/null || echo unknown)
 - Completed epics: $COMPLETED / $TOTAL_EPICS
@@ -1918,6 +1921,8 @@ $ROOT_DIR
 $validation_result_file
 
 ## Expectations
+- Validate the final implementation against the PRD, not just the code and tests.
+- Read the PRD yourself and check that completed epics and stories are actually reflected in the merged implementation.
 - Review the final repository state as a whole.
 - Run relevant tests or verification commands yourself.
 - Use browser verification when UI behavior is affected and local verification is possible.
