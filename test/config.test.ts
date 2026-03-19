@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { loadConfig, mergeCliOverrides, validateConfig, DEFAULT_CONFIG, RalphConfig, renderCommentedConfigTemplate } from '../src/config';
+import { loadConfig, loadExplicitAgentModelOverrides, mergeCliOverrides, validateConfig, DEFAULT_CONFIG, RalphConfig, renderCommentedConfigTemplate } from '../src/config';
 
 function makeTempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-config-'));
@@ -41,6 +41,24 @@ execution:
   assert.equal(config.execution.storyPlanning.enabled, false);
   assert.equal(config.execution.storyValidation.enabled, true);
   assert.equal(config.execution.storyValidation.maxFixCycles, 2);
+});
+
+test('loadConfig applies execution.model to all agent roles and preserves role overrides', () => {
+  const dir = makeTempDir();
+  writeConfig(dir, `
+execution:
+  model: gpt-5.1-codex-mini
+agents:
+  builder: gpt-5.4
+`);
+
+  const config = loadConfig(dir);
+  assert.equal(config.execution.model, 'gpt-5.1-codex-mini');
+  assert.equal(config.agents.teamLead, 'gpt-5.1-codex-mini');
+  assert.equal(config.agents.storyPlanner, 'gpt-5.1-codex-mini');
+  assert.equal(config.agents.epicPlanner, 'gpt-5.1-codex-mini');
+  assert.equal(config.agents.builder, 'gpt-5.4');
+  assert.equal(config.agents.finalValidator, 'gpt-5.1-codex-mini');
 });
 
 test('loadConfig applies the full preset', () => {
@@ -122,6 +140,22 @@ agents:
   assert.equal(config.agents.storyValidator, 'custom-validator-model');
 });
 
+test('loadExplicitAgentModelOverrides treats execution.model as explicit for every role', () => {
+  const dir = makeTempDir();
+  writeConfig(dir, `
+execution:
+  model: gpt-5.1-codex-mini
+agents:
+  builder: gpt-5.4
+`);
+
+  const overrides = loadExplicitAgentModelOverrides(dir);
+  assert.equal(overrides.teamLead, 'gpt-5.1-codex-mini');
+  assert.equal(overrides.storyPlanner, 'gpt-5.1-codex-mini');
+  assert.equal(overrides.builder, 'gpt-5.4');
+  assert.equal(overrides.finalValidator, 'gpt-5.1-codex-mini');
+});
+
 test('loadConfig returns defaults when ralph.config.yml only contains comments', () => {
   const dir = makeTempDir();
   writeConfig(dir, renderCommentedConfigTemplate());
@@ -145,6 +179,7 @@ test('validateConfig returns descriptive errors for invalid fields', () => {
     execution: {
       parallel: 1.5,
       backend: 'unknown',
+      model: '',
       storyPlanning: { enabled: 'yes' },
       storyValidation: { enabled: true, maxFixCycles: -1 },
       epicPlanning: { enabled: null },
@@ -161,6 +196,7 @@ test('validateConfig returns descriptive errors for invalid fields', () => {
   assert.match(joined, /timeouts\.loopTimeout/);
   assert.match(joined, /execution\.parallel/);
   assert.match(joined, /execution\.backend/);
+  assert.match(joined, /execution\.model/);
   assert.match(joined, /execution\.storyPlanning\.enabled/);
   assert.match(joined, /execution\.storyValidation\.maxFixCycles/);
   assert.match(joined, /execution\.epicPlanning\.enabled/);

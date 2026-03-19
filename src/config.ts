@@ -31,6 +31,8 @@ export interface RalphConfig {
     parallel: number;
     /** AI backend to use: 'claude', 'copilot', or 'codex'. Default: 'claude'. */
     backend: string;
+    /** Optional shared model override applied to all agent roles unless a role-specific override is present. */
+    model?: string;
     /** Whether per-story planning is enabled. */
     storyPlanning: ToggleConfig;
     /** Whether per-story validation is enabled and how many fix cycles are allowed. */
@@ -121,7 +123,10 @@ export const DEFAULT_CONFIG: RalphConfig = {
     idleTimeout: 600,
     loopTimeout: 18000,
   },
-  execution: presetExecution('balanced'),
+  execution: {
+    ...presetExecution('balanced'),
+    model: undefined,
+  },
   agents: {
     teamLead: 'opus',
     storyPlanner: 'opus',
@@ -141,6 +146,7 @@ function cloneConfig(config: RalphConfig): RalphConfig {
     execution: {
       parallel: config.execution.parallel,
       backend: config.execution.backend,
+      model: config.execution.model,
       storyPlanning: { ...config.execution.storyPlanning },
       storyValidation: { ...config.execution.storyValidation },
       epicPlanning: { ...config.execution.epicPlanning },
@@ -299,6 +305,28 @@ export function validateConfig(raw: unknown): { config: RalphConfig; errors: str
           errors.push(`execution.backend must be 'claude', 'copilot', 'codex', or 'opencode', got '${v}'`);
         } else {
           config.execution.backend = v;
+        }
+      }
+
+      if ('model' in e) {
+        const parsed = parseAgentModel(e['model']);
+        if (parsed === null) {
+          errors.push(`execution.model must be a non-empty string, got '${e['model']}'`);
+        } else {
+          config.execution.model = parsed;
+          const agentFields: AgentModelField[] = [
+            'teamLead',
+            'storyPlanner',
+            'epicPlanner',
+            'builder',
+            'storyValidator',
+            'epicValidator',
+            'finalValidator',
+            'merger',
+          ];
+          for (const field of agentFields) {
+            config.agents[field] = parsed;
+          }
         }
       }
 
@@ -484,13 +512,8 @@ export function loadExplicitAgentModelOverrides(projectRoot: string): Partial<Re
   }
 
   const agents = (raw as Record<string, unknown>)['agents'];
-  if (agents === null || typeof agents !== 'object' || Array.isArray(agents)) {
-    return {};
-  }
-
-  const agentObj = agents as Record<string, unknown>;
+  const execution = (raw as Record<string, unknown>)['execution'];
   const explicit: Partial<Record<AgentModelField, string>> = {};
-
   const directFields: AgentModelField[] = [
     'teamLead',
     'storyPlanner',
@@ -501,6 +524,21 @@ export function loadExplicitAgentModelOverrides(projectRoot: string): Partial<Re
     'finalValidator',
     'merger',
   ];
+
+  if (execution !== null && typeof execution === 'object' && !Array.isArray(execution)) {
+    const executionModel = parseAgentModel((execution as Record<string, unknown>)['model']);
+    if (executionModel !== null) {
+      for (const field of directFields) {
+        explicit[field] = executionModel;
+      }
+    }
+  }
+
+  if (agents === null || typeof agents !== 'object' || Array.isArray(agents)) {
+    return explicit;
+  }
+
+  const agentObj = agents as Record<string, unknown>;
 
   for (const field of directFields) {
     const value = agentObj[field];

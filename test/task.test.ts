@@ -122,6 +122,53 @@ test('taskCommand maps abstract opencode defaults to zai coding-plan models', as
   assert.equal(capturedEnv?.RALPH_MODEL_TEAM_LEAD, 'zai-coding-plan/glm-5');
 });
 
+test('taskCommand treats execution.model as an explicit override for all roles', async () => {
+  let capturedEnv: NodeJS.ProcessEnv | undefined;
+  const config = makeConfig();
+  config.execution.backend = 'codex';
+  config.execution.model = 'gpt-5.1-codex-mini';
+  config.agents.teamLead = 'gpt-5.1-codex-mini';
+  config.agents.storyPlanner = 'gpt-5.1-codex-mini';
+  config.agents.epicPlanner = 'gpt-5.1-codex-mini';
+  config.agents.builder = 'gpt-5.1-codex-mini';
+  config.agents.storyValidator = 'gpt-5.1-codex-mini';
+  config.agents.epicValidator = 'gpt-5.1-codex-mini';
+  config.agents.finalValidator = 'gpt-5.1-codex-mini';
+  config.agents.merger = 'gpt-5.1-codex-mini';
+
+  await taskCommand('use one model everywhere', {}, {
+    cwd: () => '/repo',
+    exit: ((code?: number) => { throw new ExitSignal(code); }) as (code?: number) => never,
+    loadConfig: () => config,
+    loadExplicitAgentModelOverrides: () => ({
+      teamLead: 'gpt-5.1-codex-mini',
+      storyPlanner: 'gpt-5.1-codex-mini',
+      epicPlanner: 'gpt-5.1-codex-mini',
+      builder: 'gpt-5.1-codex-mini',
+      storyValidator: 'gpt-5.1-codex-mini',
+      epicValidator: 'gpt-5.1-codex-mini',
+      finalValidator: 'gpt-5.1-codex-mini',
+      merger: 'gpt-5.1-codex-mini',
+    }),
+    ensureBackendAvailable: () => {},
+    getCurrentBranch: () => 'main',
+    askShouldPlan: async () => false,
+    runPlanningSession: async () => {
+      throw new Error('should not plan');
+    },
+    runExecutionSession: async (_prompt, _backend, env) => {
+      capturedEnv = env;
+    },
+  });
+
+  assert.equal(capturedEnv?.RALPH_MODEL_TEAM_LEAD, 'gpt-5.1-codex-mini');
+  assert.equal(capturedEnv?.RALPH_MODEL_STORY_PLANNER, 'gpt-5.1-codex-mini');
+  assert.equal(capturedEnv?.RALPH_MODEL_BUILDER, 'gpt-5.1-codex-mini');
+  assert.equal(capturedEnv?.RALPH_MODEL_TEAM_LEAD_EXPLICIT, '1');
+  assert.equal(capturedEnv?.RALPH_MODEL_BUILDER_EXPLICIT, '1');
+  assert.equal(capturedEnv?.RALPH_MODEL_FINAL_VALIDATOR_EXPLICIT, '1');
+});
+
 test('taskCommand exits when no current branch is available', async () => {
   await assert.rejects(
     taskCommand('do something', {}, {
