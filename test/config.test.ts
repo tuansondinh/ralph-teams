@@ -112,14 +112,14 @@ test('loadConfig supports planner and validator aliases for backward compatibili
 execution:
   validatorMaxPushbacks: 2
 agents:
-  planner: haiku
-  validator: opus
+  planner: gpt-5.1-codex-mini
+  validator: custom-validator-model
 `);
 
   const config = loadConfig(dir);
   assert.equal(config.execution.storyValidation.maxFixCycles, 2);
-  assert.equal(config.agents.epicPlanner, 'haiku');
-  assert.equal(config.agents.storyValidator, 'opus');
+  assert.equal(config.agents.epicPlanner, 'gpt-5.1-codex-mini');
+  assert.equal(config.agents.storyValidator, 'custom-validator-model');
 });
 
 test('loadConfig returns defaults when ralph.config.yml only contains comments', () => {
@@ -151,7 +151,7 @@ test('validateConfig returns descriptive errors for invalid fields', () => {
       epicValidation: { enabled: false, maxFixCycles: 'x' },
       finalValidation: { enabled: 'nope', maxFixCycles: 2 },
     },
-    agents: { storyPlanner: 'bad-model' },
+    agents: { storyPlanner: '' },
   });
 
   const joined = errors.join('\n');
@@ -167,6 +167,26 @@ test('validateConfig returns descriptive errors for invalid fields', () => {
   assert.match(joined, /execution\.epicValidation\.maxFixCycles/);
   assert.match(joined, /execution\.finalValidation\.enabled/);
   assert.match(joined, /agents\.storyPlanner/);
+});
+
+test('validateConfig accepts arbitrary non-empty agent model names', () => {
+  const { errors, config } = validateConfig({
+    agents: {
+      teamLead: 'gpt-5.1-codex-mini',
+      storyPlanner: 'my-custom-story-planner',
+      epicPlanner: 'claude-foo',
+      builder: 'builder-x',
+      storyValidator: 'validator-y',
+      epicValidator: 'validator-z',
+      finalValidator: 'gemini-2.5-pro',
+      merger: 'merge-model-1',
+    },
+  });
+
+  assert.equal(errors.length, 0);
+  assert.equal(config.agents.teamLead, 'gpt-5.1-codex-mini');
+  assert.equal(config.agents.finalValidator, 'gemini-2.5-pro');
+  assert.equal(config.agents.merger, 'merge-model-1');
 });
 
 test('validateConfig accepts a full valid object', () => {

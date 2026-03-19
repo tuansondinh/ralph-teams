@@ -64,8 +64,16 @@ export interface RalphConfig {
 
 export type AgentModelField = keyof RalphConfig['agents'];
 
-const VALID_MODELS = ['opus', 'sonnet', 'haiku'] as const;
 const VALID_PRESETS = ['balanced', 'full', 'minimal'] as const;
+
+function parseAgentModel(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
 
 function presetExecution(preset: WorkflowPreset): RalphConfig['execution'] {
   switch (preset) {
@@ -373,30 +381,30 @@ export function validateConfig(raw: unknown): { config: RalphConfig; errors: str
       ];
       for (const field of agentFields) {
         if (field in a) {
-          const v = a[field];
-          if (!VALID_MODELS.includes(v as typeof VALID_MODELS[number])) {
-            errors.push(`agents.${field} must be 'opus', 'sonnet', or 'haiku', got '${v}'`);
+          const parsed = parseAgentModel(a[field]);
+          if (parsed === null) {
+            errors.push(`agents.${field} must be a non-empty string, got '${a[field]}'`);
           } else {
-            config.agents[field] = v as string;
+            config.agents[field] = parsed;
           }
         }
       }
 
       if ('planner' in a && !('epicPlanner' in a)) {
-        const v = a['planner'];
-        if (!VALID_MODELS.includes(v as typeof VALID_MODELS[number])) {
-          errors.push(`agents.planner must be 'opus', 'sonnet', or 'haiku', got '${v}'`);
+        const parsed = parseAgentModel(a['planner']);
+        if (parsed === null) {
+          errors.push(`agents.planner must be a non-empty string, got '${a['planner']}'`);
         } else {
-          config.agents.epicPlanner = v as string;
+          config.agents.epicPlanner = parsed;
         }
       }
 
       if ('validator' in a && !('storyValidator' in a)) {
-        const v = a['validator'];
-        if (!VALID_MODELS.includes(v as typeof VALID_MODELS[number])) {
-          errors.push(`agents.validator must be 'opus', 'sonnet', or 'haiku', got '${v}'`);
+        const parsed = parseAgentModel(a['validator']);
+        if (parsed === null) {
+          errors.push(`agents.validator must be a non-empty string, got '${a['validator']}'`);
         } else {
-          config.agents.storyValidator = v as string;
+          config.agents.storyValidator = parsed;
         }
       }
     }
