@@ -91,6 +91,24 @@ test('builder prompt assets require test creation and TDD fallback when planning
   }
 });
 
+test('builder prompt assets require repository-driven command inference before verification', () => {
+  const promptFiles = [
+    'prompts/agents/builder.md',
+    '.opencode/agents/builder.md',
+    '.codex/agents/builder.toml',
+    '.github/agents/builder.agent.md',
+    '.claude/agents/builder.md',
+    'prompts/team-lead-policy.md',
+  ];
+
+  for (const relativePath of promptFiles) {
+    const content = fs.readFileSync(`${repoRoot}/${relativePath}`, 'utf-8');
+    assert.match(content, /infer.*setup.*build.*test commands|infer project commands/i);
+    assert.match(content, /AGENTS\.md|README/i);
+    assert.match(content, /Makefile|justfile|Taskfile\.yml|package scripts|repo-defined/i);
+  }
+});
+
 test('story planner prompt assets stay story-scoped and design-focused', () => {
   const promptFiles = [
     'prompts/agents/story-planner.md',
@@ -126,11 +144,13 @@ test('scoped validator prompt assets cover story, epic, and final validation', (
     assert.match(content, /VERDICT: PASS \/ FAIL|VERDICT: PASS|PASS \/ FAIL/i);
     if (relativePath.includes('final-validator')) {
       assert.match(content, /Result Artifact Path|write a JSON file|machine-readable result artifact/i);
+      assert.match(content, /PRD File Path|read the PRD|requirements contract|PRD requirement coverage/i);
       assert.match(content, /"final-validation"|phase.*final-validation|verdict.*pass.*fail/i);
       assert.match(content, /captures stdout into its own raw validation log|Never overwrite, truncate, or rewrite/i);
+      assert.match(content, /Allowed final-fix retries|spawn the Builder directly|you may spawn the Builder directly/i);
       assert.doesNotMatch(content, /log_file.*final validation log path provided by the caller/i);
     }
-    assert.match(content, /NEVER fix code|do not implement fixes/i);
+    assert.match(content, /NEVER fix code|do not implement fixes|Never edit code yourself/i);
   }
 });
 
@@ -164,6 +184,10 @@ test('ralph.sh loads the canonical Team Lead policy for runtime prompts', () => 
   assert.match(script, /TEAM_LEAD_POLICY_FILE=.*prompts\/team-lead-policy\.md/);
   assert.match(script, /TEAM_LEAD_POLICY="\$\(cat \"\$TEAM_LEAD_POLICY_FILE\"\)"/);
   assert.match(script, /## Canonical Team Lead Policy/);
+  assert.match(script, /## Project Setup Strategy/);
+  assert.match(script, /Ralph does not preinstall dependencies or preselect build\/test commands/);
+  assert.match(script, /Check repo instructions first: 'AGENTS\.md', 'README\*'/);
+  assert.doesNotMatch(script, /Check repo instructions first: `AGENTS\.md`, `README\*`/);
 });
 
 test('canonical Team Lead policy covers scoped planner and validator heuristics', () => {
@@ -220,7 +244,7 @@ test('copilot team-lead prompt uses difficulty-based model selection unless conf
   assert.match(content, /easy task -> `gpt-5-mini`/);
   assert.match(content, /medium task -> `gpt-5\.3-codex`/);
   assert.match(content, /difficult task -> `gpt-5\.4`/);
-  assert.match(content, /reasoning-effort/);
+  assert.doesNotMatch(content, /reasoning-effort/);
 });
 
 test('copilot team-lead prompt requires one-shot builder spawns instead of reusing teammates across stories', () => {
@@ -285,6 +309,7 @@ test('codex shell launches add the Ralph package directory alongside the project
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
   assert.match(script, /run_codex_exec "\$WORKTREE_ABS_PATH" "\$TEAM_PROMPT" --add-dir "\$ROOT_DIR" --add-dir "\$SCRIPT_DIR"/);
+  assert.match(script, /codex[\s\S]*-m "\$MODEL_TEAM_LEAD"[\s\S]*-c model_reasoning_effort='"high"'/);
   assert.match(script, /codex[\s\S]*--add-dir "\$SCRIPT_DIR"/);
   assert.match(script, /codex[\s\S]*--add-dir "\$ROOT_DIR"[\s\S]*--add-dir "\$SCRIPT_DIR"[\s\S]*- > "\$log_file"/);
 });
@@ -323,9 +348,11 @@ test('ralph.sh banner includes workflow preset or enabled execution phases', () 
 test('ralph.sh final validation reads the machine-readable result artifact', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
-  assert.match(script, /validation_run_id="\$\(date \+%s\)-\$\$-\$\{final_fix_cycle\}"/);
+  assert.match(script, /validation_run_id="\$\(date \+%s\)-\$\$-0"/);
   assert.match(script, /validation_result_file="\$\{STATE_DIR\}\/final-validation-result-\$\{validation_run_id\}\.json"/);
   assert.match(script, /validation_log="\$\{LOGS_DIR\}\/final-validation-\$\{validation_run_id\}\.log"/);
+  assert.match(script, /## PRD File Path/);
+  assert.match(script, /Validate the final implementation against the PRD, not just the code and tests/);
   assert.match(script, /## Result Artifact Path/);
   assert.match(script, /read_final_validation_verdict\(\)/);
   assert.match(script, /verdict="\$\(rjq read "\$result_file" \.verdict ""/);

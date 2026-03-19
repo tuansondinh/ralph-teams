@@ -268,6 +268,7 @@ async function runExecutionSession(prompt: string, backend: SupportedBackend, en
     'exec',
     '-C', cwd,
     '-m', env.RALPH_MODEL_TEAM_LEAD ?? 'gpt-5.3-codex',
+    '-c', 'model_reasoning_effort="high"',
     '-s', 'workspace-write',
     '--skip-git-repo-check',
     '--color', 'never',

@@ -189,7 +189,7 @@ export async function initCommand(options: InitOptions = {}): Promise<void> {
       stdio: 'inherit',
     });
   } else if (backend === 'codex') {
-    child = spawn('codex', ['-a', 'never', '-s', 'workspace-write', prompt], {
+    child = spawn('codex', ['-a', 'never', '-c', 'model_reasoning_effort="high"', '-s', 'workspace-write', prompt], {
       stdio: 'inherit',
     });
   } else if (backend === 'opencode') {

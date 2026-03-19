@@ -406,7 +406,7 @@ export function createDefaultSpawner(
         args = ['copilot', '--', '--allow-all', '-i', contextPrompt];
       } else if (backend === 'codex') {
         command = 'codex';
-        args = ['-a', 'never', '-s', 'workspace-write', contextPrompt];
+        args = ['-a', 'never', '-c', 'model_reasoning_effort="high"', '-s', 'workspace-write', contextPrompt];
       } else {
         command = 'opencode';
         args = ['.', '--prompt', contextPrompt];

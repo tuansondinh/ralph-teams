@@ -1,5 +1,5 @@
 workflow:
-  preset: balanced
+  preset: minimal
 
 timeouts:
   epicTimeout: 3600

@@ -32,4 +32,3 @@ Start by reading `prompts/team-lead-policy.md`. That file is the canonical Team 
   - easy task -> `gpt-5-mini`
   - medium task -> `gpt-5.3-codex`
   - difficult task -> `gpt-5.4`
-- If the task tool supports `--reasoning-effort`, use `low` for easy tasks, `medium` for normal tasks, `high` for difficult tasks, and `xhigh` only for exceptionally hard analysis.

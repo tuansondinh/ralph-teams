@@ -1,10 +1,26 @@
 # ralph-teams
 
+Lightweight orchestration for spec-driven AI delivery: Ralph Teams loops whole teams and epics, not tiny tasks, and uses small agent teams to move from PRD to merged implementation with minimal process overhead.
+It is built for teams who want the structure of epics and user stories without the token burn and rigidity of heavier spec-execution systems.
 
 `ralph-teams` is a lightweight and budgetfriendly CLI for running Ralph Teams: a shell-based orchestrator that initializes and reads a `prd.json`, loops through epics (not user stories), and spawns AI coding agent teams to implement work story by story. One Agent Team per Epic with fresh context. Ralph-Teams can even work on multiple epics in parallel, if there are no dependencies
 ```bash
 ralph-teams run --parallel={max_parallel_epics}
 ```
+
+## Why Use Ralph-Teams
+
+Many spec-driven tools are heavy, burn a lot of tokens, and are harder to adapt when the underlying agent capabilities change. Ralph's original idea was to trust the agent more and keep orchestration light. That bias fits the current direction of AI tooling: agents keep getting better, context windows keep growing, and models are increasingly able to coordinate teams of sub-agents on their own.
+
+`ralph-teams` is built around that idea. Instead of heavy process layers, it loops whole epics with small agent teams and keeps the orchestration simple and configurable. In my experience, the epic and user-story structure tends to work well because the user-centric view and explicit acceptance criteria give the agents a clearer picture of what "done" means.
+
+The default `balanced` mode is intentionally simple:
+- the Team Lead orchestrates the epic
+- it can spawn the epic planner if needed
+- it spawns one Builder per story attempt
+- it validates inline or spawns a validator when independent verification is needed
+- it works through the user stories sequentially until the epic is done
+- Ralph then moves to the next epic, and after all epics finish, runs final validation
 
 ## Quickest Start
 
@@ -53,32 +69,15 @@ Other presets:
 
 ## What It Does
 
-The system has two layers:
+At a high level:
+- `ralph.sh` owns the run loop, worktrees, merges, resume state, and backend process lifecycle.
+- one Team Lead session runs per epic and delegates to planner, builder, validator, and merger roles as needed.
+- `ralph.config.yml` controls backend choice, workflow toggles, parallelism, timeouts, and model selection.
 
-- `ralph.sh` acts as the project manager. It validates the PRD, checks epic dependencies, loops through ready epics, records results, and updates progress files.
-- `ralph.sh` also prepares each epic worktree to be runnable before the Team Lead starts. For lockfile-backed Node projects, it bootstraps dependencies inside the worktree and skips reinstall on reused worktrees when the lockfile is unchanged.
-- A backend agent session handles one epic at a time using a small team:
-  - `team-lead` coordinates the epic
-  - `epic-planner` creates the implementation plan when epic planning is enabled
-  - `story-planner` creates a story-scoped plan when story planning is enabled
-  - `builder` makes changes and runs tests
-  - `story-validator` verifies a single story when story validation is enabled
-  - `epic-validator` verifies the full epic when epic validation is enabled and the Team Lead decides independent epic-level verification is warranted
-  - `final-validator` verifies the merged result in multi-epic runs when final validation is enabled
-  - `merger` resolves merge conflicts when they occur
-
-Scoped planning and validation are configurable via `ralph.config.yml`. Workflow presets provide sensible defaults:
+Workflow presets:
 - `balanced`: epic planning enabled and heuristic epic validation enabled
 - `full`: `balanced`, plus story planning and heuristic story validation
 - `minimal`: planning and validation toggles disabled; no planner or validator subagents are spawned
-
-Validation semantics:
-- `storyValidation.enabled = 0` does not mean "no validation". It means no separate `story-validator` agent is spawned. The Team Lead performs the acceptance check inline so each story still has a gate before it can be marked passed.
-- `epicValidation.enabled = 0` means no separate epic-level validation gate is spawned. Story acceptance still happens, but there is no additional independent epic validator pass.
-- This asymmetry is intentional. Story work always needs an acceptance decision to drive the Builder retry loop and update per-story state. Epic validation is a higher-level quality gate that can be turned off entirely when you want a faster loop.
-- `storyValidation.maxFixCycles` and `epicValidation.maxFixCycles` control retries after the first attempt. `0` means one total attempt and no retry cycle. The Team Lead can still mark the work failed, but cannot push it back for another Builder pass.
-
-Across all backends, `builder` work is one-shot per attempt. A build attempt only counts when the Builder returns a concrete commit SHA and the Team Lead persists the story result to the epic state file at `.ralph-teams/state/{epic-id}.json`.
 
 Default agent model assignments:
 - `teamLead`: `opus`
@@ -90,14 +89,9 @@ Default agent model assignments:
 - `storyPlanner`: `opus`
 - `merger`: `sonnet`
 
-Team Lead policy by backend:
-- Claude: keep `team-lead` on `opus`; for spawned work, the Team Lead chooses `haiku` for easy tasks, `sonnet` for medium tasks, `opus` for difficult tasks
-- Copilot: difficulty-based defaults use `claude-haiku-4.5`, `claude-sonnet-4.6`, and `claude-opus-4.6`
-- Codex: difficulty-based defaults use `gpt-5-mini`, `gpt-5.3-codex`, and `gpt-5.4`
-
-If `ralph.config.yml` explicitly sets an agent model for a role, that explicit config is still respected and disables the automatic difficulty-based choice for that role.
-
 Ralph never writes code itself. It only schedules work, tracks results, and updates project state.
+
+For detailed workflow semantics, validation behavior, config precedence, runtime files, and architecture, see [docs/architecture.md](docs/architecture.md).
 
 Current backends:
 
@@ -106,20 +100,6 @@ Current backends:
 - `codex` via the `codex` CLI, repo-local `.codex/agents/*.toml`, and Codex multi-agent mode
 - `opencode` via the `opencode` CLI and `.opencode/agents/*.md`
 - shared worker-agent prompt source in `prompts/agents/*.md`, rendered to those backend-specific files via `npm run sync:agents`
-
-The runtime is file-based. During a run, Ralph treats these files as the working state of the system:
-
-- `prd.json`: source of truth for epic dependencies and status
-- `.ralph-teams/state/`: per-epic story pass/fail state files
-- `.ralph-teams/plans/`: implementation plans for epics that were explicitly planned
-- `.ralph-teams/progress.txt`: narrative progress log
-- `.ralph-teams/logs/`: raw backend logs
-- `.ralph-teams/ralph-state.json`: interrupt/resume state
-
-Final validation artifacts:
-- `.ralph-teams/logs/final-validation-<run-id>.log`: shell-owned raw final-validation output. This is the file the final Builder reads if final validation fails and a fix cycle is needed.
-- `.ralph-teams/state/final-validation-result-<run-id>.json`: machine-readable final-validation verdict for Ralph's control flow.
-- Ralph intentionally keeps the raw log shell-owned so the validator cannot overwrite it.
 
 
 ## Requirements
@@ -262,6 +242,7 @@ Notes:
 - `setup` lets you choose the default backend, use a planning/validation workflow preset or configure that workflow manually, set parallelism, and optionally override per-role models
 - the agent generates epics and user stories automatically
 - the agent should aim for about 5 user stories per epic when the scope supports it
+- treat about 5 user stories as the current practical ceiling for an epic, not just a suggestion; this keeps the Team Lead session context under control and avoids overwhelming the epic planner
 - `--backend` controls whether the interview/generation uses `claude`, `copilot`, `codex`, or `opencode`
 - the discussion itself is handled by the agent, not by a hardcoded questionnaire in the CLI
 
@@ -539,6 +520,7 @@ Important fields:
 Authoring guideline:
 
 - aim for about 5 user stories per epic when the scope can be split cleanly
+- treat about 5 user stories as the current practical ceiling for an epic so the Team Lead session stays within a reasonable context window and the epic planner is not overloaded
 - use fewer only when the epic is genuinely small or further splitting would be artificial
 
 The `init` command uses `prd.json.example` as schema and style guidance when generating a new PRD.
@@ -569,8 +551,9 @@ The current execution contract is:
 - experimental wave parallelism is enabled only with `--parallel <n>`
 - at run start Ralph auto-commits any dirty worktree changes, then creates a fresh loop branch from your current branch
 - each epic gets its own worktree and branch rooted from that loop branch
-- before the Team Lead starts, Ralph bootstraps lockfile-backed Node projects inside the worktree so tests and local tooling can run there
-- reused worktrees skip dependency reinstall when the worktree lockfile checksum is unchanged
+- before the Team Lead starts, Ralph creates the worktree and hands repo inspection, setup, build, and test command inference to the agents
+- agents are expected to prefer repo-defined scripts and docs over generic ecosystem defaults when choosing setup and verification commands
+- the shell-built Team Lead prompt must keep literal filenames shell-safe; do not add raw Markdown backticks inside that Bash string because Bash will treat them as command substitution
 - when an epic completes, its branch is merged back into the loop branch
 - the backend team processes one epic per session
 - stories run sequentially inside that epic

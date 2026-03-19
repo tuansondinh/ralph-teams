@@ -355,6 +355,11 @@ repair_root_runtime_dir_if_needed
 mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$STATE_DIR" "$WORKTREES_DIR"
 
 ensure_runtime_rjq_bin() {
+  if [ "${RALPH_SKIP_RUNTIME_RJQ:-}" = "1" ]; then
+    RJQ_BIN=""
+    return 0
+  fi
+
   local runtime_bin_dir="${RALPH_RUNTIME_DIR}/bin"
   local runtime_rjq_bin="${runtime_bin_dir}/rjq"
   local source_rjq_bin=""
@@ -714,87 +719,6 @@ compute_file_checksum() {
   cksum "$file_path" | awk '{print $1 ":" $2}'
 }
 
-bootstrap_project_dependencies() {
-  local project_dir="$1"
-  local rel_dir="$2"
-  local lockfile_name="$3"
-  local install_cmd="$4"
-  local lockfile_path="${project_dir}/${lockfile_name}"
-  local node_modules_dir="${project_dir}/node_modules"
-  local stamp_path="${node_modules_dir}/.ralph-lockhash"
-  local current_hash
-  current_hash="$(compute_file_checksum "$lockfile_path")"
-
-  if [ -d "$node_modules_dir" ] && [ -f "$stamp_path" ] && [ "$(cat "$stamp_path" 2>/dev/null || true)" = "$current_hash" ]; then
-    echo "  Dependency bootstrap skipped for ${rel_dir} (${lockfile_name} unchanged)"
-    return 0
-  fi
-
-  if [ -d "$node_modules_dir" ]; then
-    rm -rf "$node_modules_dir"
-  fi
-
-  echo "  Bootstrapping dependencies in ${rel_dir} with '${install_cmd}'"
-
-  (
-    cd "$project_dir"
-    eval "$install_cmd"
-  )
-
-  mkdir -p "$node_modules_dir"
-  printf '%s\n' "$current_hash" > "$stamp_path"
-}
-
-bootstrap_worktree_dependencies() {
-  local worktree_abs_path="$1"
-  local package_json_path
-  local project_dir
-  local rel_dir
-  local install_cmd=""
-  local lockfile_name=""
-  local bootstrapped_any="0"
-
-  while IFS= read -r package_json_path; do
-    [ -n "$package_json_path" ] || continue
-    project_dir="$(dirname "$package_json_path")"
-    rel_dir="${project_dir#${worktree_abs_path}/}"
-    [ "$project_dir" = "$worktree_abs_path" ] && rel_dir="."
-
-    install_cmd=""
-    lockfile_name=""
-    if [ -f "${project_dir}/package-lock.json" ]; then
-      lockfile_name="package-lock.json"
-      install_cmd="npm ci"
-    elif [ -f "${project_dir}/pnpm-lock.yaml" ]; then
-      lockfile_name="pnpm-lock.yaml"
-      install_cmd="pnpm install --frozen-lockfile"
-    elif [ -f "${project_dir}/yarn.lock" ]; then
-      lockfile_name="yarn.lock"
-      install_cmd="yarn install --frozen-lockfile"
-    fi
-
-    if [ -z "$install_cmd" ]; then
-      continue
-    fi
-
-    if ! command -v "${install_cmd%% *}" >/dev/null 2>&1; then
-      echo "Error: required package manager '${install_cmd%% *}' is not available for ${rel_dir}." >&2
-      exit 1
-    fi
-
-    bootstrap_project_dependencies "$project_dir" "$rel_dir" "$lockfile_name" "$install_cmd"
-    bootstrapped_any="1"
-  done < <(
-    find "$worktree_abs_path" \
-      \( -name .git -o -name node_modules -o -name "$RALPH_RUNTIME_DIRNAME" \) -prune \
-      -o -type f -name package.json -print | sort
-  )
-
-  if [ "$bootstrapped_any" = "0" ]; then
-    echo "  No lockfile-backed Node projects detected in worktree"
-  fi
-}
-
 ensure_worktree_runtime_link() {
   local worktree_abs_path="$1"
   local worktree_runtime_path="${worktree_abs_path}/${RALPH_RUNTIME_DIRNAME}"
@@ -1057,6 +981,7 @@ run_codex_exec() {
     exec \
     -C "$workdir" \
     -m "$MODEL_TEAM_LEAD" \
+    -c model_reasoning_effort='"high"' \
     -s workspace-write \
     --skip-git-repo-check \
     --color never \
@@ -1466,7 +1391,6 @@ spawn_epic_bg() {
   local WORKTREE_ABS_PATH
   WORKTREE_ABS_PATH="$(cd "${ROOT_DIR}/${WORKTREE_PATH}" && pwd)"
   ensure_worktree_runtime_link "$WORKTREE_ABS_PATH"
-  bootstrap_worktree_dependencies "$WORKTREE_ABS_PATH"
   local WORKTREE_PRD_PATH="${WORKTREE_ABS_PATH}/${PRD_REL_PATH}"
   local WORKTREE_STATE_FILE="${WORKTREE_ABS_PATH}/${RALPH_RUNTIME_DIRNAME}/state/${EPIC_ID}.json"
   local WORKTREE_PLAN_FILE="${WORKTREE_ABS_PATH}/${RALPH_RUNTIME_DIRNAME}/plans/plan-${EPIC_ID}.md"
@@ -1490,6 +1414,16 @@ $PROJECT
 ## Working Directory
 ALL work for this epic MUST happen in this directory: $WORKTREE_ABS_PATH
 Do NOT modify files outside this directory, except for the epic state file below.
+
+## Project Setup Strategy
+- Ralph does not preinstall dependencies or preselect build/test commands for this repo.
+- Before delegating implementation, inspect the repository and infer the correct setup, build, and test commands from project context.
+- Check repo instructions first: 'AGENTS.md', 'README*', contributor docs, and project-local guidance files.
+- Prefer repo-defined task runners or scripts such as 'Makefile', 'justfile', 'Taskfile.yml', package scripts, wrapper scripts, or documented commands.
+- Then inspect ecosystem manifests such as 'package.json', 'pyproject.toml', 'requirements.txt', 'Cargo.toml', 'go.mod', 'Gemfile', 'pom.xml', 'build.gradle*', 'mix.exs', 'Dockerfile', and 'docker-compose*.yml'.
+- Prefer explicit repository commands over generic ecosystem defaults.
+- Only fall back to generic defaults when the repository is unambiguous.
+- If setup remains ambiguous after inspection, stop guessing and fail the story attempt with a short concrete reason describing what you found.
 
 ## Epic State File
 $WORKTREE_STATE_FILE
@@ -1542,7 +1476,6 @@ $TEAM_LEAD_POLICY
   - Claude: easy -> haiku, medium -> sonnet, difficult -> opus
   - Copilot / Codex: easy -> gpt-5-mini, medium -> gpt-5.3-codex, difficult -> gpt-5.4
   - OpenCode: easy -> zai-coding-plan/glm-4.7-flash, medium -> zai-coding-plan/glm-4.7, difficult -> zai-coding-plan/glm-5
-- If your runtime supports setting reasoning effort per spawned task, use low for easy tasks, medium for normal tasks, high for difficult tasks, and xhigh only for unusually hard analysis or verification.
 - If your runtime is Codex, use these exact named teammate roles when spawning:
   - story planners: story_planner_easy, story_planner_medium, story_planner_difficult
   - epic planners: epic_planner_easy, epic_planner_medium, epic_planner_difficult
@@ -1884,8 +1817,6 @@ read_final_validation_verdict() {
 }
 
 run_final_validation_cycle() {
-  local final_fix_cycle=0
-
   [ "$FINAL_VALIDATION_ENABLED" = "1" ] || return 0
   [ "$COMPLETED" -eq "$TOTAL_EPICS" ] || return 0
   [ "$TOTAL_EPICS" -ge 2 ] || return 0
@@ -1893,12 +1824,11 @@ run_final_validation_cycle() {
   echo ""
   echo "  --- Final validation ---"
 
-  while true; do
-    local validation_run_id="$(date +%s)-$$-${final_fix_cycle}"
-    local validation_log="${LOGS_DIR}/final-validation-${validation_run_id}.log"
-    local validation_result_file="${STATE_DIR}/final-validation-result-${validation_run_id}.json"
-    local validation_verdict=""
-    local validation_prompt="Validate the final integrated branch after all epics have completed.
+  local validation_run_id="$(date +%s)-$$-0"
+  local validation_log="${LOGS_DIR}/final-validation-${validation_run_id}.log"
+  local validation_result_file="${STATE_DIR}/final-validation-result-${validation_run_id}.json"
+  local validation_verdict=""
+  local validation_prompt="Validate the final integrated branch after all epics have completed.
 
 ## Project
 $PROJECT
@@ -1906,18 +1836,25 @@ $PROJECT
 ## Working Directory
 $ROOT_DIR
 
+## PRD File Path
+$PRD_FILE
+
 ## Context
 - Current branch: $(git branch --show-current 2>/dev/null || echo unknown)
 - Completed epics: $COMPLETED / $TOTAL_EPICS
 - Progress log: $PROGRESS_FILE
+- Allowed final-fix retries: $FINAL_VALIDATION_MAX_FIX_CYCLES
 
 ## Result Artifact Path
 $validation_result_file
 
 ## Expectations
+- Validate the final implementation against the PRD, not just the code and tests.
+- Read the PRD yourself and check that completed epics and stories are actually reflected in the merged implementation.
 - Review the final repository state as a whole.
 - Run relevant tests or verification commands yourself.
 - Use browser verification when UI behavior is affected and local verification is possible.
+- If you find fixable issues and retries remain, you may spawn the Builder directly, pass the findings directly, verify the fix yourself, and then decide the final verdict.
 - Write the final validation result artifact to the exact path above before exiting.
 - The result artifact must be valid JSON and include: phase, verdict, tests, browser_check, timestamp.
 - Set verdict to exactly pass or fail in the result artifact.
@@ -1925,52 +1862,28 @@ $validation_result_file
 - Do not overwrite or rewrite any Ralph log files. Ralph captures your stdout to its own raw log.
 - If you return FAIL, include a concise actionable fix list."
 
-    rm -f "$validation_result_file"
-    run_backend_agent_session "$ROOT_DIR" final-validator "$MODEL_FINAL_VALIDATOR" "$validation_prompt" "$validation_log"
+  rm -f "$validation_result_file"
+  echo "  Spawning final validator..."
+  run_backend_agent_session "$ROOT_DIR" final-validator "$MODEL_FINAL_VALIDATOR" "$validation_prompt" "$validation_log"
 
-    validation_verdict="$(read_final_validation_verdict "$validation_result_file" || true)"
+  validation_verdict="$(read_final_validation_verdict "$validation_result_file" || true)"
 
-    if [ "$validation_verdict" = "PASS" ]; then
-      echo "  Final validation PASSED"
-      echo "[FINAL] FINAL VALIDATION PASSED — $(date)" >> "$PROGRESS_FILE"
-      return 0
-    fi
+  if [ "$validation_verdict" = "PASS" ]; then
+    echo "  Final validation PASSED"
+    echo "[FINAL] FINAL VALIDATION PASSED — $(date)" >> "$PROGRESS_FILE"
+    return 0
+  fi
 
-    echo "  Final validation FAILED"
-    echo "  Final validation log: $validation_log"
-    if [ "$validation_verdict" = "FAIL" ]; then
-      echo "  Final validation result: $validation_result_file"
-    else
-      echo "  Final validation result missing or invalid: $validation_result_file"
-    fi
-    echo "[FINAL] FINAL VALIDATION FAILED — $(date)" >> "$PROGRESS_FILE"
+  echo "  Final validation FAILED"
+  echo "  Final validation log: $validation_log"
+  if [ "$validation_verdict" = "FAIL" ]; then
+    echo "  Final validation result: $validation_result_file"
+  else
+    echo "  Final validation result missing or invalid: $validation_result_file"
+  fi
+  echo "[FINAL] FINAL VALIDATION FAILED — $(date)" >> "$PROGRESS_FILE"
+  return 1
 
-    if [ "$final_fix_cycle" -ge "$FINAL_VALIDATION_MAX_FIX_CYCLES" ]; then
-      return 1
-    fi
-
-    final_fix_cycle=$((final_fix_cycle + 1))
-    local fix_log="${LOGS_DIR}/final-fix-$(date +%s).log"
-    local fix_prompt="Implement only the fixes required by the failed final validation report.
-
-## Working Directory
-$ROOT_DIR
-
-## Final Validation Log
-$validation_log
-
-## Rules
-- Read the validation findings from the log file yourself before editing.
-- Make only the changes needed to address those findings.
-- Add or update automated tests when needed.
-- Run the relevant verification commands.
-- Commit the result and report the commit SHA in your normal format."
-
-    run_backend_agent_session "$ROOT_DIR" builder "$MODEL_BUILDER" "$fix_prompt" "$fix_log"
-    echo "  Final fix cycle ${final_fix_cycle} completed"
-    echo "  Final fix log: $fix_log"
-    echo "[FINAL] FINAL FIX CYCLE ${final_fix_cycle} — $(date)" >> "$PROGRESS_FILE"
-  done
 }
 
 if ! recover_pending_merges "resume/startup"; then
