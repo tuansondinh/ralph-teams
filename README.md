@@ -360,12 +360,13 @@ ralph-teams logs --tail 20
 
 `--tail` shows the last `N` wave blocks from `.ralph-teams/progress.txt`.
 
-### `ralph-teams reset <epicId> [path]`
+### `ralph-teams reset [epicId] [path]`
 
-Resets one epic to `pending` and sets all of its stories back to `passes: false`.
+Resets one epic to `pending` and sets all of its stories back to `passes: false`. When no epic ID is provided, resets all epics.
 
 ```bash
 ralph-teams reset EPIC-002
+ralph-teams reset          # resets all epics
 ```
 
 ### `ralph-teams validate [path]`
