@@ -26,6 +26,30 @@ export function readCodexPromptBody(relativePath: string): string {
   return match[1].trim();
 }
 
+function cloneProcessEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) {
+      env[key] = value;
+    }
+  }
+  return env;
+}
+
+export function createTestEnv(binDir: string): Record<string, string> {
+  const env = cloneProcessEnv();
+  env.PATH = `${binDir}:${env.PATH ?? ''}`;
+  env.RALPH_MAX_CRASH_RETRIES = '0';
+  env.RALPH_PARALLEL = '';
+  delete env.RALPH_RJQ_BIN;
+  env.RALPH_SKIP_RUNTIME_RJQ = '1';
+  return env;
+}
+
+export function writeSampleJson(targetDir: string, value = 'sample-value') {
+  fs.writeFileSync(path.join(targetDir, 'sample.json'), JSON.stringify({ value }, null, 2) + '\n');
+}
+
 export function setupTempRepo() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-shell-'));
   const binDir = path.join(tempDir, 'bin');
@@ -214,11 +238,7 @@ export function setupMultiEpicRepo(
   execFileSync('git', ['add', '.'], { cwd: tempDir });
   execFileSync('git', ['commit', '-m', 'chore: initial'], { cwd: tempDir });
 
-  const env: Record<string, string> = {
-    ...process.env as Record<string, string>,
-    PATH: `${binDir}:${process.env.PATH ?? ''}`,
-    RALPH_MAX_CRASH_RETRIES: '0',
-  };
+  const env = createTestEnv(binDir);
   for (const [epicId, result] of Object.entries(resultMap)) {
     env[`MOCK_RESULT_${epicId.replace(/-/g, '_')}`] = result;
   }
@@ -350,11 +370,7 @@ export function setupMergeRepo(
   fs.writeFileSync(path.join(binDir, 'claude'), mockClaude);
   fs.chmodSync(path.join(binDir, 'claude'), 0o755);
 
-  const env: Record<string, string> = {
-    ...process.env as Record<string, string>,
-    PATH: `${binDir}:${process.env.PATH ?? ''}`,
-    RALPH_MAX_CRASH_RETRIES: '0',
-  };
+  const env = createTestEnv(binDir);
   for (const e of epics) {
     env[`MOCK_FILE_${e.id.replace(/-/g, '_')}`] = e.fileName;
   }
@@ -445,11 +461,7 @@ export function setupConflictRepo(options?: { resolveWithMerger?: boolean }) {
   fs.writeFileSync(path.join(binDir, 'claude'), mockClaude);
   fs.chmodSync(path.join(binDir, 'claude'), 0o755);
 
-  const env: Record<string, string> = {
-    ...process.env as Record<string, string>,
-    PATH: `${binDir}:${process.env.PATH ?? ''}`,
-    RALPH_MAX_CRASH_RETRIES: '0',
-  };
+  const env = createTestEnv(binDir);
 
   return { tempDir, binDir, env };
 }
@@ -526,11 +538,7 @@ export function setupIdleTimeoutRepo(
   execFileSync('git', ['add', '.'], { cwd: tempDir });
   execFileSync('git', ['commit', '-m', 'chore: initial'], { cwd: tempDir });
 
-  const env: Record<string, string> = {
-    ...process.env as Record<string, string>,
-    PATH: `${binDir}:${process.env.PATH ?? ''}`,
-    RALPH_MAX_CRASH_RETRIES: '0',
-  };
+  const env = createTestEnv(binDir);
   for (const [epicId, result] of Object.entries(resultMap)) {
     env[`MOCK_RESULT_${epicId.replace(/-/g, '_')}`] = result;
   }

@@ -355,6 +355,11 @@ repair_root_runtime_dir_if_needed
 mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$STATE_DIR" "$WORKTREES_DIR"
 
 ensure_runtime_rjq_bin() {
+  if [ "${RALPH_SKIP_RUNTIME_RJQ:-}" = "1" ]; then
+    RJQ_BIN=""
+    return 0
+  fi
+
   local runtime_bin_dir="${RALPH_RUNTIME_DIR}/bin"
   local runtime_rjq_bin="${runtime_bin_dir}/rjq"
   local source_rjq_bin=""

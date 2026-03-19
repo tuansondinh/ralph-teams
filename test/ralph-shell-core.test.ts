@@ -13,6 +13,8 @@ import {
   setupMultiEpicRepo,
   setupTempRepo,
   setupUnbornRepo,
+  writeSampleJson,
+  createTestEnv,
 } from './helpers/ralph-shell-helpers.js';
 
 test('ralph.sh auto-commits dirty changes without prompting before switching branches', () => {
@@ -217,6 +219,9 @@ test('rjq helper re-resolves to a working binary when the cached path is stale',
   assert.ok(resolveMatch, 'expected resolve_rjq_bin to exist in ralph.sh');
   assert.ok(rjqMatch, 'expected rjq helper to exist in ralph.sh');
 
+  writeSampleJson(tempDir);
+  const env = createTestEnv(binDir);
+
   const result = spawnSync(BASH, ['-c', [
     `PATH="${binDir}:${process.env.PATH ?? ''}"`,
     `SCRIPT_DIR="${tempDir}"`,
@@ -236,7 +241,7 @@ test('rjq helper re-resolves to a working binary when the cached path is stale',
   ].join('\n')], {
     cwd: tempDir,
     encoding: 'utf-8',
-    env: { ...process.env },
+    env,
   });
 
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
@@ -262,6 +267,9 @@ test('resolve_rjq_bin falls back to the node sibling bin when PATH lacks rjq', (
   assert.ok(resolveMatch, 'expected resolve_rjq_bin to exist in ralph.sh');
   assert.ok(rjqMatch, 'expected rjq helper to exist in ralph.sh');
 
+  writeSampleJson(tempDir);
+  const env = createTestEnv(fakeNodeBinDir);
+
   const result = spawnSync(BASH, ['-c', [
     `SCRIPT_DIR="${tempDir}"`,
     `PATH="${process.env.PATH ?? ''}"`,
@@ -285,7 +293,7 @@ test('resolve_rjq_bin falls back to the node sibling bin when PATH lacks rjq', (
   ].join('\n')], {
     cwd: tempDir,
     encoding: 'utf-8',
-    env: { ...process.env },
+    env,
   });
 
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
@@ -317,6 +325,9 @@ test('resolve_rjq_bin falls back to the ralph-teams sibling bin when node and PA
 
   assert.ok(resolveMatch, 'expected resolve_rjq_bin to exist in ralph.sh');
   assert.ok(rjqMatch, 'expected rjq helper to exist in ralph.sh');
+
+  writeSampleJson(tempDir);
+  const env = createTestEnv(fakeGlobalBinDir);
 
   const result = spawnSync(BASH, ['-c', [
     `SCRIPT_DIR="${tempDir}"`,
@@ -351,7 +362,7 @@ test('resolve_rjq_bin falls back to the ralph-teams sibling bin when node and PA
   ].join('\n')], {
     cwd: tempDir,
     encoding: 'utf-8',
-    env: { ...process.env },
+    env,
   });
 
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
