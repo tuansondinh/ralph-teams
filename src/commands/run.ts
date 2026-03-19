@@ -84,11 +84,24 @@ export async function runCommand(
   const projectRoot = path.dirname(resolved);
   const runtimeDir = getRalphRuntimeDir(projectRoot);
   const parallel = options.parallel;
+  const requestedParallel = parallel !== undefined ? parseParallel(parallel) : undefined;
 
   if (!deps.existsSync(resolved)) {
     console.error(chalk.red(`Error: prd.json not found at ${resolved}`));
     console.error(chalk.dim('Run `ralph-teams init` to create one.'));
     deps.exit(1);
+  }
+
+  if (parallel !== undefined) {
+    if (requestedParallel === null) {
+      console.error(chalk.red('Error: --parallel must be a whole number'));
+      deps.exit(1);
+    }
+
+    if (requestedParallel <= 0) {
+      console.error(chalk.red('Error: --parallel must be greater than 0'));
+      deps.exit(1);
+    }
   }
 
   // Load ralph.config.yml (if present) and merge CLI overrides
@@ -97,10 +110,9 @@ export async function runCommand(
   let explicitAgentOverrides;
   try {
     const baseConfig = configLoader(deps.cwd());
-    const parallelNum = parallel !== undefined ? parseParallel(parallel) : undefined;
     config = mergeCliOverrides(baseConfig, {
       ...(options.backend !== undefined ? { backend: options.backend } : {}),
-      ...(parallelNum !== null && parallelNum !== undefined ? { parallel: parallelNum } : {}),
+      ...(requestedParallel !== null && requestedParallel !== undefined ? { parallel: requestedParallel } : {}),
     });
     const explicitOverridesLoader = deps.loadExplicitAgentModelOverrides ?? loadExplicitAgentModelOverrides;
     explicitAgentOverrides = explicitOverridesLoader(deps.cwd());
@@ -113,6 +125,7 @@ export async function runCommand(
   // config is always defined here (exit called on error), but TypeScript needs this assertion
   const resolvedConfig = config!;
   const backend = resolvedConfig.execution.backend;
+  const effectiveParallel = resolvedConfig.execution.parallel;
 
   if (backend === 'claude' && !isCommandInstalled('claude', deps)) {
     console.error(chalk.red('Error: claude CLI is not installed or not in PATH.'));
@@ -151,31 +164,15 @@ export async function runCommand(
   console.log(chalk.dim(`Using backend: ${backend}`));
   console.log(chalk.dim(`Using ralph.sh: ${ralphSh}`));
 
-  if (parallel !== undefined) {
-    const parallelCount = parseParallel(parallel);
-    if (parallelCount === null) {
-      console.error(chalk.red('Error: --parallel must be a whole number'));
-      deps.exit(1);
-    }
-
-    if (parallelCount <= 0) {
-      console.error(chalk.red('Error: --parallel must be greater than 0'));
-      deps.exit(1);
-    }
-
-    console.log(chalk.dim(`Parallel: ${parallelCount} epics per wave\n`));
+  if (effectiveParallel > 0) {
+    console.log(chalk.dim(`Parallel: ${effectiveParallel} epics per wave\n`));
   } else {
     console.log(chalk.dim('Mode: sequential\n'));
   }
 
   const args = [resolved, '--backend', backend];
-  if (parallel !== undefined) {
-    const parallelCount = parseParallel(parallel);
-    if (parallelCount === null || parallelCount <= 0) {
-      deps.exit(1);
-    }
-
-    args.push('--parallel', String(parallelCount));
+  if (effectiveParallel > 0) {
+    args.push('--parallel', String(effectiveParallel));
   }
 
   // Pass config values to ralph.sh via environment variables

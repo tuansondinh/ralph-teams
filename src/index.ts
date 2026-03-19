@@ -48,7 +48,7 @@ program
 program
   .command('run [path]')
   .description('Run ralph.sh with the given prd.json')
-  .option('--backend <backend>', 'AI backend to use (claude, copilot, codex, or opencode)', 'claude')
+  .option('--backend <backend>', 'AI backend to use (claude, copilot, codex, or opencode)')
   .option('--parallel <n>', 'Max epics to run in parallel per wave (default: sequential)')
   .action(async (prdPath: string = './prd.json', options: { backend?: string; parallel?: string }) => {
     await runCommand(prdPath, options);

@@ -254,7 +254,7 @@ test('runCommand with --parallel passes flag to ralph.sh', async () => {
   assert.ok(ralphArgs.includes('3'), 'args should include the parallel value');
 });
 
-test('runCommand without --parallel does not include --parallel in args', async () => {
+test('runCommand without parallel config or CLI override does not include --parallel in args', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
   const prdPath = path.join(tempDir, 'prd.json');
   fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
@@ -283,6 +283,50 @@ test('runCommand without --parallel does not include --parallel in args', async 
   assert.ok(ralphArgs !== undefined, 'ralph.sh was not called');
   assert.ok(!ralphArgs.includes('--parallel'), 'args should NOT include --parallel');
   assert.deepEqual(Array.from(ralphArgs).slice(1), ['--backend', 'claude']);
+});
+
+test('runCommand uses backend and parallel from ralph.config.yml when CLI overrides are omitted', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-run-'));
+  const prdPath = path.join(tempDir, 'prd.json');
+  fs.writeFileSync(prdPath, JSON.stringify({ epics: [] }));
+  fs.writeFileSync(path.join(tempDir, 'ralph.config.yml'), [
+    'execution:',
+    '  backend: codex',
+    '  parallel: 3',
+    '',
+  ].join('\n'));
+
+  const tempRalphSh = path.join(tempDir, 'ralph.sh');
+  fs.writeFileSync(tempRalphSh, '#!/bin/sh\n');
+
+  const logs: string[] = [];
+  mock.method(console, 'log', (...args: unknown[]) => {
+    logs.push(args.join(' '));
+  });
+
+  const calls: Array<{ command: string; args?: readonly string[] }> = [];
+  const deps = createRunDeps({
+    existsSync: (target: fs.PathLike) => fs.existsSync(target),
+    spawnSync: ((command: string, args?: readonly string[]) => {
+      calls.push({ command, args });
+      return { status: 0 } as ReturnType<NonNullable<Parameters<typeof runCommand>[2]>['spawnSync']>;
+    }) as NonNullable<Parameters<typeof runCommand>[2]>['spawnSync'],
+    chmodSync: (() => {}) as typeof fs.chmodSync,
+    cwd: () => tempDir,
+  });
+
+  await assert.rejects(runCommand(prdPath, {}, deps), (error: unknown) => {
+    assert.ok(error instanceof ExitSignal);
+    assert.equal(error.code, 0);
+    return true;
+  });
+
+  const ralphArgs = calls.find(call => call.command === path.resolve('ralph.sh'))?.args;
+  assert.ok(ralphArgs !== undefined, 'ralph.sh was not called');
+  assert.deepEqual(Array.from(ralphArgs).slice(1), ['--backend', 'codex', '--parallel', '3']);
+  assert.ok(logs.some(line => line.includes('Using backend: codex')));
+  assert.ok(logs.some(line => line.includes('Parallel: 3 epics per wave')));
+  assert.ok(!logs.some(line => line.includes('Mode: sequential')));
 });
 
 test('runCommand exits when --parallel is not a whole number', async () => {
