@@ -53,32 +53,15 @@ Other presets:
 
 ## What It Does
 
-The system has two layers:
+At a high level:
+- `ralph.sh` owns the run loop, worktrees, merges, resume state, and backend process lifecycle.
+- one Team Lead session runs per epic and delegates to planner, builder, validator, and merger roles as needed.
+- `ralph.config.yml` controls backend choice, workflow toggles, parallelism, timeouts, and model selection.
 
-- `ralph.sh` acts as the project manager. It validates the PRD, checks epic dependencies, loops through ready epics, records results, and updates progress files.
-- `ralph.sh` also prepares each epic worktree to be runnable before the Team Lead starts. For lockfile-backed Node projects, it bootstraps dependencies inside the worktree and skips reinstall on reused worktrees when the lockfile is unchanged.
-- A backend agent session handles one epic at a time using a small team:
-  - `team-lead` coordinates the epic
-  - `epic-planner` creates the implementation plan when epic planning is enabled
-  - `story-planner` creates a story-scoped plan when story planning is enabled
-  - `builder` makes changes and runs tests
-  - `story-validator` verifies a single story when story validation is enabled
-  - `epic-validator` verifies the full epic when epic validation is enabled and the Team Lead decides independent epic-level verification is warranted
-  - `final-validator` verifies the merged result in multi-epic runs when final validation is enabled
-  - `merger` resolves merge conflicts when they occur
-
-Scoped planning and validation are configurable via `ralph.config.yml`. Workflow presets provide sensible defaults:
+Workflow presets:
 - `balanced`: epic planning enabled and heuristic epic validation enabled
 - `full`: `balanced`, plus story planning and heuristic story validation
 - `minimal`: planning and validation toggles disabled; no planner or validator subagents are spawned
-
-Validation semantics:
-- `storyValidation.enabled = 0` does not mean "no validation". It means no separate `story-validator` agent is spawned. The Team Lead performs the acceptance check inline so each story still has a gate before it can be marked passed.
-- `epicValidation.enabled = 0` means no separate epic-level validation gate is spawned. Story acceptance still happens, but there is no additional independent epic validator pass.
-- This asymmetry is intentional. Story work always needs an acceptance decision to drive the Builder retry loop and update per-story state. Epic validation is a higher-level quality gate that can be turned off entirely when you want a faster loop.
-- `storyValidation.maxFixCycles` and `epicValidation.maxFixCycles` control retries after the first attempt. `0` means one total attempt and no retry cycle. The Team Lead can still mark the work failed, but cannot push it back for another Builder pass.
-
-Across all backends, `builder` work is one-shot per attempt. A build attempt only counts when the Builder returns a concrete commit SHA and the Team Lead persists the story result to the epic state file at `.ralph-teams/state/{epic-id}.json`.
 
 Default agent model assignments:
 - `teamLead`: `opus`
@@ -90,32 +73,9 @@ Default agent model assignments:
 - `storyPlanner`: `opus`
 - `merger`: `sonnet`
 
-Team Lead policy by backend:
-- Claude: keep `team-lead` on `opus`; for spawned work, the Team Lead chooses `haiku` for easy tasks, `sonnet` for medium tasks, `opus` for difficult tasks
-- Copilot: difficulty-based defaults use `claude-haiku-4.5`, `claude-sonnet-4.6`, and `claude-opus-4.6`
-- Codex: difficulty-based defaults use `gpt-5-mini`, `gpt-5.3-codex`, and `gpt-5.4`
-
-If `ralph.config.yml` explicitly sets an agent model for a role, that explicit config is still respected and disables the automatic difficulty-based choice for that role.
-
-Configuration precedence, highest priority first:
-- CLI flags override config for the fields they control today: `run --backend` beats `execution.backend`, and `run --parallel` beats `execution.parallel`.
-- In `ralph.config.yml`, explicit per-role `agents.<role>` entries beat `execution.model` for that role.
-- In `ralph.config.yml`, `execution.model` beats the built-in per-role defaults and is treated as an explicit model choice for every role.
-- In `ralph.config.yml`, explicit `execution.*` fields beat the selected workflow preset for those same execution settings.
-- In `ralph.config.yml`, `workflow.preset` beats the built-in defaults by seeding the planning/validation toggles.
-- Built-in defaults in `src/config.ts` apply last when nothing else overrides them.
-
-Model precedence, ranked:
-1. `agents.<role>`
-2. `execution.model`
-3. backend difficulty-based auto-selection, but only when there is no explicit model override for that role
-4. built-in config defaults
-
-Notes:
-- `agents.planner` and `agents.validator` are legacy aliases. They only apply when `agents.epicPlanner` or `agents.storyValidator` are not set.
-- `execution.model` counts as explicit for all roles, so Ralph will not replace it later with the Team Lead's difficulty-based model selection.
-
 Ralph never writes code itself. It only schedules work, tracks results, and updates project state.
+
+For detailed workflow semantics, validation behavior, config precedence, runtime files, and architecture, see [docs/architecture.md](docs/architecture.md).
 
 Current backends:
 
@@ -124,20 +84,6 @@ Current backends:
 - `codex` via the `codex` CLI, repo-local `.codex/agents/*.toml`, and Codex multi-agent mode
 - `opencode` via the `opencode` CLI and `.opencode/agents/*.md`
 - shared worker-agent prompt source in `prompts/agents/*.md`, rendered to those backend-specific files via `npm run sync:agents`
-
-The runtime is file-based. During a run, Ralph treats these files as the working state of the system:
-
-- `prd.json`: source of truth for epic dependencies and status
-- `.ralph-teams/state/`: per-epic story pass/fail state files
-- `.ralph-teams/plans/`: implementation plans for epics that were explicitly planned
-- `.ralph-teams/progress.txt`: narrative progress log
-- `.ralph-teams/logs/`: raw backend logs
-- `.ralph-teams/ralph-state.json`: interrupt/resume state
-
-Final validation artifacts:
-- `.ralph-teams/logs/final-validation-<run-id>.log`: shell-owned raw final-validation output. This is the file the final Builder reads if final validation fails and a fix cycle is needed.
-- `.ralph-teams/state/final-validation-result-<run-id>.json`: machine-readable final-validation verdict for Ralph's control flow.
-- Ralph intentionally keeps the raw log shell-owned so the validator cannot overwrite it.
 
 
 ## Requirements
