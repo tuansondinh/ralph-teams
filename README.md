@@ -56,6 +56,7 @@ Other presets:
 The system has two layers:
 
 - `ralph.sh` acts as the project manager. It validates the PRD, checks epic dependencies, loops through ready epics, records results, and updates progress files.
+- `ralph.sh` also prepares each epic worktree to be runnable before the Team Lead starts. For lockfile-backed Node projects, it bootstraps dependencies inside the worktree and skips reinstall on reused worktrees when the lockfile is unchanged.
 - A backend agent session handles one epic at a time using a small team:
   - `team-lead` coordinates the epic
   - `epic-planner` creates the implementation plan when epic planning is enabled
@@ -531,6 +532,7 @@ The `init` command uses `prd.json.example` as schema and style guidance when gen
 During a run, Ralph writes:
 
 - `.ralph-teams/progress.txt`: high-level run log
+- `.ralph-teams/.worktrees/EPIC-xxx/`: isolated git worktree for an active epic
 - `.ralph-teams/state/EPIC-xxx.json`: per-epic story pass/fail state (Team Lead reads/writes)
 - `.ralph-teams/plans/plan-EPIC-xxx.md`: epic-planner output for an epic
 - planned epics are expected to use these files as their implementation contract
@@ -551,6 +553,8 @@ The current execution contract is:
 - experimental wave parallelism is enabled only with `--parallel <n>`
 - at run start Ralph auto-commits any dirty worktree changes, then creates a fresh loop branch from your current branch
 - each epic gets its own worktree and branch rooted from that loop branch
+- before the Team Lead starts, Ralph bootstraps lockfile-backed Node projects inside the worktree so tests and local tooling can run there
+- reused worktrees skip dependency reinstall when the worktree lockfile checksum is unchanged
 - when an epic completes, its branch is merged back into the loop branch
 - the backend team processes one epic per session
 - stories run sequentially inside that epic
@@ -560,6 +564,7 @@ The current execution contract is:
 - Builder and Validator are one-shot story-scoped workers, never long-lived mailboxes shared across stories
 - a Builder attempt only counts when the Team Lead receives a concrete commit SHA for that story attempt
 - scoped validators check output independently from the builder's reasoning
+- the Team Lead is expected to delegate early and not inspect the codebase beyond the minimum needed before delegation
 - `DONE: X/Y stories passed` is a required session footer, but the durable completion signal is the epic state file updated by the Team Lead
 - after updating the epic state file for all attempted stories, the team lead must print `DONE: X/Y stories passed` and exit the session immediately
 - pressing `Ctrl-C` writes `.ralph-teams/ralph-state.json` so the run can be resumed later with `ralph-teams resume`

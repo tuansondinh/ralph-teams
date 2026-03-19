@@ -51,6 +51,7 @@ EPIC_VALIDATION_ENABLED="${RALPH_EPIC_VALIDATION_ENABLED:-1}"
 EPIC_VALIDATION_MAX_FIX_CYCLES="${RALPH_EPIC_VALIDATION_MAX_FIX_CYCLES:-1}"
 FINAL_VALIDATION_ENABLED="${RALPH_FINAL_VALIDATION_ENABLED:-1}"
 FINAL_VALIDATION_MAX_FIX_CYCLES="${RALPH_FINAL_VALIDATION_MAX_FIX_CYCLES:-1}"
+WORKFLOW_PRESET="${RALPH_WORKFLOW_PRESET:-}"
 MODEL_TEAM_LEAD="${RALPH_MODEL_TEAM_LEAD:-opus}"
 MODEL_STORY_PLANNER="${RALPH_MODEL_STORY_PLANNER:-haiku}"
 MODEL_EPIC_PLANNER="${RALPH_MODEL_EPIC_PLANNER:-opus}"
@@ -103,6 +104,23 @@ map_model_for_backend() {
       echo "$model"
       ;;
   esac
+}
+
+render_enabled_execution_phases() {
+  local phases=()
+
+  [ "$STORY_PLANNING_ENABLED" = "1" ] && phases+=("story-planning")
+  [ "$STORY_VALIDATION_ENABLED" = "1" ] && phases+=("story-validation")
+  [ "$EPIC_PLANNING_ENABLED" = "1" ] && phases+=("epic-planning")
+  [ "$EPIC_VALIDATION_ENABLED" = "1" ] && phases+=("epic-validation")
+  [ "$FINAL_VALIDATION_ENABLED" = "1" ] && phases+=("final-validation")
+
+  if [ ${#phases[@]} -eq 0 ]; then
+    echo "none"
+  else
+    local IFS=", "
+    echo "${phases[*]}"
+  fi
 }
 
 MODEL_TEAM_LEAD="$(map_model_for_backend "$BACKEND" "$MODEL_TEAM_LEAD")"
@@ -511,6 +529,11 @@ if [ -n "$PARALLEL" ]; then
   echo "  Parallel: $PARALLEL"
 else
   echo "  Mode: sequential"
+fi
+if [ -n "$WORKFLOW_PRESET" ]; then
+  echo "  Workflow: $WORKFLOW_PRESET ($(render_enabled_execution_phases))"
+else
+  echo "  Execution phases: $(render_enabled_execution_phases)"
 fi
 echo "  Models: team-lead=$MODEL_TEAM_LEAD  story-planner=$MODEL_STORY_PLANNER  epic-planner=$MODEL_EPIC_PLANNER  builder=$MODEL_BUILDER  story-validator=$MODEL_STORY_VALIDATOR  epic-validator=$MODEL_EPIC_VALIDATOR  final-validator=$MODEL_FINAL_VALIDATOR  merger=$MODEL_MERGER"
 echo "========================================================"

@@ -150,6 +150,7 @@ test('runCommand passes configured timeout env vars to ralph.sh', async () => {
   assert.equal(capturedEnv?.RALPH_EPIC_TIMEOUT, '11');
   assert.equal(capturedEnv?.RALPH_IDLE_TIMEOUT, '22');
   assert.equal(capturedEnv?.RALPH_LOOP_TIMEOUT, '33');
+  assert.equal(capturedEnv?.RALPH_WORKFLOW_PRESET, 'balanced');
 });
 
 test('runCommand passes RALPH_RJQ_BIN to ralph.sh when bundled json tool exists', async () => {

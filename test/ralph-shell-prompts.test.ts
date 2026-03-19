@@ -304,6 +304,15 @@ test('ralph.sh repairs a merged-in root runtime symlink and keeps runtime artifa
   assert.match(script, /git merge "\$\{branch_name\}" --no-edit[\s\S]*repair_root_runtime_dir_if_needed/);
 });
 
+test('ralph.sh banner includes workflow preset or enabled execution phases', () => {
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+
+  assert.match(script, /WORKFLOW_PRESET="\$\{RALPH_WORKFLOW_PRESET:-\}"/);
+  assert.match(script, /render_enabled_execution_phases\(\)/);
+  assert.match(script, /echo "  Workflow: \$WORKFLOW_PRESET \(\$\(render_enabled_execution_phases\)\)"/);
+  assert.match(script, /echo "  Execution phases: \$\(render_enabled_execution_phases\)"/);
+});
+
 test('ralph.sh requires one-shot builder and validator runs for shared team-lead prompt backends', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
 

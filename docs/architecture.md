@@ -8,6 +8,7 @@ The architecture is intentionally split:
 
 - The Node CLI is the control plane for user-facing commands, config loading, validation, planning, and stats.
 - `ralph.sh` is the execution engine. It owns the run loop, git worktrees, backend process lifecycle, timeouts, merges, and resume state.
+- `ralph.sh` also makes each epic worktree runnable before execution by bootstrapping lockfile-backed Node dependencies inside the worktree.
 - External agent CLIs (`claude`, `gh copilot`, `codex`) do the implementation work. This repo provides prompts, agent role definitions, and orchestration around them.
 
 The most important design choice is that `prd.json` is not just input. It becomes mutable runtime state:
@@ -136,9 +137,17 @@ The command passes runtime settings to `ralph.sh` via environment variables:
 - `RALPH_EPIC_TIMEOUT`
 - `RALPH_IDLE_TIMEOUT`
 - `RALPH_LOOP_TIMEOUT`
-- `RALPH_VALIDATOR_MAX_PUSHBACKS`
+- `RALPH_STORY_PLANNING_ENABLED`
+- `RALPH_STORY_VALIDATION_ENABLED`
+- `RALPH_STORY_VALIDATION_MAX_FIX_CYCLES`
+- `RALPH_EPIC_PLANNING_ENABLED`
+- `RALPH_EPIC_VALIDATION_ENABLED`
+- `RALPH_EPIC_VALIDATION_MAX_FIX_CYCLES`
+- `RALPH_FINAL_VALIDATION_ENABLED`
+- `RALPH_FINAL_VALIDATION_MAX_FIX_CYCLES`
 - `RALPH_PARALLEL`
 - `RALPH_BACKEND`
+- per-role model env vars such as `RALPH_MODEL_TEAM_LEAD` and `RALPH_MODEL_BUILDER`
 
 ### `ralph.sh`
 
@@ -150,11 +159,13 @@ The shell runtime then:
 4. Establishes the run loop branch.
 5. Normalizes retryable PRD state.
 6. Repeatedly computes the next wave of runnable epics.
-6. Spawns each epic in its own worktree and backend process.
-7. Watches logs, timeout thresholds, and PRD progress.
-8. Updates `prd.json`, `.ralph-teams/progress.txt`, and stats after completion.
-9. Merges completed epic branches back into the loop branch.
-10. Repeats until no runnable epics remain.
+7. Creates or reuses each epic worktree and initializes the per-epic state file.
+8. Bootstraps lockfile-backed Node dependencies inside each worktree, skipping reinstall when the stored lockfile checksum still matches.
+9. Spawns each epic in its own worktree and backend process.
+10. Watches logs, timeout thresholds, and PRD progress.
+11. Updates `prd.json`, `.ralph-teams/progress.txt`, and stats after completion.
+12. Merges completed epic branches back into the loop branch.
+13. Repeats until no runnable epics remain.
 
 ### Epic execution
 
@@ -166,19 +177,20 @@ The team lead is instructed to:
 - spawn the epic planner for unplanned medium- and high-complexity epics when epic planning is enabled
 - skip epic planning only for clearly low-complexity unplanned epics or when epic planning is disabled
 - plan only the pending stories for that epic
+- avoid inspecting the codebase beyond the minimum needed before delegation
 - process stories sequentially
 - spawn a fresh Builder for each story attempt
 - spawn a fresh Validator only when independent verification is needed, and only for that single story attempt
 - require a concrete Builder commit SHA before a build attempt can advance to verification
-- update `prd.json` after each attempted story and finish with a DONE summary
+- update the epic state file after each attempted story and finish with a DONE summary
 
 The shell contract is simple and important:
 
 - agents communicate progress by writing logs
-- agents communicate durable completion by updating story pass state in `prd.json`
+- agents communicate durable completion by updating the epic state file in `.ralph-teams/state/{epic-id}.json`
 - `DONE: X/Y stories passed` is treated as a required footer, not as authoritative state on its own
 
-The shell never tries to infer completion from agent intent alone. It trusts the PRD state.
+The shell never tries to infer completion from agent intent alone. It trusts the epic state file and the projected PRD state.
 
 ## Persistence Model
 
@@ -205,8 +217,7 @@ Each epic has its own state file tracking:
 - `stories`: Map of story ID to `{passes: boolean, failureReason: string | null}`
 
 The Team Lead reads and updates these files after each story attempt.
-
- The shell watches for `DONE` markers in agent output.
+The shell watches for `DONE` markers in agent output, but uses the state file as the durable source of story-level truth.
 
 ### `.ralph-teams/progress.txt`
 

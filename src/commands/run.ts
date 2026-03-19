@@ -184,6 +184,7 @@ export async function runCommand(
     RALPH_EPIC_TIMEOUT: String(resolvedConfig.timeouts.epicTimeout),
     RALPH_IDLE_TIMEOUT: String(resolvedConfig.timeouts.idleTimeout),
     RALPH_LOOP_TIMEOUT: String(resolvedConfig.timeouts.loopTimeout),
+    RALPH_WORKFLOW_PRESET: resolvedConfig.workflow.preset,
     RALPH_STORY_PLANNING_ENABLED: resolvedConfig.execution.storyPlanning.enabled ? '1' : '0',
     RALPH_STORY_VALIDATION_ENABLED: resolvedConfig.execution.storyValidation.enabled ? '1' : '0',
     RALPH_STORY_VALIDATION_MAX_FIX_CYCLES: String(resolvedConfig.execution.storyValidation.maxFixCycles),
