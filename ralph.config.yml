@@ -15,9 +15,9 @@ execution:
     enabled: false
     maxFixCycles: 1
   epicPlanning:
-    enabled: true
+    enabled: false
   epicValidation:
-    enabled: true
+    enabled: false
     maxFixCycles: 1
   finalValidation:
     enabled: true
