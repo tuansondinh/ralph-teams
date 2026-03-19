@@ -34,7 +34,7 @@ flowchart LR
     SH --> PRD["prd.json"]
     SH --> PROGRESS[".ralph-teams/progress.txt"]
     SH --> STATE[".ralph-teams/ralph-state.json"]
-    note["Balanced preset: epic planning + epic validation + final validation"]
+    note["Balanced preset: epic planning + epic validation"]
 ```
 
 ## Main Layers
@@ -114,6 +114,12 @@ Workflow presets in `ralph.config.yml`:
 - `balanced`: epic planning + epic validation enabled (default)
 - `full`: all planning and validation toggles enabled
 - `minimal`: all planning and validation toggles disabled
+
+Validation semantics are intentionally asymmetric:
+
+- when `storyValidation.enabled = 0`, the Team Lead still performs the story acceptance check inline so each story retains a pass/fail gate
+- when `epicValidation.enabled = 0`, Ralph skips the independent epic-level validation gate entirely
+- `maxFixCycles = 0` means one total attempt and no retry cycle after a failed validation decision
 
 Legacy preset names (`default`, `thorough`, `off`, `epic-focused`) are accepted for backward compatibility and normalized to their current equivalents.
 

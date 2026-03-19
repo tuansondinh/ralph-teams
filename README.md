@@ -72,6 +72,12 @@ Scoped planning and validation are configurable via `ralph.config.yml`. Workflow
 - `full`: `balanced`, plus story planning and heuristic story validation
 - `minimal`: planning and validation toggles disabled; no planner or validator subagents are spawned
 
+Validation semantics:
+- `storyValidation.enabled = 0` does not mean "no validation". It means no separate `story-validator` agent is spawned. The Team Lead performs the acceptance check inline so each story still has a gate before it can be marked passed.
+- `epicValidation.enabled = 0` means no separate epic-level validation gate is spawned. Story acceptance still happens, but there is no additional independent epic validator pass.
+- This asymmetry is intentional. Story work always needs an acceptance decision to drive the Builder retry loop and update per-story state. Epic validation is a higher-level quality gate that can be turned off entirely when you want a faster loop.
+- `storyValidation.maxFixCycles` and `epicValidation.maxFixCycles` control retries after the first attempt. `0` means one total attempt and no retry cycle. The Team Lead can still mark the work failed, but cannot push it back for another Builder pass.
+
 Across all backends, `builder` work is one-shot per attempt. A build attempt only counts when the Builder returns a concrete commit SHA and the Team Lead persists the story result to the epic state file at `.ralph-teams/state/{epic-id}.json`.
 
 Default agent model assignments:
@@ -109,6 +115,11 @@ The runtime is file-based. During a run, Ralph treats these files as the working
 - `.ralph-teams/progress.txt`: narrative progress log
 - `.ralph-teams/logs/`: raw backend logs
 - `.ralph-teams/ralph-state.json`: interrupt/resume state
+
+Final validation artifacts:
+- `.ralph-teams/logs/final-validation-<run-id>.log`: shell-owned raw final-validation output. This is the file the final Builder reads if final validation fails and a fix cycle is needed.
+- `.ralph-teams/state/final-validation-result-<run-id>.json`: machine-readable final-validation verdict for Ralph's control flow.
+- Ralph intentionally keeps the raw log shell-owned so the validator cannot overwrite it.
 
 
 ## Requirements
@@ -217,6 +228,10 @@ Workflow presets:
 - `balanced`: epic planning enabled and heuristic epic validation enabled
 - `full`: `balanced`, plus story planning and heuristic story validation
 - `minimal`: planning and validation toggles disabled; no planner or validator subagents are spawned
+
+Preset behavior notes:
+- `balanced` does not enable final validation by default.
+- `minimal` still lets the Team Lead validate stories inline and mark them passed or failed; it only disables the separate planner/validator subagent stages.
 
 ### `ralph-teams init`
 
