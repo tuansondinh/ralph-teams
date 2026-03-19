@@ -239,18 +239,7 @@ This is acceptable since `$install_cmd` is derived from known lockfile types, bu
 ### 4.1 Strengths
 
 1. **Parallel execution support** with configurable slot limits
-2. **Dependency bootstrapping cache** - Skips npm install when lockfile unchanged:
-```bash
-# Lines 722-751
-bootstrap_project_dependencies() {
-  local stamp_path="${node_modules_dir}/.ralph-lockhash"
-  if [ -d "$node_modules_dir" ] && [ -f "$stamp_path" ] && \
-     [ "$(cat "$stamp_path" 2>/dev/null || true)" = "$current_hash" ]; then
-    echo "  Dependency bootstrap skipped..."
-    return 0
-  fi
-}
-```
+2. **Lightweight worktree startup** - The runtime creates isolated worktrees and lets agents infer repo-specific setup and verification commands instead of enforcing a centralized package-manager bootstrap path.
 
 3. **Efficient JSON operations** - Custom `rjq` tool avoids jq dependency overhead
 

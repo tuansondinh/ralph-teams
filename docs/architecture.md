@@ -8,7 +8,7 @@ The architecture is intentionally split:
 
 - The Node CLI is the control plane for user-facing commands, config loading, validation, planning, and stats.
 - `ralph.sh` is the execution engine. It owns the run loop, git worktrees, backend process lifecycle, timeouts, merges, and resume state.
-- `ralph.sh` also makes each epic worktree runnable before execution by bootstrapping lockfile-backed Node dependencies inside the worktree.
+- `ralph.sh` creates each epic worktree and passes repo inspection, setup, build, and test command inference to the agents running inside it.
 - External agent CLIs (`claude`, `gh copilot`, `codex`) do the implementation work. This repo provides prompts, agent role definitions, and orchestration around them.
 
 The most important design choice is that `prd.json` is not just input. It becomes mutable runtime state:
@@ -182,12 +182,11 @@ The shell runtime then:
 5. Normalizes retryable PRD state.
 6. Repeatedly computes the next wave of runnable epics.
 7. Creates or reuses each epic worktree and initializes the per-epic state file.
-8. Bootstraps lockfile-backed Node dependencies inside each worktree, skipping reinstall when the stored lockfile checksum still matches.
-9. Spawns each epic in its own worktree and backend process.
-10. Watches logs, timeout thresholds, and PRD progress.
-11. Updates `prd.json`, `.ralph-teams/progress.txt`, and stats after completion.
-12. Merges completed epic branches back into the loop branch.
-13. Repeats until no runnable epics remain.
+8. Spawns each epic in its own worktree and backend process.
+9. Watches logs, timeout thresholds, and PRD progress.
+10. Updates `prd.json`, `.ralph-teams/progress.txt`, and stats after completion.
+11. Merges completed epic branches back into the loop branch.
+12. Repeats until no runnable epics remain.
 
 ### Epic execution
 

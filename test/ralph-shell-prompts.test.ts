@@ -91,6 +91,24 @@ test('builder prompt assets require test creation and TDD fallback when planning
   }
 });
 
+test('builder prompt assets require repository-driven command inference before verification', () => {
+  const promptFiles = [
+    'prompts/agents/builder.md',
+    '.opencode/agents/builder.md',
+    '.codex/agents/builder.toml',
+    '.github/agents/builder.agent.md',
+    '.claude/agents/builder.md',
+    'prompts/team-lead-policy.md',
+  ];
+
+  for (const relativePath of promptFiles) {
+    const content = fs.readFileSync(`${repoRoot}/${relativePath}`, 'utf-8');
+    assert.match(content, /infer.*setup.*build.*test commands|infer project commands/i);
+    assert.match(content, /AGENTS\.md|README/i);
+    assert.match(content, /Makefile|justfile|Taskfile\.yml|package scripts|repo-defined/i);
+  }
+});
+
 test('story planner prompt assets stay story-scoped and design-focused', () => {
   const promptFiles = [
     'prompts/agents/story-planner.md',
@@ -166,6 +184,8 @@ test('ralph.sh loads the canonical Team Lead policy for runtime prompts', () => 
   assert.match(script, /TEAM_LEAD_POLICY_FILE=.*prompts\/team-lead-policy\.md/);
   assert.match(script, /TEAM_LEAD_POLICY="\$\(cat \"\$TEAM_LEAD_POLICY_FILE\"\)"/);
   assert.match(script, /## Canonical Team Lead Policy/);
+  assert.match(script, /## Project Setup Strategy/);
+  assert.match(script, /Ralph does not preinstall dependencies or preselect build\/test commands/);
 });
 
 test('canonical Team Lead policy covers scoped planner and validator heuristics', () => {

@@ -549,8 +549,8 @@ The current execution contract is:
 - experimental wave parallelism is enabled only with `--parallel <n>`
 - at run start Ralph auto-commits any dirty worktree changes, then creates a fresh loop branch from your current branch
 - each epic gets its own worktree and branch rooted from that loop branch
-- before the Team Lead starts, Ralph bootstraps lockfile-backed Node projects inside the worktree so tests and local tooling can run there
-- reused worktrees skip dependency reinstall when the worktree lockfile checksum is unchanged
+- before the Team Lead starts, Ralph creates the worktree and hands repo inspection, setup, build, and test command inference to the agents
+- agents are expected to prefer repo-defined scripts and docs over generic ecosystem defaults when choosing setup and verification commands
 - when an epic completes, its branch is merged back into the loop branch
 - the backend team processes one epic per session
 - stories run sequentially inside that epic
