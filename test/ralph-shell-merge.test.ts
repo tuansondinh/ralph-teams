@@ -105,6 +105,7 @@ test('ralph.sh auto-adds runtime artifacts to the repo .gitignore', () => {
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
   assert.match(result.stdout, /Updated \.gitignore with Ralph runtime directory/);
   const gitignore = fs.readFileSync(path.join(tempDir, '.gitignore'), 'utf-8');
+  assert.match(gitignore, /^\.ralph-teams$/m);
   assert.match(gitignore, /^\.ralph-teams\/$/m);
 });
 

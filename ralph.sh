@@ -305,6 +305,26 @@ PLANS_DIR="${RALPH_RUNTIME_DIR}/plans"
 LOGS_DIR="${RALPH_RUNTIME_DIR}/logs"
 STATE_DIR="${RALPH_RUNTIME_DIR}/state"
 WORKTREES_DIR="${RALPH_RUNTIME_DIR}/.worktrees"
+
+repair_root_runtime_dir_if_needed() {
+  if [ -L "$RALPH_RUNTIME_DIR" ]; then
+    local runtime_link_target=""
+    runtime_link_target=$(readlink "$RALPH_RUNTIME_DIR" 2>/dev/null || true)
+    rm -f "$RALPH_RUNTIME_DIR"
+    mkdir -p "$RALPH_RUNTIME_DIR"
+    if [ -n "$runtime_link_target" ]; then
+      echo "Replaced unexpected root runtime symlink: ${RALPH_RUNTIME_DIRNAME} -> ${runtime_link_target}"
+    else
+      echo "Replaced unexpected root runtime symlink: ${RALPH_RUNTIME_DIRNAME}"
+    fi
+  fi
+}
+
+unstage_runtime_artifacts() {
+  git rm --cached -r --ignore-unmatch "$RALPH_RUNTIME_DIRNAME" >/dev/null 2>&1 || true
+}
+
+repair_root_runtime_dir_if_needed
 mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$STATE_DIR" "$WORKTREES_DIR"
 
 ensure_runtime_rjq_bin() {
@@ -498,7 +518,7 @@ echo "========================================================"
 ensure_runtime_gitignore_entries() {
   local gitignore_file=".gitignore"
   local changed=0
-  local entries=(".ralph-teams/")
+  local entries=(".ralph-teams" ".ralph-teams/")
 
   [ -f "$gitignore_file" ] || : > "$gitignore_file"
 
@@ -522,6 +542,7 @@ prompt_to_commit_dirty_worktree() {
   echo "Ralph will now stage and commit all current changes before the run."
   git status --short
   git add -A
+  unstage_runtime_artifacts
   git commit -m "chore: auto-commit changes before ralph run"
 }
 
@@ -1574,6 +1595,7 @@ merge_wave() {
     dirty_status=$(git status --porcelain 2>/dev/null || true)
     if [ -n "$dirty_status" ]; then
       git add -A
+      unstage_runtime_artifacts
       if git commit -m "chore: checkpoint loop branch before merge wave" >/dev/null 2>&1; then
         echo "  [$epic_id] Auto-committed dirty worktree before merge"
         echo "[$epic_id] AUTO-COMMIT before merge wave — $(date)" >> "$PROGRESS_FILE"
@@ -1582,9 +1604,13 @@ merge_wave() {
 
     # Attempt clean merge first
     if git merge "${branch_name}" --no-edit 2>/dev/null; then
+      unstage_runtime_artifacts
+      repair_root_runtime_dir_if_needed
       echo "  [$epic_id] Merge successful (clean)"
       echo "[$epic_id] MERGED (clean) — $(date)" >> "$PROGRESS_FILE"
     else
+      unstage_runtime_artifacts
+      repair_root_runtime_dir_if_needed
       local conflicted_files
       conflicted_files=$(git diff --name-only --diff-filter=U 2>/dev/null || true)
       local conflict_count

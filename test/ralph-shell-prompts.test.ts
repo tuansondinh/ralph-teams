@@ -294,6 +294,16 @@ test('ralph.sh stages a runtime-local rjq binary inside .ralph-teams/bin and pre
   assert.match(script, /export PATH="\$\{runtime_bin_dir\}:\$PATH"/);
 });
 
+test('ralph.sh repairs a merged-in root runtime symlink and keeps runtime artifacts out of git commits', () => {
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+
+  assert.match(script, /repair_root_runtime_dir_if_needed\(\)/);
+  assert.match(script, /if \[ -L "\$RALPH_RUNTIME_DIR" \]; then/);
+  assert.match(script, /git rm --cached -r --ignore-unmatch "\$RALPH_RUNTIME_DIRNAME"/);
+  assert.match(script, /git add -A[\s\S]*unstage_runtime_artifacts/);
+  assert.match(script, /git merge "\$\{branch_name\}" --no-edit[\s\S]*repair_root_runtime_dir_if_needed/);
+});
+
 test('ralph.sh requires one-shot builder and validator runs for shared team-lead prompt backends', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
