@@ -1884,8 +1884,6 @@ read_final_validation_verdict() {
 }
 
 run_final_validation_cycle() {
-  local final_fix_cycle=0
-
   [ "$FINAL_VALIDATION_ENABLED" = "1" ] || return 0
   [ "$COMPLETED" -eq "$TOTAL_EPICS" ] || return 0
   [ "$TOTAL_EPICS" -ge 2 ] || return 0
@@ -1893,12 +1891,11 @@ run_final_validation_cycle() {
   echo ""
   echo "  --- Final validation ---"
 
-  while true; do
-    local validation_run_id="$(date +%s)-$$-${final_fix_cycle}"
-    local validation_log="${LOGS_DIR}/final-validation-${validation_run_id}.log"
-    local validation_result_file="${STATE_DIR}/final-validation-result-${validation_run_id}.json"
-    local validation_verdict=""
-    local validation_prompt="Validate the final integrated branch after all epics have completed.
+  local validation_run_id="$(date +%s)-$$-0"
+  local validation_log="${LOGS_DIR}/final-validation-${validation_run_id}.log"
+  local validation_result_file="${STATE_DIR}/final-validation-result-${validation_run_id}.json"
+  local validation_verdict=""
+  local validation_prompt="Validate the final integrated branch after all epics have completed.
 
 ## Project
 $PROJECT
@@ -1910,6 +1907,7 @@ $ROOT_DIR
 - Current branch: $(git branch --show-current 2>/dev/null || echo unknown)
 - Completed epics: $COMPLETED / $TOTAL_EPICS
 - Progress log: $PROGRESS_FILE
+- Allowed final-fix retries: $FINAL_VALIDATION_MAX_FIX_CYCLES
 
 ## Result Artifact Path
 $validation_result_file
@@ -1918,6 +1916,7 @@ $validation_result_file
 - Review the final repository state as a whole.
 - Run relevant tests or verification commands yourself.
 - Use browser verification when UI behavior is affected and local verification is possible.
+- If you find fixable issues and retries remain, you may spawn the Builder directly, pass the findings directly, verify the fix yourself, and then decide the final verdict.
 - Write the final validation result artifact to the exact path above before exiting.
 - The result artifact must be valid JSON and include: phase, verdict, tests, browser_check, timestamp.
 - Set verdict to exactly pass or fail in the result artifact.
@@ -1925,54 +1924,28 @@ $validation_result_file
 - Do not overwrite or rewrite any Ralph log files. Ralph captures your stdout to its own raw log.
 - If you return FAIL, include a concise actionable fix list."
 
-    rm -f "$validation_result_file"
-    run_backend_agent_session "$ROOT_DIR" final-validator "$MODEL_FINAL_VALIDATOR" "$validation_prompt" "$validation_log"
+  rm -f "$validation_result_file"
+  echo "  Spawning final validator..."
+  run_backend_agent_session "$ROOT_DIR" final-validator "$MODEL_FINAL_VALIDATOR" "$validation_prompt" "$validation_log"
 
-    validation_verdict="$(read_final_validation_verdict "$validation_result_file" || true)"
+  validation_verdict="$(read_final_validation_verdict "$validation_result_file" || true)"
 
-    if [ "$validation_verdict" = "PASS" ]; then
-    echo "  Spawning final validator..."
-      echo "  Final validation PASSED"
-      echo "[FINAL] FINAL VALIDATION PASSED — $(date)" >> "$PROGRESS_FILE"
-      return 0
-    fi
+  if [ "$validation_verdict" = "PASS" ]; then
+    echo "  Final validation PASSED"
+    echo "[FINAL] FINAL VALIDATION PASSED — $(date)" >> "$PROGRESS_FILE"
+    return 0
+  fi
 
-    echo "  Final validation FAILED"
-    echo "  Final validation log: $validation_log"
-    if [ "$validation_verdict" = "FAIL" ]; then
-      echo "  Final validation result: $validation_result_file"
-    else
-      echo "  Final validation result missing or invalid: $validation_result_file"
-    fi
-    echo "[FINAL] FINAL VALIDATION FAILED — $(date)" >> "$PROGRESS_FILE"
+  echo "  Final validation FAILED"
+  echo "  Final validation log: $validation_log"
+  if [ "$validation_verdict" = "FAIL" ]; then
+    echo "  Final validation result: $validation_result_file"
+  else
+    echo "  Final validation result missing or invalid: $validation_result_file"
+  fi
+  echo "[FINAL] FINAL VALIDATION FAILED — $(date)" >> "$PROGRESS_FILE"
+  return 1
 
-    if [ "$final_fix_cycle" -ge "$FINAL_VALIDATION_MAX_FIX_CYCLES" ]; then
-      return 1
-    fi
-
-    final_fix_cycle=$((final_fix_cycle + 1))
-    local fix_log="${LOGS_DIR}/final-fix-$(date +%s).log"
-    local fix_prompt="Implement only the fixes required by the failed final validation report.
-
-## Working Directory
-$ROOT_DIR
-    echo "  Spawning final fix (cycle ${final_fix_cycle}/${FINAL_VALIDATION_MAX_FIX_CYCLES})..."
-
-## Final Validation Log
-$validation_log
-
-## Rules
-- Read the validation findings from the log file yourself before editing.
-- Make only the changes needed to address those findings.
-- Add or update automated tests when needed.
-- Run the relevant verification commands.
-- Commit the result and report the commit SHA in your normal format."
-
-    run_backend_agent_session "$ROOT_DIR" builder "$MODEL_BUILDER" "$fix_prompt" "$fix_log"
-    echo "  Final fix cycle ${final_fix_cycle} completed"
-    echo "  Final fix log: $fix_log"
-    echo "[FINAL] FINAL FIX CYCLE ${final_fix_cycle} — $(date)" >> "$PROGRESS_FILE"
-  done
 }
 
 if ! recover_pending_merges "resume/startup"; then
