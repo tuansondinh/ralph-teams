@@ -1062,6 +1062,7 @@ run_codex_exec() {
     exec \
     -C "$workdir" \
     -m "$MODEL_TEAM_LEAD" \
+    -c model_reasoning_effort='"high"' \
     -s workspace-write \
     --skip-git-repo-check \
     --color never \
@@ -1547,7 +1548,6 @@ $TEAM_LEAD_POLICY
   - Claude: easy -> haiku, medium -> sonnet, difficult -> opus
   - Copilot / Codex: easy -> gpt-5-mini, medium -> gpt-5.3-codex, difficult -> gpt-5.4
   - OpenCode: easy -> zai-coding-plan/glm-4.7-flash, medium -> zai-coding-plan/glm-4.7, difficult -> zai-coding-plan/glm-5
-- If your runtime supports setting reasoning effort per spawned task, use low for easy tasks, medium for normal tasks, high for difficult tasks, and xhigh only for unusually hard analysis or verification.
 - If your runtime is Codex, use these exact named teammate roles when spawning:
   - story planners: story_planner_easy, story_planner_medium, story_planner_difficult
   - epic planners: epic_planner_easy, epic_planner_medium, epic_planner_difficult

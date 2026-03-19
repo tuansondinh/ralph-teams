@@ -222,7 +222,7 @@ test('copilot team-lead prompt uses difficulty-based model selection unless conf
   assert.match(content, /easy task -> `gpt-5-mini`/);
   assert.match(content, /medium task -> `gpt-5\.3-codex`/);
   assert.match(content, /difficult task -> `gpt-5\.4`/);
-  assert.match(content, /reasoning-effort/);
+  assert.doesNotMatch(content, /reasoning-effort/);
 });
 
 test('copilot team-lead prompt requires one-shot builder spawns instead of reusing teammates across stories', () => {
@@ -287,6 +287,7 @@ test('codex shell launches add the Ralph package directory alongside the project
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
   assert.match(script, /run_codex_exec "\$WORKTREE_ABS_PATH" "\$TEAM_PROMPT" --add-dir "\$ROOT_DIR" --add-dir "\$SCRIPT_DIR"/);
+  assert.match(script, /codex[\s\S]*-m "\$MODEL_TEAM_LEAD"[\s\S]*-c model_reasoning_effort='"high"'/);
   assert.match(script, /codex[\s\S]*--add-dir "\$SCRIPT_DIR"/);
   assert.match(script, /codex[\s\S]*--add-dir "\$ROOT_DIR"[\s\S]*--add-dir "\$SCRIPT_DIR"[\s\S]*- > "\$log_file"/);
 });
