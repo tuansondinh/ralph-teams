@@ -11,17 +11,11 @@ ralph-teams run --parallel={max_parallel_epics}
 ```bash
 npm install -g ralph-teams
 
-# configure Ralph for your repository (interactive setup)
-ralph-teams setup
-
 # discuss with an agent and create the prd.json (epics and user stories)
 ralph-teams init
 
 # start the loop, by default uses claude
 ralph-teams run
-
-# optionally before run, you can also plan epics before hand, otherwise this will be done automatically by the epic planner:
-ralph-teams plan
 ```
 
 ## Flow
@@ -35,13 +29,21 @@ flowchart TD
     C --> D[Create worktree and epic branch]
     D --> E[Team Lead decides on epic planner]
     E --> F[Team Lead runs stories with builder]
-    F --> G[Team Lead decides on epic validator]
-    G --> H[Merge epic branch]
-    H --> I[If needed, run merger]
-    I --> J{More epics?}
-    J -->|Yes| C
-    J -->|No| K[If 2+ epics and enabled, run final validator]
-    K --> L[Finish]
+    F --> G{Epic validator needed?}
+    G -->|No| J[Merge epic branch]
+    G -->|Yes| H[Run epic validator]
+    H -->|PASS| J
+    H -->|FAIL and retries left| I[Builder fixes epic-level findings]
+    I --> H
+    J --> K[If needed, run merger]
+    K --> L{More epics?}
+    L -->|Yes| C
+    L -->|No| M{2+ epics and final validation enabled?}
+    M -->|No| P[Finish]
+    M -->|Yes| N[Run final validator]
+    N -->|PASS| P
+    N -->|FAIL and retries left| O[Builder fixes final-validation findings]
+    O --> N
 ```
 
 Other presets:
