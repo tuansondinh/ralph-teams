@@ -1,5 +1,7 @@
 # ralph-teams
 
+Lightweight orchestration for spec-driven AI delivery: Ralph Teams loops whole teams and epics, not tiny tasks, and uses small agent teams to move from PRD to merged implementation with minimal process overhead.
+It is built for teams who want the structure of epics and user stories without the token burn and rigidity of heavier spec-execution systems.
 
 `ralph-teams` is a lightweight and budgetfriendly CLI for running Ralph Teams: a shell-based orchestrator that initializes and reads a `prd.json`, loops through epics (not user stories), and spawns AI coding agent teams to implement work story by story. One Agent Team per Epic with fresh context. Ralph-Teams can even work on multiple epics in parallel, if there are no dependencies
 ```bash
