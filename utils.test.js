@@ -67,4 +67,13 @@ assert.strictEqual(multiply(0, 0), 0, 'multiply(0, 0) should equal 0');
 // Test 21: multiply() should return the number when multiplying by one (identity)
 assert.strictEqual(multiply(9, 1), 9, 'multiply(9, 1) should equal 9');
 
+// Test 22: multiply() should handle floating-point numbers accurately
+assert.strictEqual(multiply(2.5, 4), 10, 'multiply(2.5, 4) should equal 10');
+
+// Test 23: multiply() should handle large numbers without overflow
+assert.strictEqual(multiply(1000000, 1000), 1000000000, 'multiply(1_000_000, 1_000) should equal 1_000_000_000');
+
+// Test 24: multiply() should return zero when one of the operands is zero even if negative
+assert.strictEqual(multiply(-5, 0), 0, 'multiply(-5, 0) should equal 0');
+
 console.log('All tests passed!');

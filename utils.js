@@ -7,7 +7,8 @@ function capitalize(str) {
 }
 
 function multiply(a, b) {
-  return a * b;
+  const result = a * b;
+  return result === 0 ? 0 : result;
 }
 
 module.exports = { add, capitalize, multiply };
