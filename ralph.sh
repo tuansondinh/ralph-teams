@@ -1894,7 +1894,7 @@ $ROOT_DIR
 
     run_backend_agent_session "$ROOT_DIR" final-validator "$MODEL_FINAL_VALIDATOR" "$validation_prompt" "$validation_log"
 
-    if grep -Eq '### VERDICT: PASS|VERDICT: PASS' "$validation_log"; then
+    if grep -Eq 'VERDICT:[[:space:]]+\*\*?PASS\*\*?|VERDICT:[[:space:]]+PASS' "$validation_log"; then
       echo "  Final validation PASSED"
       echo "[FINAL] FINAL VALIDATION PASSED — $(date)" >> "$PROGRESS_FILE"
       return 0

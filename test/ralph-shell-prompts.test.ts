@@ -314,6 +314,12 @@ test('ralph.sh banner includes workflow preset or enabled execution phases', () 
   assert.match(script, /echo "  Execution phases: \$\(render_enabled_execution_phases\)"/);
 });
 
+test('ralph.sh final validation parser accepts markdown-formatted PASS verdicts', () => {
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+
+  assert.match(script, /grep -Eq 'VERDICT:\[\[:space:\]\]\+\\\*\\\*\?PASS\\\*\\\*\?\|VERDICT:\[\[:space:\]\]\+PASS'/);
+});
+
 test('ralph.sh requires one-shot builder and validator runs for shared team-lead prompt backends', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
