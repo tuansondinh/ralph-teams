@@ -131,6 +131,8 @@ export function setupMultiEpicRepo(
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
     'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
+    'FINAL_RESULT_PATH=$(printf "%s" "$STDIN" | grep -oE \'[^[:space:]]*final-validation-result\\.json\' | head -1)',
+    'if [ -z "$FINAL_RESULT_PATH" ]; then FINAL_RESULT_PATH="$(pwd)/.ralph-teams/state/final-validation-result.json"; fi',
     'if [ -n "$EPIC_ID" ]; then',
     '  ENV_KEY="MOCK_RESULT_$(printf "%s" "$EPIC_ID" | tr - _)"',
     '  RESULT_VAL=$(printenv "$ENV_KEY" 2>/dev/null || true)',
@@ -165,7 +167,29 @@ export function setupMultiEpicRepo(
     '    sleep 5',
     '  fi',
     'else',
-    '  printf "VERDICT: PASS\\n"',
+    '  FINAL_ARTIFACT_ENABLED=$(printenv MOCK_FINAL_VALIDATION_ARTIFACT 2>/dev/null || true)',
+    '  FINAL_VERDICT=$(printenv MOCK_FINAL_VALIDATION_VERDICT 2>/dev/null || true)',
+    '  FINAL_LOG_LINE=$(printenv MOCK_FINAL_VALIDATION_LOG_LINE 2>/dev/null || true)',
+    '  if [ -z "$FINAL_ARTIFACT_ENABLED" ]; then FINAL_ARTIFACT_ENABLED=1; fi',
+    '  if [ -z "$FINAL_VERDICT" ]; then FINAL_VERDICT=pass; fi',
+    '  if [ -z "$FINAL_LOG_LINE" ]; then FINAL_LOG_LINE="Final validation report generated"; fi',
+    '  if [ "$FINAL_ARTIFACT_ENABLED" = "1" ] && [ -n "$FINAL_RESULT_PATH" ]; then',
+    '    node -e "' +
+      "const fs=require('fs');" +
+      "const file=process.argv[1];" +
+      "const verdict=(process.argv[2]||'pass').toLowerCase();" +
+      "const artifact={" +
+      " phase:'final-validation'," +
+      " verdict: verdict === 'fail' ? 'fail' : 'pass'," +
+      " tests:'pass'," +
+      " browser_check:'na'," +
+      " log_file: process.argv[3]," +
+      " timestamp:'2026-03-19T12:27:13+01:00'" +
+      "};" +
+      "fs.writeFileSync(file,JSON.stringify(artifact,null,2)+'\\n');" +
+      '" "$FINAL_RESULT_PATH" "$FINAL_VERDICT" "log-from-mock"',
+    '  fi',
+    '  printf "%s\\n" "$FINAL_LOG_LINE"',
     'fi',
     'exit 0',
   ].join('\n');
@@ -248,6 +272,10 @@ export function setupMergeRepo(
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
     'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
+    'FINAL_RESULT_PATH=$(printf "%s" "$STDIN" | grep -oE \'[^[:space:]]*final-validation-result\\.json\' | head -1)',
+    'if [ -z "$FINAL_RESULT_PATH" ]; then FINAL_RESULT_PATH="$(pwd)/.ralph-teams/state/final-validation-result.json"; fi',
+    'FINAL_LOG_PATH=$(printf "%s" "$STDIN" | awk \'/^- Final validation log file:/ {sub(/^- Final validation log file: /, \"\"); print; exit}\' )',
+    'if [ -z "$FINAL_LOG_PATH" ]; then FINAL_LOG_PATH="$(pwd)/.ralph-teams/logs/final-validation-mock.log"; fi',
     'if [ -n "$EPIC_ID" ]; then',
     '  ENV_KEY="MOCK_FILE_$(printf "%s" "$EPIC_ID" | tr - _)"',
     '  FILE_NAME=$(printenv "$ENV_KEY" 2>/dev/null || true)',
@@ -294,8 +322,32 @@ export function setupMergeRepo(
     'else',
     '  if printf "%s" "$STDIN" | grep -q "Validate the final integrated branch"; then',
     '    touch final-validator-invoked.txt',
+    '    FINAL_ARTIFACT_ENABLED=$(printenv MOCK_FINAL_VALIDATION_ARTIFACT 2>/dev/null || true)',
+    '    FINAL_VERDICT=$(printenv MOCK_FINAL_VALIDATION_VERDICT 2>/dev/null || true)',
+    '    FINAL_LOG_LINE=$(printenv MOCK_FINAL_VALIDATION_LOG_LINE 2>/dev/null || true)',
+    '    if [ -z "$FINAL_ARTIFACT_ENABLED" ]; then FINAL_ARTIFACT_ENABLED=1; fi',
+    '    if [ -z "$FINAL_VERDICT" ]; then FINAL_VERDICT=pass; fi',
+    '    if [ -z "$FINAL_LOG_LINE" ]; then FINAL_LOG_LINE="Final validation report generated"; fi',
+    '    if [ "$FINAL_ARTIFACT_ENABLED" = "1" ] && [ -n "$FINAL_RESULT_PATH" ]; then',
+    '      node -e "' +
+      "const fs=require('fs');" +
+      "const file=process.argv[1];" +
+      "const verdict=(process.argv[2]||'pass').toLowerCase();" +
+      "const artifact={" +
+      " phase:'final-validation'," +
+      " verdict: verdict === 'fail' ? 'fail' : 'pass'," +
+      " tests:'pass'," +
+      " browser_check:'na'," +
+      " log_file: process.argv[3]," +
+      " timestamp:'2026-03-19T12:27:13+01:00'" +
+      "};" +
+      "fs.writeFileSync(file,JSON.stringify(artifact,null,2)+'\\n');" +
+      '" "$FINAL_RESULT_PATH" "$FINAL_VERDICT" "$FINAL_LOG_PATH"',
+    '    fi',
+    '    printf "%s\\n" "$FINAL_LOG_LINE"',
+    '  else',
+    '    printf "VERDICT: PASS\\n"',
     '  fi',
-    '  printf "VERDICT: PASS\\n"',
     'fi',
     'exit 0',
   ].join('\n');

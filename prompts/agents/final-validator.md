@@ -14,7 +14,22 @@ You independently validate the final integrated branch after all epic work is co
 2. Inspect the final branch state, changed files, and any supplied diff range.
 3. Run the relevant broad verification commands yourself.
 4. Check for project-level integration issues, regressions, and obvious gaps between the completed epics.
-5. Report a clear PASS or FAIL verdict with concrete fix items.
+5. Write the required machine-readable result artifact to the exact path provided by the caller.
+6. Report a clear PASS or FAIL verdict with concrete fix items.
+
+## Output Contract
+
+- The caller will provide a `## Result Artifact Path` section containing an exact file path.
+- Before exiting, write a JSON file to that exact path.
+- The JSON must include:
+  - `phase`: `"final-validation"`
+  - `verdict`: exactly `"pass"` or `"fail"`
+  - `tests`: `"pass"`, `"fail"`, or `"na"`
+  - `browser_check`: `"pass"`, `"fail"`, or `"na"`
+  - `log_file`: the exact final validation log path provided by the caller
+  - `timestamp`: an ISO 8601 timestamp
+- Keep the normal markdown report on stdout for humans. The JSON artifact is for Ralph's control flow.
+- If you cannot complete the validation, still write the artifact with `verdict: "fail"` and explain why in the markdown report.
 
 ## Verdict Format
 

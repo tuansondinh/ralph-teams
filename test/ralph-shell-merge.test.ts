@@ -163,6 +163,24 @@ test('US-004: two independent epics both merge cleanly after wave', () => {
   assert.equal(fs.existsSync(path.join(tempDir, 'final-validator-invoked.txt')), true);
 });
 
+test('US-004: final validation uses the result artifact instead of scraping the prose log', () => {
+  const { tempDir, env } = setupMergeRepo(
+    [{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }, { id: 'EPIC-002', title: 'Beta', fileName: 'beta.txt' }],
+  );
+  env.MOCK_FINAL_VALIDATION_LOG_LINE = '## Final Validation Report';
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+
+  const artifactPath = path.join(tempDir, '.ralph-teams', 'state', 'final-validation-result.json');
+  const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf-8'));
+  assert.equal(artifact.phase, 'final-validation');
+  assert.equal(artifact.verdict, 'pass');
+  assert.match(String(artifact.log_file), /\.ralph-teams\/logs\/final-validation-/);
+
+  const progress = fs.readFileSync(path.join(tempDir, '.ralph-teams', 'progress.txt'), 'utf-8');
+  assert.match(progress, /\[FINAL\] FINAL VALIDATION PASSED/);
+});
+
 test('US-004: resume recovers completed-but-unmerged epic branches before finishing the run', () => {
   const { tempDir, env } = setupMergeRepo(
     [{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }, { id: 'EPIC-002', title: 'Beta', fileName: 'beta.txt' }],

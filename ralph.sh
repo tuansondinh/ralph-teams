@@ -1860,6 +1860,29 @@ run_backend_agent_session() {
   esac
 }
 
+read_final_validation_verdict() {
+  local result_file="$1"
+  local verdict=""
+
+  if [ ! -f "$result_file" ]; then
+    return 1
+  fi
+
+  verdict="$(rjq read "$result_file" .verdict "" 2>/dev/null || true)"
+  case "$verdict" in
+    pass|PASS)
+      echo "PASS"
+      return 0
+      ;;
+    fail|FAIL)
+      echo "FAIL"
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
 run_final_validation_cycle() {
   local final_fix_cycle=0
 
@@ -1872,6 +1895,8 @@ run_final_validation_cycle() {
 
   while true; do
     local validation_log="${LOGS_DIR}/final-validation-$(date +%s).log"
+    local validation_result_file="${STATE_DIR}/final-validation-result.json"
+    local validation_verdict=""
     local validation_prompt="Validate the final integrated branch after all epics have completed.
 
 ## Project
@@ -1884,17 +1909,28 @@ $ROOT_DIR
 - Current branch: $(git branch --show-current 2>/dev/null || echo unknown)
 - Completed epics: $COMPLETED / $TOTAL_EPICS
 - Progress log: $PROGRESS_FILE
+- Final validation log file: $validation_log
+
+## Result Artifact Path
+$validation_result_file
 
 ## Expectations
 - Review the final repository state as a whole.
 - Run relevant tests or verification commands yourself.
 - Use browser verification when UI behavior is affected and local verification is possible.
-- Return a clear PASS or FAIL verdict in the role's required format.
+- Write the final validation result artifact to the exact path above before exiting.
+- The result artifact must be valid JSON and include: phase, verdict, tests, browser_check, log_file, timestamp.
+- Set verdict to exactly pass or fail in the result artifact.
+- Set log_file in the result artifact to exactly $validation_log
+- Return a clear PASS or FAIL verdict in the role's required markdown format on stdout.
 - If you return FAIL, include a concise actionable fix list."
 
+    rm -f "$validation_result_file"
     run_backend_agent_session "$ROOT_DIR" final-validator "$MODEL_FINAL_VALIDATOR" "$validation_prompt" "$validation_log"
 
-    if grep -Eq 'VERDICT:[[:space:]]+\*\*?PASS\*\*?|VERDICT:[[:space:]]+PASS' "$validation_log"; then
+    validation_verdict="$(read_final_validation_verdict "$validation_result_file" || true)"
+
+    if [ "$validation_verdict" = "PASS" ]; then
       echo "  Final validation PASSED"
       echo "[FINAL] FINAL VALIDATION PASSED — $(date)" >> "$PROGRESS_FILE"
       return 0
@@ -1902,6 +1938,11 @@ $ROOT_DIR
 
     echo "  Final validation FAILED"
     echo "  Final validation log: $validation_log"
+    if [ "$validation_verdict" = "FAIL" ]; then
+      echo "  Final validation result: $validation_result_file"
+    else
+      echo "  Final validation result missing or invalid: $validation_result_file"
+    fi
     echo "[FINAL] FINAL VALIDATION FAILED — $(date)" >> "$PROGRESS_FILE"
 
     if [ "$final_fix_cycle" -ge "$FINAL_VALIDATION_MAX_FIX_CYCLES" ]; then

@@ -124,6 +124,10 @@ test('scoped validator prompt assets cover story, epic, and final validation', (
   for (const relativePath of promptFiles) {
     const content = fs.readFileSync(`${repoRoot}/${relativePath}`, 'utf-8');
     assert.match(content, /VERDICT: PASS \/ FAIL|VERDICT: PASS|PASS \/ FAIL/i);
+    if (relativePath.includes('final-validator')) {
+      assert.match(content, /Result Artifact Path|write a JSON file|machine-readable result artifact/i);
+      assert.match(content, /"final-validation"|phase.*final-validation|verdict.*pass.*fail/i);
+    }
     assert.match(content, /NEVER fix code|do not implement fixes/i);
   }
 });
@@ -314,10 +318,13 @@ test('ralph.sh banner includes workflow preset or enabled execution phases', () 
   assert.match(script, /echo "  Execution phases: \$\(render_enabled_execution_phases\)"/);
 });
 
-test('ralph.sh final validation parser accepts markdown-formatted PASS verdicts', () => {
+test('ralph.sh final validation reads the machine-readable result artifact', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
-  assert.match(script, /grep -Eq 'VERDICT:\[\[:space:\]\]\+\\\*\\\*\?PASS\\\*\\\*\?\|VERDICT:\[\[:space:\]\]\+PASS'/);
+  assert.match(script, /validation_result_file="\$\{STATE_DIR\}\/final-validation-result\.json"/);
+  assert.match(script, /## Result Artifact Path/);
+  assert.match(script, /read_final_validation_verdict\(\)/);
+  assert.match(script, /verdict="\$\(rjq read "\$result_file" \.verdict ""/);
 });
 
 test('ralph.sh requires one-shot builder and validator runs for shared team-lead prompt backends', () => {
