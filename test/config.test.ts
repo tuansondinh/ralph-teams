@@ -37,7 +37,7 @@ execution:
   assert.equal(config.workflow.preset, 'balanced');
   assert.equal(config.execution.epicPlanning.enabled, true);
   assert.equal(config.execution.epicValidation.enabled, true);
-  assert.equal(config.execution.finalValidation.enabled, true);
+  assert.equal(config.execution.finalValidation.enabled, false);
   assert.equal(config.execution.storyPlanning.enabled, false);
   assert.equal(config.execution.storyValidation.enabled, true);
   assert.equal(config.execution.storyValidation.maxFixCycles, 2);

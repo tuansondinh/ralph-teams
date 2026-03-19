@@ -68,7 +68,7 @@ The system has two layers:
   - `merger` resolves merge conflicts when they occur
 
 Scoped planning and validation are configurable via `ralph.config.yml`. Workflow presets provide sensible defaults:
-- `balanced`: epic planning enabled, heuristic epic validation enabled, plus final validation for multi-epic runs
+- `balanced`: epic planning enabled and heuristic epic validation enabled
 - `full`: `balanced`, plus story planning and heuristic story validation
 - `minimal`: planning and validation toggles disabled; no planner or validator subagents are spawned
 
@@ -214,7 +214,7 @@ Prompts for:
 - Agent model overrides (optional)
 
 Workflow presets:
-- `balanced`: epic planning enabled, heuristic epic validation enabled, plus final validation for multi-epic runs
+- `balanced`: epic planning enabled and heuristic epic validation enabled
 - `full`: `balanced`, plus story planning and heuristic story validation
 - `minimal`: planning and validation toggles disabled; no planner or validator subagents are spawned
 

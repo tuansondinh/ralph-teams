@@ -185,7 +185,7 @@ test('setupCommand explains workflow presets before prompting for one', async ()
   });
 
   const joined = logs.join('\n');
-  assert.match(joined, /balanced: plan and validate epics, plus final validation/i);
+  assert.match(joined, /balanced: plan and validate epics only/i);
   assert.match(joined, /full: plan and validate stories and epics, plus final validation/i);
   assert.match(joined, /minimal: disable automated planning and validation steps/i);
 });

@@ -98,7 +98,7 @@ function presetExecution(preset: WorkflowPreset): RalphConfig['execution'] {
         storyValidation: { enabled: false, maxFixCycles: 1 },
         epicPlanning: { enabled: true },
         epicValidation: { enabled: true, maxFixCycles: 1 },
-        finalValidation: { enabled: true, maxFixCycles: 1 },
+        finalValidation: { enabled: false, maxFixCycles: 1 },
       };
   }
 }

@@ -111,7 +111,7 @@ Core shared modules:
 
 Workflow presets in `ralph.config.yml`:
 
-- `balanced`: epic planning + epic validation + final validation enabled (default)
+- `balanced`: epic planning + epic validation enabled (default)
 - `full`: all planning and validation toggles enabled
 - `minimal`: all planning and validation toggles disabled
 
