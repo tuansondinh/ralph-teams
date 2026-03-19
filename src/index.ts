@@ -63,9 +63,9 @@ program
   });
 
 program
-  .command('reset <epicId> [path]')
-  .description('Reset an epic status back to pending')
-  .action((epicId: string, prdPath: string = './prd.json') => {
+  .command('reset [epicId] [path]')
+  .description('Reset one epic, or all epics when no epic ID is provided')
+  .action((epicId?: string, prdPath: string = './prd.json') => {
     resetCommand(epicId, prdPath);
   });
 

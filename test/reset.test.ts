@@ -24,6 +24,14 @@ function writeTempPrd(): string {
           { id: 'US-002', title: 'Refunds', passes: true },
         ],
       },
+      {
+        id: 'EPIC-002',
+        title: 'Notifications',
+        status: 'completed',
+        userStories: [
+          { id: 'US-003', title: 'Emails', passes: true },
+        ],
+      },
     ],
   }, null, 2));
   return prdPath;
@@ -42,6 +50,26 @@ test('resetCommand returns an epic to pending and clears story passes', () => {
   assert.equal(updated.epics[0].status, 'pending');
   assert.deepEqual(updated.epics[0].userStories.map((story: { passes: boolean }) => story.passes), [false, false]);
   assert.match(logs.join('\n'), /Reset EPIC-001: Payments/);
+});
+
+test('resetCommand without an epic ID resets all epics and stories', () => {
+  const prdPath = writeTempPrd();
+  const logs: string[] = [];
+  mock.method(console, 'log', (...args: unknown[]) => {
+    logs.push(args.join(' '));
+  });
+
+  resetCommand(undefined, prdPath);
+
+  const updated = JSON.parse(fs.readFileSync(prdPath, 'utf-8'));
+  assert.deepEqual(updated.epics.map((epic: { status: string }) => epic.status), ['pending', 'pending']);
+  assert.deepEqual(
+    updated.epics.flatMap((epic: { userStories: Array<{ passes: boolean }> }) => epic.userStories.map((story) => story.passes)),
+    [false, false, false],
+  );
+  assert.match(logs.join('\n'), /Reset all epics/);
+  assert.match(logs.join('\n'), /2 epics reset to pending/);
+  assert.match(logs.join('\n'), /3 stories reset to not passed/);
 });
 
 test('resetCommand exits when the epic does not exist', () => {
