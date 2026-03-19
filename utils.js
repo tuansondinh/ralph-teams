@@ -2,4 +2,8 @@ function add(a, b) {
   return a + b;
 }
 
-module.exports = { add };
+function capitalize(str) {
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
+
+module.exports = { add, capitalize };
