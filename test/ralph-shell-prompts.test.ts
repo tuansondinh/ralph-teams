@@ -301,7 +301,8 @@ test('ralph.sh repairs a merged-in root runtime symlink and keeps runtime artifa
   assert.match(script, /if \[ -L "\$RALPH_RUNTIME_DIR" \]; then/);
   assert.match(script, /git rm --cached -r --ignore-unmatch "\$RALPH_RUNTIME_DIRNAME"/);
   assert.match(script, /git add -A[\s\S]*unstage_runtime_artifacts/);
-  assert.match(script, /git merge "\$\{branch_name\}" --no-edit[\s\S]*repair_root_runtime_dir_if_needed/);
+  assert.match(script, /git merge "\$\{branch_name\}" --no-commit --no-ff[\s\S]*repair_root_runtime_dir_if_needed/);
+  assert.match(script, /if \[ -f "\.git\/MERGE_HEAD" \]; then[\s\S]*git commit --no-edit/);
 });
 
 test('ralph.sh banner includes workflow preset or enabled execution phases', () => {

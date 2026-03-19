@@ -1634,10 +1634,14 @@ merge_wave() {
       fi
     fi
 
-    # Attempt clean merge first
-    if git merge "${branch_name}" --no-edit 2>/dev/null; then
+    # Attempt a clean merge without finalizing the commit so runtime artifacts can
+    # be stripped before the merge result is recorded in git history.
+    if git merge "${branch_name}" --no-commit --no-ff 2>/dev/null; then
       unstage_runtime_artifacts
       repair_root_runtime_dir_if_needed
+      if [ -f ".git/MERGE_HEAD" ]; then
+        git commit --no-edit >/dev/null 2>&1 || true
+      fi
       echo "  [$epic_id] Merge successful (clean)"
       echo "[$epic_id] MERGED (clean) — $(date)" >> "$PROGRESS_FILE"
     else
