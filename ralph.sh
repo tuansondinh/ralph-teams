@@ -1418,9 +1418,9 @@ Do NOT modify files outside this directory, except for the epic state file below
 ## Project Setup Strategy
 - Ralph does not preinstall dependencies or preselect build/test commands for this repo.
 - Before delegating implementation, inspect the repository and infer the correct setup, build, and test commands from project context.
-- Check repo instructions first: `AGENTS.md`, `README*`, contributor docs, and project-local guidance files.
-- Prefer repo-defined task runners or scripts such as `Makefile`, `justfile`, `Taskfile.yml`, package scripts, wrapper scripts, or documented commands.
-- Then inspect ecosystem manifests such as `package.json`, `pyproject.toml`, `requirements.txt`, `Cargo.toml`, `go.mod`, `Gemfile`, `pom.xml`, `build.gradle*`, `mix.exs`, `Dockerfile`, and `docker-compose*.yml`.
+- Check repo instructions first: 'AGENTS.md', 'README*', contributor docs, and project-local guidance files.
+- Prefer repo-defined task runners or scripts such as 'Makefile', 'justfile', 'Taskfile.yml', package scripts, wrapper scripts, or documented commands.
+- Then inspect ecosystem manifests such as 'package.json', 'pyproject.toml', 'requirements.txt', 'Cargo.toml', 'go.mod', 'Gemfile', 'pom.xml', 'build.gradle*', 'mix.exs', 'Dockerfile', and 'docker-compose*.yml'.
 - Prefer explicit repository commands over generic ecosystem defaults.
 - Only fall back to generic defaults when the repository is unambiguous.
 - If setup remains ambiguous after inspection, stop guessing and fail the story attempt with a short concrete reason describing what you found.

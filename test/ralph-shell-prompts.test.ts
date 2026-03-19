@@ -186,6 +186,8 @@ test('ralph.sh loads the canonical Team Lead policy for runtime prompts', () => 
   assert.match(script, /## Canonical Team Lead Policy/);
   assert.match(script, /## Project Setup Strategy/);
   assert.match(script, /Ralph does not preinstall dependencies or preselect build\/test commands/);
+  assert.match(script, /Check repo instructions first: 'AGENTS\.md', 'README\*'/);
+  assert.doesNotMatch(script, /Check repo instructions first: `AGENTS\.md`, `README\*`/);
 });
 
 test('canonical Team Lead policy covers scoped planner and validator heuristics', () => {
