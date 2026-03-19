@@ -551,6 +551,7 @@ The current execution contract is:
 - each epic gets its own worktree and branch rooted from that loop branch
 - before the Team Lead starts, Ralph creates the worktree and hands repo inspection, setup, build, and test command inference to the agents
 - agents are expected to prefer repo-defined scripts and docs over generic ecosystem defaults when choosing setup and verification commands
+- the shell-built Team Lead prompt must keep literal filenames shell-safe; do not add raw Markdown backticks inside that Bash string because Bash will treat them as command substitution
 - when an epic completes, its branch is merged back into the loop branch
 - the backend team processes one epic per session
 - stories run sequentially inside that epic

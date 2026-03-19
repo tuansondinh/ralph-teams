@@ -192,6 +192,8 @@ The shell runtime then:
 
 Each epic is executed through a team-lead prompt assembled in `ralph.sh`.
 
+Because that prompt is assembled inside a double-quoted Bash string, any literal backticks in shell-authored sections must be escaped or avoided. Raw Markdown code spans in that block will execute as command substitution and corrupt the run.
+
 The team lead is instructed to:
 
 - follow `.ralph-teams/plans/plan-EPIC-xxx.md` directly when the epic is already marked `planned: true`
@@ -203,6 +205,7 @@ The team lead is instructed to:
 - spawn a fresh Builder for each story attempt
 - spawn a fresh Validator only when independent verification is needed, and only for that single story attempt
 - require a concrete Builder commit SHA before a build attempt can advance to verification
+- infer repo-specific setup, build, and test commands from project docs, task runners, and manifests instead of relying on centralized runtime bootstrap logic
 - update the epic state file after each attempted story and finish with a DONE summary
 
 The shell contract is simple and important:
