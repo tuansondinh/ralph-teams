@@ -8,6 +8,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import {
   BASH,
   runRalph,
+  runRalphWithSigint,
   scriptPath,
   setupMultiEpicRepo,
   setupTempRepo,
@@ -505,6 +506,76 @@ test('US-002: a transient worktree creation failure is retried automatically', (
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
   assert.ok(fs.existsSync(marker), 'expected transient worktree failure hook to run once');
+});
+
+test('US-002: new worktrees bootstrap lockfile-backed Node projects before spawning the epic', () => {
+  const { tempDir, binDir, env } = setupMultiEpicRepo([{ id: 'EPIC-001', title: 'Alpha' }], { 'EPIC-001': 'PASS' });
+  fs.mkdirSync(path.join(tempDir, 'web'), { recursive: true });
+  fs.writeFileSync(path.join(tempDir, 'web', 'package.json'), JSON.stringify({
+    name: 'web',
+    private: true,
+  }, null, 2));
+  fs.writeFileSync(path.join(tempDir, 'web', 'package-lock.json'), JSON.stringify({
+    name: 'web',
+    lockfileVersion: 3,
+  }, null, 2));
+  execFileSync('git', ['add', 'web/package.json', 'web/package-lock.json'], { cwd: tempDir });
+  execFileSync('git', ['commit', '-m', 'test: add web package'], { cwd: tempDir });
+
+  const npmLog = path.join(tempDir, 'npm-invocations.log');
+  const mockNpm = [
+    '#!/bin/sh',
+    'printf "%s\\n" "$PWD" >> "$RALPH_NPM_LOG"',
+    'mkdir -p node_modules/.bin',
+    'touch node_modules/.bin/vitest',
+  ].join('\n');
+  fs.writeFileSync(path.join(binDir, 'npm'), `${mockNpm}\n`);
+  fs.chmodSync(path.join(binDir, 'npm'), 0o755);
+  env.RALPH_NPM_LOG = npmLog;
+
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.match(result.stdout, /Bootstrapping dependencies in web with 'npm ci'/);
+  const invocations = fs.readFileSync(npmLog, 'utf-8').trim().split('\n').filter(Boolean);
+  assert.equal(invocations.length, 1);
+  assert.match(invocations[0], /\.ralph-teams\/\.worktrees\/EPIC-001\/web$/);
+});
+
+test('US-002: reused worktrees skip dependency bootstrap when the lockfile is unchanged', async () => {
+  const { tempDir, binDir, env } = setupMultiEpicRepo([{ id: 'EPIC-001', title: 'Alpha' }], {});
+  fs.mkdirSync(path.join(tempDir, 'web'), { recursive: true });
+  fs.writeFileSync(path.join(tempDir, 'web', 'package.json'), JSON.stringify({
+    name: 'web',
+    private: true,
+  }, null, 2));
+  fs.writeFileSync(path.join(tempDir, 'web', 'package-lock.json'), JSON.stringify({
+    name: 'web',
+    lockfileVersion: 3,
+  }, null, 2));
+  execFileSync('git', ['add', 'web/package.json', 'web/package-lock.json'], { cwd: tempDir });
+  execFileSync('git', ['commit', '-m', 'test: add web package'], { cwd: tempDir });
+
+  const npmLog = path.join(tempDir, 'npm-invocations.log');
+  const mockNpm = [
+    '#!/bin/sh',
+    'printf "%s\\n" "$PWD" >> "$RALPH_NPM_LOG"',
+    'mkdir -p node_modules/.bin',
+    'touch node_modules/.bin/vitest',
+  ].join('\n');
+  fs.writeFileSync(path.join(binDir, 'npm'), `${mockNpm}\n`);
+  fs.chmodSync(path.join(binDir, 'npm'), 0o755);
+  env.RALPH_NPM_LOG = npmLog;
+  env.MOCK_HANG_EPIC_001 = '1';
+
+  await runRalphWithSigint(tempDir, env);
+
+  delete env.MOCK_HANG_EPIC_001;
+  env.MOCK_RESULT_EPIC_001 = 'PASS';
+  const second = runRalph(tempDir, env);
+  assert.equal(second.status, 0, `stderr: ${second.stderr}\nstdout: ${second.stdout}`);
+  assert.match(second.stdout, /Dependency bootstrap skipped for web \(package-lock\.json unchanged\)/);
+  const invocations = fs.readFileSync(npmLog, 'utf-8').trim().split('\n').filter(Boolean);
+  assert.equal(invocations.length, 1);
 });
 
 test('US-002: two independent epics each get separate log files', () => {
