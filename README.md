@@ -75,7 +75,7 @@ At a high level:
 - `ralph.config.yml` controls backend choice, workflow toggles, parallelism, timeouts, and model selection.
 
 Workflow presets:
-- `balanced`: epic planning enabled and heuristic epic validation enabled
+- `balanced`: epic planning enabled, heuristic epic validation enabled, and final validation enabled
 - `full`: `balanced`, plus story planning and heuristic story validation
 - `minimal`: planning and validation toggles disabled; no planner or validator subagents are spawned
 
@@ -205,12 +205,11 @@ Prompts for:
 - Agent model overrides (optional)
 
 Workflow presets:
-- `balanced`: epic planning enabled and heuristic epic validation enabled
+- `balanced`: epic planning enabled, heuristic epic validation enabled, and final validation enabled
 - `full`: `balanced`, plus story planning and heuristic story validation
 - `minimal`: planning and validation toggles disabled; no planner or validator subagents are spawned
 
 Preset behavior notes:
-- `balanced` does not enable final validation by default.
 - `minimal` still lets the Team Lead validate stories inline and mark them passed or failed; it only disables the separate planner/validator subagent stages.
 
 ### `ralph-teams init`

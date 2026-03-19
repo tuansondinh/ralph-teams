@@ -170,7 +170,7 @@ function applyWorkflowPreset(config: RalphConfig, preset: RalphConfig['workflow'
     config.execution.epicPlanning.enabled = true;
     config.execution.epicValidation.enabled = true;
     config.execution.epicValidation.maxFixCycles = 1;
-    config.execution.finalValidation.enabled = false;
+    config.execution.finalValidation.enabled = true;
     config.execution.finalValidation.maxFixCycles = 1;
     return;
   }
@@ -274,7 +274,7 @@ export async function setupCommand(
 
   if (usePreset) {
     deps.log(chalk.dim('Workflow presets:'));
-    deps.log(chalk.dim('  balanced: plan and validate epics only.'));
+    deps.log(chalk.dim('  balanced: plan and validate epics, then run final validation.'));
     deps.log(chalk.dim('  full: plan and validate stories and epics, plus final validation after the full run.'));
     deps.log(chalk.dim('  minimal: disable automated planning and validation steps.'));
     const preset = await askChoice(
