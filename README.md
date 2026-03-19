@@ -242,6 +242,7 @@ Notes:
 - `setup` lets you choose the default backend, use a planning/validation workflow preset or configure that workflow manually, set parallelism, and optionally override per-role models
 - the agent generates epics and user stories automatically
 - the agent should aim for about 5 user stories per epic when the scope supports it
+- treat about 5 user stories as the current practical ceiling for an epic, not just a suggestion; this keeps the Team Lead session context under control and avoids overwhelming the epic planner
 - `--backend` controls whether the interview/generation uses `claude`, `copilot`, `codex`, or `opencode`
 - the discussion itself is handled by the agent, not by a hardcoded questionnaire in the CLI
 
@@ -519,6 +520,7 @@ Important fields:
 Authoring guideline:
 
 - aim for about 5 user stories per epic when the scope can be split cleanly
+- treat about 5 user stories as the current practical ceiling for an epic so the Team Lead session stays within a reasonable context window and the epic planner is not overloaded
 - use fewer only when the epic is genuinely small or further splitting would be artificial
 
 The `init` command uses `prd.json.example` as schema and style guidance when generating a new PRD.
