@@ -107,19 +107,28 @@ map_model_for_backend() {
 }
 
 render_enabled_execution_phases() {
-  local phases=()
+  local phases=""
 
-  [ "$STORY_PLANNING_ENABLED" = "1" ] && phases+=("story-planning")
-  [ "$STORY_VALIDATION_ENABLED" = "1" ] && phases+=("story-validation")
-  [ "$EPIC_PLANNING_ENABLED" = "1" ] && phases+=("epic-planning")
-  [ "$EPIC_VALIDATION_ENABLED" = "1" ] && phases+=("epic-validation")
-  [ "$FINAL_VALIDATION_ENABLED" = "1" ] && phases+=("final-validation")
+  if [ "$STORY_PLANNING_ENABLED" = "1" ]; then
+    phases="story-planning"
+  fi
+  if [ "$STORY_VALIDATION_ENABLED" = "1" ]; then
+    phases="${phases}${phases:+, }story-validation"
+  fi
+  if [ "$EPIC_PLANNING_ENABLED" = "1" ]; then
+    phases="${phases}${phases:+, }epic-planning"
+  fi
+  if [ "$EPIC_VALIDATION_ENABLED" = "1" ]; then
+    phases="${phases}${phases:+, }epic-validation"
+  fi
+  if [ "$FINAL_VALIDATION_ENABLED" = "1" ]; then
+    phases="${phases}${phases:+, }final-validation"
+  fi
 
-  if [ ${#phases[@]} -eq 0 ]; then
-    echo "none"
+  if [ -n "$phases" ]; then
+    echo "$phases"
   else
-    local IFS=", "
-    echo "${phases[*]}"
+    echo "none"
   fi
 }
 
