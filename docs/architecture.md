@@ -123,6 +123,22 @@ Validation semantics are intentionally asymmetric:
 
 Legacy preset names (`default`, `thorough`, `off`, `epic-focused`) are accepted for backward compatibility and normalized to their current equivalents.
 
+Configuration precedence is:
+
+1. CLI overrides such as `--backend` and `--parallel`
+2. role-specific `agents.<role>` values in `ralph.config.yml`
+3. shared `execution.model` in `ralph.config.yml`
+4. explicit `execution.*` values in `ralph.config.yml`
+5. `workflow.preset`
+6. built-in defaults from `src/config.ts`
+
+Important nuance:
+
+- `execution.model` is expanded into every role and treated as explicit for runtime model-selection purposes
+- `agents.<role>` still overrides that shared model for the matching role
+- if a role has no explicit model override, Ralph can still fall back to backend-specific difficulty-based selection at runtime
+- legacy aliases `agents.planner` and `agents.validator` only apply when the modern role-specific fields are absent
+
 These modules are mostly synchronous and file-oriented. That matches the rest of the codebase, which prefers simple filesystem contracts over in-memory services.
 
 ## Execution Lifecycle

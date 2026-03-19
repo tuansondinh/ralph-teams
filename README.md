@@ -97,6 +97,24 @@ Team Lead policy by backend:
 
 If `ralph.config.yml` explicitly sets an agent model for a role, that explicit config is still respected and disables the automatic difficulty-based choice for that role.
 
+Configuration precedence, highest priority first:
+- CLI flags override config for the fields they control today: `run --backend` beats `execution.backend`, and `run --parallel` beats `execution.parallel`.
+- In `ralph.config.yml`, explicit per-role `agents.<role>` entries beat `execution.model` for that role.
+- In `ralph.config.yml`, `execution.model` beats the built-in per-role defaults and is treated as an explicit model choice for every role.
+- In `ralph.config.yml`, explicit `execution.*` fields beat the selected workflow preset for those same execution settings.
+- In `ralph.config.yml`, `workflow.preset` beats the built-in defaults by seeding the planning/validation toggles.
+- Built-in defaults in `src/config.ts` apply last when nothing else overrides them.
+
+Model precedence, ranked:
+1. `agents.<role>`
+2. `execution.model`
+3. backend difficulty-based auto-selection, but only when there is no explicit model override for that role
+4. built-in config defaults
+
+Notes:
+- `agents.planner` and `agents.validator` are legacy aliases. They only apply when `agents.epicPlanner` or `agents.storyValidator` are not set.
+- `execution.model` counts as explicit for all roles, so Ralph will not replace it later with the Team Lead's difficulty-based model selection.
+
 Ralph never writes code itself. It only schedules work, tracks results, and updates project state.
 
 Current backends:
