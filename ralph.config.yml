@@ -1,5 +1,5 @@
 workflow:
-  preset: minimal
+  preset: balanced
 
 timeouts:
   epicTimeout: 3600
@@ -8,7 +8,7 @@ timeouts:
 
 execution:
   backend: claude
-  parallel: 0
+  parallel: 3
   storyPlanning:
     enabled: false
   storyValidation:
