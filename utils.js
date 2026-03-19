@@ -13,4 +13,8 @@ function capitalize(str = '') {
   return `${firstChar}${rest}`;
 }
 
-module.exports = { add, capitalize };
+function multiply(a, b) {
+  return a * b;
+}
+
+module.exports = { add, capitalize, multiply };
