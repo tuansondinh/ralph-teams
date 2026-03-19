@@ -84,7 +84,7 @@ export async function runCommand(
   const projectRoot = path.dirname(resolved);
   const runtimeDir = getRalphRuntimeDir(projectRoot);
   const parallel = options.parallel;
-  const requestedParallel = parallel !== undefined ? parseParallel(parallel) : undefined;
+  let requestedParallelOverride: number | undefined;
 
   if (!deps.existsSync(resolved)) {
     console.error(chalk.red(`Error: prd.json not found at ${resolved}`));
@@ -93,7 +93,8 @@ export async function runCommand(
   }
 
   if (parallel !== undefined) {
-    if (requestedParallel === null) {
+    const requestedParallel = parseParallel(parallel);
+    if (requestedParallel === null || requestedParallel === undefined) {
       console.error(chalk.red('Error: --parallel must be a whole number'));
       deps.exit(1);
     }
@@ -102,6 +103,8 @@ export async function runCommand(
       console.error(chalk.red('Error: --parallel must be greater than 0'));
       deps.exit(1);
     }
+
+    requestedParallelOverride = requestedParallel;
   }
 
   // Load ralph.config.yml (if present) and merge CLI overrides
@@ -112,7 +115,7 @@ export async function runCommand(
     const baseConfig = configLoader(deps.cwd());
     config = mergeCliOverrides(baseConfig, {
       ...(options.backend !== undefined ? { backend: options.backend } : {}),
-      ...(requestedParallel !== null && requestedParallel !== undefined ? { parallel: requestedParallel } : {}),
+      ...(requestedParallelOverride !== undefined ? { parallel: requestedParallelOverride } : {}),
     });
     const explicitOverridesLoader = deps.loadExplicitAgentModelOverrides ?? loadExplicitAgentModelOverrides;
     explicitAgentOverrides = explicitOverridesLoader(deps.cwd());
