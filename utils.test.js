@@ -46,6 +46,9 @@ assert.strictEqual(capitalize('!hello'), '!hello', "capitalize('!hello') should 
 // Test 15: capitalize() should handle whitespace only
 assert.strictEqual(capitalize('   '), '   ', "capitalize('   ') should equal '   '");
 
+// Test 15b: capitalize() should only capitalize the first character of a multi-word string
+assert.strictEqual(capitalize('hello world'), 'Hello world', "capitalize('hello world') should equal 'Hello world'");
+
 // Test 16: multiply() should return the product of two positive numbers
 assert.strictEqual(multiply(2, 3), 6, 'multiply(2, 3) should equal 6');
 
