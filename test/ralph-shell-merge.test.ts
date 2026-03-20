@@ -257,12 +257,12 @@ test('US-004: resume recovers completed-but-unmerged epic branches before finish
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
   assert.match(result.stdout, /Recovered pending merge from existing epic branch/);
   assert.match(result.stdout, /\[EPIC-001\] Merge successful \(clean\)/);
-  assert.match(result.stdout, /\[EPIC-002\] Merge successful \(clean\)/);
+  assert.match(result.stdout, /\[EPIC-002\] Merge successful \(team lead, clean\)/);
 
   const progress = fs.readFileSync(path.join(runtimeDir, 'progress.txt'), 'utf-8');
   assert.match(progress, /\[EPIC-001\] RECOVERED PENDING MERGE \(resume\/startup\)/);
   assert.match(progress, /\[EPIC-001\] MERGED \(clean\)/);
-  assert.match(progress, /\[EPIC-002\] MERGED \(clean\)/);
+  assert.match(progress, /\[EPIC-002\] MERGED \(team lead clean\)/);
 
   const branches = execFileSync('git', ['branch'], { cwd: tempDir, encoding: 'utf-8' });
   assert.doesNotMatch(branches, /ralph\/EPIC-001/);
