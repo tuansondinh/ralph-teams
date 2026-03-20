@@ -197,6 +197,16 @@ test('ralph.sh loads the canonical Team Lead policy for runtime prompts', () => 
   assert.match(runtimePrompt, /\{\{TEAM_LEAD_POLICY\}\}/);
 });
 
+test('ralph.sh enables Claude agent teams in in-process mode for the claude backend', () => {
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+  const runtimePrompt = fs.readFileSync(`${repoRoot}/prompts/team-lead-runtime.md`, 'utf-8');
+
+  assert.match(script, /--teammate-mode in-process/);
+  assert.match(script, /CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="\$\{CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS:-1\}"/);
+  assert.match(runtimePrompt, /If your runtime is Claude, use Claude agent teams/i);
+  assert.match(runtimePrompt, /use direct teammate messaging when coordination helps/i);
+});
+
 test('canonical Team Lead policy covers scoped planner and validator heuristics', () => {
   const content = fs.readFileSync(`${repoRoot}/prompts/team-lead-policy.md`, 'utf-8');
 
@@ -215,7 +225,7 @@ test('canonical Team Lead policy covers scoped planner and validator heuristics'
   assert.match(content, /epicValidation\.enabled = 1/i);
   assert.match(content, /If you are unsure, spawn the story validator/i);
   assert.match(content, /If you are unsure, spawn the epic validator/i);
-  assert.match(content, /Print `DONE: X\/Y stories passed` and exit immediately/i);
+  assert.match(content, /Only print `DONE: X\/Y stories passed` after the merge attempt and merge-result artifact write are finished/i);
 });
 
 test('claude team-lead prompt uses difficulty-based model selection unless config overrides are set', () => {
@@ -232,16 +242,18 @@ test('claude team-lead prompt uses difficulty-based model selection unless confi
   assert.match(content, /difficult task -> `opus`/);
 });
 
-test('claude team-lead prompt requires one-shot builder spawns instead of a persistent mailbox', () => {
+test('claude team-lead prompt uses Claude agent teams for delegated work', () => {
   const content = fs.readFileSync(`${repoRoot}/.claude/agents/team-lead.md`, 'utf-8');
 
   assert.match(content, /prompts\/team-lead-policy\.md/);
-  assert.match(content, /spawn a fresh Builder/i);
-  assert.match(content, /subagent_type: "story-validator"/);
-  assert.match(content, /subagent_type: "builder"/);
-  assert.match(content, /Do NOT use `SendMessage` or `shutdown_request`/);
-  assert.doesNotMatch(content, /wait for story assignments from you via direct messages/i);
-  assert.doesNotMatch(content, /Send Builder a direct message/i);
+  assert.match(content, /Use Claude agent teams, not Claude subagents/i);
+  assert.match(content, /TeamCreate/);
+  assert.match(content, /SendMessage/);
+  assert.match(content, /fresh Builder/i);
+  assert.match(content, /validators independent from builder reasoning/i);
+  assert.match(content, /Builder-to-validator direct messaging is restricted to artifact or status handoff only/i);
+  assert.match(content, /Do not let the Builder send reasoning, verdict framing, acceptance-criteria arguments, or coaching/i);
+  assert.doesNotMatch(content, /subagent_type:/);
 });
 
 test('copilot team-lead prompt uses difficulty-based model selection unless config overrides are set', () => {
@@ -288,10 +300,8 @@ test('copilot shell launch relies on agent markdown models instead of forcing CL
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
   assert.match(script, /gh copilot -- --agent team-lead --allow-all --no-ask-user --stream on -p/);
-  assert.match(script, /gh copilot -- --agent merger --allow-all --no-ask-user --stream on -p/);
   assert.match(script, /gh copilot -- --agent "\$0" --allow-all --no-ask-user --stream on -p "\$1"/);
   assert.doesNotMatch(script, /gh copilot -- --agent team-lead --model /);
-  assert.doesNotMatch(script, /gh copilot -- --agent merger --model /);
   assert.doesNotMatch(script, /gh copilot -- --agent "\$0" --model /);
 });
 
@@ -323,6 +333,16 @@ test('team lead runtime prompt keeps the lead in orchestration mode', () => {
 
   assert.match(runtimePrompt, /You are the Team Lead for execution, not the primary implementer or explorer/i);
   assert.match(runtimePrompt, /Keep your own repo exploration minimal and delegate the actual work/i);
+  assert.match(runtimePrompt, /## Merge Responsibility/);
+  assert.match(runtimePrompt, /this same Team Lead session owns the merge attempt before exiting/i);
+});
+
+test('team lead policy requires in-session merge ownership with a scripted artifact handoff', () => {
+  const policy = fs.readFileSync(`${repoRoot}/prompts/team-lead-policy.md`, 'utf-8');
+
+  assert.match(policy, /## Merge Completion/);
+  assert.match(policy, /same Team Lead session must attempt the merge before exiting/i);
+  assert.match(policy, /merge-result artifact/i);
 });
 
 test('codex shell launches add the Ralph package directory alongside the project workspace', () => {
@@ -356,13 +376,22 @@ test('ralph.sh repairs a merged-in root runtime symlink and keeps runtime artifa
   assert.match(script, /if \[ -f "\.git\/MERGE_HEAD" \]; then[\s\S]*git commit --no-edit/);
 });
 
-test('ralph.sh banner includes workflow preset or enabled execution phases', () => {
+test('ralph.sh banner shows the workflow preset without enabled phases when a preset is present', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
   assert.match(script, /WORKFLOW_PRESET="\$\{RALPH_WORKFLOW_PRESET:-\}"/);
   assert.match(script, /render_enabled_execution_phases\(\)/);
-  assert.match(script, /echo "  Workflow: \$WORKFLOW_PRESET \(enabled phases: \$\(render_enabled_execution_phases\)\)"/);
+  assert.match(script, /echo "  Workflow: \$WORKFLOW_PRESET"/);
+  assert.doesNotMatch(script, /echo "  Workflow: \$WORKFLOW_PRESET \(enabled phases: \$\(render_enabled_execution_phases\)\)"/);
   assert.match(script, /echo "  Execution phases enabled: \$\(render_enabled_execution_phases\)"/);
+});
+
+test('ralph.sh finalization always reinitializes counters after pending-merge recovery', () => {
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+
+  assert.match(script, /recover_pending_merges "finalization" \|\| true/);
+  assert.match(script, /recover_pending_merges "finalization" \|\| true\s+initialize_counters/);
+  assert.doesNotMatch(script, /if ! recover_pending_merges "finalization"; then[\s\S]*initialize_counters[\s\S]*fi\s+initialize_counters/);
 });
 
 test('ralph.sh final validation reads the machine-readable result artifact', () => {

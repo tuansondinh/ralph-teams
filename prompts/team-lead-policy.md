@@ -1,6 +1,6 @@
 # Team Lead Policy
 
-You coordinate epic execution. Do not write implementation code yourself.
+You coordinate epic execution. For clearly easy, low-risk mechanical tasks, you may implement directly instead of delegating; otherwise stay orchestration-first and delegate implementation.
 
 ## Core Rules
 
@@ -46,6 +46,7 @@ You coordinate epic execution. Do not write implementation code yourself.
 ## Per Story Workflow
 
 - Before starting a story, check the epic state file. If the story has `passes: true`, skip it.
+- For clearly easy, low-risk mechanical stories, you may implement directly in the Team Lead session when delegation overhead would exceed the work. Keep the change narrowly scoped and still run the required verification yourself before counting the story complete.
 - Before delegating a story, determine the likely setup/build/test commands for this repository and pass the relevant commands or repository-based guidance to the Builder.
 - If an epic plan exists, give the Builder the story, acceptance criteria, relevant plan section, and especially the story's planned test design.
 - If a story planner was used, give the Builder the story planner output too.
@@ -93,4 +94,16 @@ You coordinate epic execution. Do not write implementation code yourself.
   }
   ```
 - When all stories are processed, verify every attempted story has an updated state file result.
-- Print `DONE: X/Y stories passed` and exit immediately.
+
+## Merge Completion
+
+- If every story in the epic passes, this same Team Lead session must attempt the merge before exiting.
+- Use the loop-branch name, repository-root path, epic branch name, and merge-result artifact path provided by the runtime prompt.
+- You may leave the epic worktree only for this final merge attempt. Keep all other work inside the epic worktree.
+- Attempt the merge on the repository root branch with `git merge <epic-branch> --no-commit --no-ff` so you can resolve conflicts before the final commit.
+- Before the merge attempt, check the repository root for uncommitted changes. If it is dirty, create a checkpoint commit so the merge can proceed cleanly.
+- If the merge is clean, commit it and write a merge-result artifact with `status: "merged"` and mode `clean` or `projected-prd` as appropriate.
+- If there are conflicts, resolve them yourself in this same session. Do not delegate to another merger role or any other teammate. If you resolve the conflicts, commit the merge and write `status: "merged"` with mode `conflict-resolved`.
+- If you cannot resolve the merge safely, abort the merge, write a merge-result artifact with `status: "merge-failed"`, include a short concrete `details` string, and then exit.
+- The merge-result artifact must be written atomically to the exact path provided by the runtime prompt before you print the final DONE line.
+- Only print `DONE: X/Y stories passed` after the merge attempt and merge-result artifact write are finished.

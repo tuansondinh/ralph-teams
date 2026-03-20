@@ -106,6 +106,9 @@ test('codex backend suppresses bare file-path chatter in stdout while keeping ou
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
     'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
+    'LOOP_BRANCH=$(printf "%s" "$STDIN" | sed -n \'s/^- Loop branch to merge into: //p\' | head -1)',
+    'ROOT_DIR=$(printf "%s" "$STDIN" | sed -n \'s/^- Repository root for the merge attempt: //p\' | head -1)',
+    'MERGE_RESULT_PATH=$(printf "%s" "$STDIN" | sed -n \'s/^- Write the final merge result artifact to: //p\' | head -1)',
     'if [ -n "$EPIC_ID" ]; then',
     '  printf "./src/config.ts\\n"',
     '  printf "./src/index.ts\\n"',
@@ -130,6 +133,23 @@ test('codex backend suppresses bare file-path chatter in stdout while keeping ou
       "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
       "fs.renameSync(t,f);" +
     '" "$EPIC_ID" "$PRD_PATH"',
+    '  if [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
+    '    EPIC_BRANCH=$(git branch --show-current)',
+    '    git -C "$ROOT_DIR" checkout "$LOOP_BRANCH"',
+    '    if git -C "$ROOT_DIR" merge "$EPIC_BRANCH" --no-commit --no-ff; then',
+    '      if [ -f "$ROOT_DIR/.git/MERGE_HEAD" ]; then',
+    '        git -C "$ROOT_DIR" commit --no-edit',
+    '      fi',
+    '      node -e "' +
+      "const fs=require('fs');" +
+      "const file=process.argv[1];" +
+      "const t=file+'.tmp.'+process.pid;" +
+      "const data={epicId:process.argv[2],status:'merged',mode:'clean',details:'',timestamp:'2026-03-20T17:30:00+01:00'};" +
+      "fs.writeFileSync(t,JSON.stringify(data,null,2)+'\\n');" +
+      "fs.renameSync(t,file);" +
+    '" "$MERGE_RESULT_PATH" "$EPIC_ID"',
+    '    fi',
+    '  fi',
     '  printf "PASS\\n"',
     'else',
     '  printf "VERDICT: PASS\\n"',
@@ -446,7 +466,7 @@ test('US-001: sequential mode merges before scheduling the next independent epic
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
 
-  const epic1MergedPos = result.stdout.indexOf('[EPIC-001] Merge successful (clean)');
+  const epic1MergedPos = result.stdout.indexOf('[EPIC-001] Merge successful (team lead, clean)');
   const secondRemainingPos = result.stdout.indexOf('1 epic(s) remaining to run sequentially');
   const epic2PassedPos = result.stdout.indexOf('[EPIC-002] PASSED');
 
@@ -516,6 +536,27 @@ test('US-002: a transient worktree creation failure is retried automatically', (
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
   assert.ok(fs.existsSync(marker), 'expected transient worktree failure hook to run once');
+});
+
+test('US-002: Ralph fails fast when a pending epic was already merged into the reused loop branch', () => {
+  const { tempDir, env } = setupMultiEpicRepo([{ id: 'EPIC-001', title: 'Alpha' }], { 'EPIC-001': 'PASS' });
+
+  execFileSync('git', ['checkout', '-b', 'ralph/loop/20260320-163740'], { cwd: tempDir });
+  execFileSync('git', ['checkout', '-b', 'ralph/EPIC-001'], { cwd: tempDir });
+  fs.writeFileSync(path.join(tempDir, 'README.md'), 'epic merged already\n');
+  execFileSync('git', ['add', 'README.md'], { cwd: tempDir });
+  execFileSync('git', ['commit', '-m', 'feat: stale merged epic'], { cwd: tempDir });
+  execFileSync('git', ['checkout', 'ralph/loop/20260320-163740'], { cwd: tempDir });
+  execFileSync('git', ['merge', '--no-ff', 'ralph/EPIC-001', '-m', "Merge branch 'ralph/EPIC-001' into ralph/loop/20260320-163740"], { cwd: tempDir });
+  execFileSync('git', ['branch', '-D', 'ralph/EPIC-001'], { cwd: tempDir });
+
+  const result = runRalph(tempDir, env);
+  const combined = `${result.stdout}\n${result.stderr}`;
+
+  assert.equal(result.status, 1, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.match(combined, /Error: pending epics in 'prd\.json' conflict with the current loop branch state\./);
+  assert.match(combined, /\[EPIC-001\] loop branch 'ralph\/loop\/20260320-163740' already contains prior merge history for 'ralph\/EPIC-001'/);
+  assert.match(combined, /Mark the already-merged epic\(s\) completed in 'prd\.json'/);
 });
 
 test('US-002: new worktrees do not centrally bootstrap Node dependencies before spawning the epic', () => {

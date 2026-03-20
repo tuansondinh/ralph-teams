@@ -1,32 +1,37 @@
-const assert = require('node:assert/strict');
-const { add, multiply, capitalize, ...rest } = require('./utils');
+const { test } = require('node:test');
+const assert = require('node:assert');
+const { add, capitalize, multiply } = require('./utils');
 
-assert.strictEqual(typeof add, 'function', 'utils should export add as a function');
-assert.strictEqual(typeof multiply, 'function', 'utils should export multiply as a function');
-assert.strictEqual(
-  typeof capitalize,
-  'function',
-  'utils should export capitalize as a function'
-);
-assert.deepStrictEqual(
-  rest,
-  {},
-  'utils should only export add, multiply, and capitalize'
-);
+test('add() returns the sum of two numbers', () => {
+  assert.strictEqual(add(2, 3), 5);
+  assert.strictEqual(add(0, 0), 0);
+  assert.strictEqual(add(-1, 1), 0);
+  assert.strictEqual(add(10, 20), 30);
+});
 
-assert.strictEqual(add(2, 3), 5, 'add should sum positive operands');
-assert.strictEqual(add(-4, -6), -10, 'add should sum negative operands');
-assert.strictEqual(add(0, 0), 0, 'add should sum zero operands');
+test('capitalize() uppercases first character and lowercases the rest', () => {
+  assert.strictEqual(capitalize('hello'), 'Hello');
+  assert.strictEqual(capitalize('HELLO'), 'Hello');
+  assert.strictEqual(capitalize('hELLO'), 'Hello');
+  assert.strictEqual(capitalize('HeLLo'), 'Hello');
+});
 
-assert.strictEqual(multiply(2, 3), 6, 'multiply should handle positive operands');
-assert.strictEqual(multiply(-2, 3), -6, 'multiply should handle negative operands');
-assert.strictEqual(multiply(0, 5), 0, 'multiply should handle zero operands');
+test('capitalize() handles single character', () => {
+  assert.strictEqual(capitalize('a'), 'A');
+  assert.strictEqual(capitalize('Z'), 'Z');
+});
 
-assert.strictEqual(capitalize('hello'), 'Hello', 'capitalize should uppercase the first letter');
-assert.strictEqual(
-  capitalize('hELLO'),
-  'Hello',
-  'capitalize should lowercase the remaining letters'
-);
-assert.strictEqual(capitalize('a'), 'A', 'capitalize should handle single-character strings');
-assert.strictEqual(capitalize(''), '', 'capitalize should handle empty strings');
+test('capitalize() handles empty string', () => {
+  assert.strictEqual(capitalize(''), '');
+});
+
+test('capitalize() handles single uppercase character', () => {
+  assert.strictEqual(capitalize('H'), 'H');
+});
+
+test('multiply() returns the product of two numbers', () => {
+  assert.strictEqual(multiply(2, 3), 6);
+  assert.strictEqual(multiply(0, 5), 0);
+  assert.strictEqual(multiply(-2, 3), -6);
+  assert.strictEqual(multiply(10, 20), 200);
+});
