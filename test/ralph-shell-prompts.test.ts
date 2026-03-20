@@ -300,10 +300,8 @@ test('copilot shell launch relies on agent markdown models instead of forcing CL
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
   assert.match(script, /gh copilot -- --agent team-lead --allow-all --no-ask-user --stream on -p/);
-  assert.match(script, /gh copilot -- --agent merger --allow-all --no-ask-user --stream on -p/);
   assert.match(script, /gh copilot -- --agent "\$0" --allow-all --no-ask-user --stream on -p "\$1"/);
   assert.doesNotMatch(script, /gh copilot -- --agent team-lead --model /);
-  assert.doesNotMatch(script, /gh copilot -- --agent merger --model /);
   assert.doesNotMatch(script, /gh copilot -- --agent "\$0" --model /);
 });
 

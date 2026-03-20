@@ -378,11 +378,11 @@ export function setupMergeRepo(
   return { tempDir, binDir, env };
 }
 
-export function setupConflictRepo(options?: { resolveWithMerger?: boolean }) {
+export function setupConflictRepo(options?: { resolveWithTeamLead?: boolean }) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-conflict-'));
   const binDir = path.join(tempDir, 'bin');
   fs.mkdirSync(binDir);
-  const resolveWithMerger = options?.resolveWithMerger === true;
+  const resolveWithTeamLead = options?.resolveWithTeamLead === true;
 
   execFileSync('git', ['init', '-b', 'main'], { cwd: tempDir });
   execFileSync('git', ['config', 'user.name', 'Ralph Test'], { cwd: tempDir });
@@ -406,7 +406,7 @@ export function setupConflictRepo(options?: { resolveWithMerger?: boolean }) {
 
   const mockClaude = [
     '#!/bin/sh',
-    `RESOLVE_WITH_MERGER="${resolveWithMerger ? '1' : '0'}"`,
+    `RESOLVE_WITH_TEAM_LEAD="${resolveWithTeamLead ? '1' : '0'}"`,
     'STDIN=$(cat)',
     'ARGS="$*"',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
@@ -446,9 +446,9 @@ export function setupConflictRepo(options?: { resolveWithMerger?: boolean }) {
     '" "$EPIC_ID" "$PRD_PATH"',
     '  exit 0',
     'fi',
-    'if printf "%s" "$ARGS" | grep -q -- "--agent merger"; then',
-    '  touch merger-agent-invoked.txt',
-    '  if [ "$RESOLVE_WITH_MERGER" = "1" ]; then',
+    'if printf "%s" "$ARGS" | grep -q -- "--agent team-lead" && printf "%s" "$STDIN" | grep -q -- "Take over this merge conflict resolution directly"; then',
+    '  touch team-lead-merge-invoked.txt',
+    '  if [ "$RESOLVE_WITH_TEAM_LEAD" = "1" ]; then',
     '    printf "main version\\nepic version\\n" > README.md',
     '    git add README.md',
     '    echo MERGE_SUCCESS',

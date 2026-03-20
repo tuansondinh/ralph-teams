@@ -109,7 +109,7 @@ test('ralph.sh auto-adds runtime artifacts to the repo .gitignore', () => {
   assert.match(gitignore, /^\.ralph-teams\/$/m);
 });
 
-test('US-004: clean merge succeeds without spawning merger agent', () => {
+test('US-004: clean merge succeeds without team lead takeover', () => {
   const { tempDir, env } = setupMergeRepo([{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }]);
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
@@ -284,8 +284,8 @@ test('US-005: merge-failed status set when conflict cannot be resolved', () => {
   assert.equal(prd.epics[0].status, 'merge-failed');
 });
 
-test('US-005: recovered pending merges spawn the merger agent when conflicts exist', () => {
-  const { tempDir, env } = setupConflictRepo({ resolveWithMerger: true });
+test('US-005: recovered pending merges trigger team lead takeover when conflicts exist', () => {
+  const { tempDir, env } = setupConflictRepo({ resolveWithTeamLead: true });
   const runtimeDir = path.join(tempDir, '.ralph-teams');
   fs.mkdirSync(runtimeDir, { recursive: true });
 
@@ -335,9 +335,9 @@ test('US-005: recovered pending merges spawn the merger agent when conflicts exi
   });
 
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
-  assert.match(result.stdout, /\[EPIC-001\] conflicts detected — spawning merger agent/);
+  assert.match(result.stdout, /\[EPIC-001\] conflicts detected — team lead takeover/);
   assert.match(result.stdout, /\[EPIC-001\] merged \(AI-resolved conflicts\)/);
-  assert.ok(fs.existsSync(path.join(tempDir, 'merger-agent-invoked.txt')));
+  assert.ok(fs.existsSync(path.join(tempDir, 'team-lead-merge-invoked.txt')));
   const progress = fs.readFileSync(path.join(runtimeDir, 'progress.txt'), 'utf-8');
   assert.match(progress, /\[EPIC-001\] RECOVERED PENDING MERGE \(resume\/startup\)/);
   assert.match(progress, /\[EPIC-001\] MERGED \(AI-resolved\)/);
@@ -365,7 +365,7 @@ test('US-005: merge-failed epic does not block independent epics in later waves'
   assert.match(result.stdout, /\[EPIC-002\].*[Ss]kipped/);
 });
 
-test('US-005: merge log file created when merger agent is spawned', () => {
+test('US-005: merge log file created when team lead takeover runs', () => {
   const { tempDir, env } = setupConflictRepo();
   runRalph(tempDir, env);
   const logsDir = path.join(tempDir, '.ralph-teams', 'logs');
@@ -374,14 +374,14 @@ test('US-005: merge log file created when merger agent is spawned', () => {
   assert.ok(mergeLogs.length > 0);
 });
 
-test('US-005: merger agent is spawned and can resolve a simple conflict end to end', () => {
-  const { tempDir, env } = setupConflictRepo({ resolveWithMerger: true });
+test('US-005: team lead takeover can resolve a simple conflict end to end', () => {
+  const { tempDir, env } = setupConflictRepo({ resolveWithTeamLead: true });
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
   assert.match(result.stdout, /\[EPIC-001\] merged \(AI-resolved conflicts\)/);
   const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
   assert.equal(prd.epics[0].status, 'completed');
-  assert.ok(fs.existsSync(path.join(tempDir, 'merger-agent-invoked.txt')));
+  assert.ok(fs.existsSync(path.join(tempDir, 'team-lead-merge-invoked.txt')));
   const readme = fs.readFileSync(path.join(tempDir, 'README.md'), 'utf-8');
   assert.equal(readme, 'main version\nepic version\n');
   const logsDir = path.join(tempDir, '.ralph-teams', 'logs');

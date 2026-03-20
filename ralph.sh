@@ -1476,7 +1476,7 @@ spawn_epic_bg() {
 
 # merge_wave: merges completed epic branches back to the loop branch sequentially.
 # Takes epic IDs as arguments. Clean merges succeed without AI intervention.
-# On conflict, spawns the merger agent. Logs all outcomes to progress.txt.
+# On conflict, hands the repo to a tightly-scoped Team Lead takeover. Logs all outcomes to progress.txt.
 merge_wave() {
   local -a completed_epic_ids=("$@")
 
@@ -1566,11 +1566,11 @@ merge_wave() {
         continue
       fi
 
-      # Conflicts detected — attempt AI resolution via merger agent
-      echo "  [$epic_id] conflicts detected — spawning merger agent..."
-      echo "[$epic_id] merge conflicts — attempting AI resolution — $(date)" >> "$PROGRESS_FILE"
+      # Conflicts detected — hand off the current merge state to the Team Lead.
+      echo "  [$epic_id] conflicts detected — team lead takeover..."
+      echo "[$epic_id] merge conflicts — team lead takeover — $(date)" >> "$PROGRESS_FILE"
 
-      local merge_prompt="You are the Merger Agent. Resolve the git merge conflicts.
+      local merge_prompt="You are the Team Lead. Take over this merge conflict resolution directly.
 
 ## Context
 - Target branch: ${target_branch}
@@ -1581,14 +1581,20 @@ merge_wave() {
 ${conflicted_files}
 
 ## Instructions
-1. For each conflicted file listed above, read the full file to see the conflict markers
-2. Run: git log --oneline ${target_branch}..${branch_name} (what the epic branch changed)
-3. Run: git log --oneline ${branch_name}..${target_branch} (what target changed since branch point)
-4. Resolve each conflict by combining both sides' intent
-5. Stage each resolved file with: git add <filename>
-6. Do NOT commit — ralph.sh will create the merge commit
-7. Do NOT run git merge --abort
-8. If you cannot safely resolve a conflict, leave the conflict markers in place
+1. Stay in the current repository and operate on the existing in-progress merge state.
+2. Do NOT delegate. Do NOT spawn merger, builder, planner, or validator work.
+3. For each conflicted file listed above, read the full file and inspect the conflict markers.
+4. Run: git log --oneline ${target_branch}..${branch_name} to see what the epic branch changed.
+5. Run: git log --oneline ${branch_name}..${target_branch} to see what changed on the target branch.
+6. Resolve each conflict by combining both sides' intent where possible.
+7. Stage each resolved file with: git add <filename>.
+8. Do NOT commit. ralph.sh will create the merge commit after all conflicts are resolved.
+9. Do NOT run git merge --abort.
+10. If you cannot safely resolve a conflict, leave the conflict markers in place.
+
+When you are finished, print exactly one final line:
+- MERGE_SUCCESS
+- MERGE_FAILED
 
 Begin resolving."
 
@@ -1596,18 +1602,18 @@ Begin resolving."
 
       case "$BACKEND" in
         claude)
-          echo "$merge_prompt" | $AGENT_CMD --agent merger --model "$MODEL_MERGER" --dangerously-skip-permissions --print --verbose --output-format stream-json > "$merge_log" 2>&1 || true
+          echo "$merge_prompt" | $AGENT_CMD --agent team-lead --model "$MODEL_TEAM_LEAD" --dangerously-skip-permissions --print --verbose --output-format stream-json > "$merge_log" 2>&1 || true
           ;;
         copilot)
           COPILOT_MERGE_PROMPT="$merge_prompt" \
-            script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent merger --allow-all --no-ask-user --stream on -p "$COPILOT_MERGE_PROMPT"' \
+            script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent team-lead --allow-all --no-ask-user --stream on -p "$COPILOT_MERGE_PROMPT"' \
             > "$merge_log" 2>&1 || true
           ;;
         codex)
-          MODEL_TEAM_LEAD="$MODEL_MERGER" run_codex_exec "$ROOT_DIR" "$merge_prompt" > "$merge_log" 2>&1 || true
+          run_codex_exec "$ROOT_DIR" "$merge_prompt" > "$merge_log" 2>&1 || true
           ;;
         opencode)
-          run_opencode_exec "$ROOT_DIR" "$merge_prompt" merger "$MODEL_MERGER" > "$merge_log" 2>&1 || true
+          run_opencode_exec "$ROOT_DIR" "$merge_prompt" team-lead "$MODEL_TEAM_LEAD" > "$merge_log" 2>&1 || true
           ;;
       esac
 
