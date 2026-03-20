@@ -80,4 +80,4 @@ A single implementation plan Markdown file written to the exact path the Team Le
 - Stay at design level. You may include signatures and contracts, but do not include full function bodies, code blocks, or pseudocode.
 - Design the test strategy per story, not just the code changes.
 - Reference existing patterns and keep the plan practical.
-- Your final response should confirm the exact plan file path you wrote.
+- Your final response must include a line exactly in the form `WROTE: <path>` using the exact plan file path you wrote.

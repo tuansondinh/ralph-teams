@@ -23,6 +23,7 @@ test('epic planner prompt assets require writing the epic plan markdown file', (
     assert.match(content, /write.*plan.*(path|disk)|persist.*disk/i);
     assert.match(content, /\.ralph-teams\/plans\/plan-\{?epic-id\}?\.md|\.ralph-teams\/plans\/plan-<epic-id>\.md|plans\/plan-\{?epic-id\}?\.md|plans\/plan-<epic-id>\.md/i);
     assert.match(content, /do not ask the team lead to copy, save, or rewrite the plan|write the file yourself before replying/i);
+    assert.match(content, /WROTE: <path>/i);
   }
 });
 
@@ -180,14 +181,20 @@ test('team lead wrappers reference the canonical Team Lead policy file', () => {
 
 test('ralph.sh loads the canonical Team Lead policy for runtime prompts', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
+  const runtimePrompt = fs.readFileSync(`${repoRoot}/prompts/team-lead-runtime.md`, 'utf-8');
 
   assert.match(script, /TEAM_LEAD_POLICY_FILE=.*prompts\/team-lead-policy\.md/);
+  assert.match(script, /TEAM_LEAD_PROMPT_FILE=.*prompts\/team-lead-runtime\.md/);
   assert.match(script, /TEAM_LEAD_POLICY="\$\(cat \"\$TEAM_LEAD_POLICY_FILE\"\)"/);
-  assert.match(script, /## Canonical Team Lead Policy/);
-  assert.match(script, /## Project Setup Strategy/);
-  assert.match(script, /Ralph does not preinstall dependencies or preselect build\/test commands/);
-  assert.match(script, /Check repo instructions first: 'AGENTS\.md', 'README\*'/);
-  assert.doesNotMatch(script, /Check repo instructions first: `AGENTS\.md`, `README\*`/);
+  assert.match(script, /TEAM_PROMPT="\$\(render_team_lead_prompt\)"/);
+  assert.match(script, /TEAM_LEAD_TEMPLATE_PATH="\$TEAM_LEAD_PROMPT_FILE"/);
+  assert.match(runtimePrompt, /## Canonical Team Lead Policy/);
+  assert.match(runtimePrompt, /## Project Setup Strategy/);
+  assert.match(runtimePrompt, /Ralph does not preinstall dependencies or preselect build\/test commands/);
+  assert.match(runtimePrompt, /Check repo instructions first: 'AGENTS\.md', 'README\*'/);
+  assert.doesNotMatch(runtimePrompt, /Check repo instructions first: `AGENTS\.md`, `README\*`/);
+  assert.match(runtimePrompt, /\{\{PROJECT\}\}/);
+  assert.match(runtimePrompt, /\{\{TEAM_LEAD_POLICY\}\}/);
 });
 
 test('canonical Team Lead policy covers scoped planner and validator heuristics', () => {
@@ -196,8 +203,13 @@ test('canonical Team Lead policy covers scoped planner and validator heuristics'
   assert.match(content, /If a usable canonical plan file already exists at the path provided in the prompt, do not spawn the epic planner/i);
   assert.match(content, /If `epicPlanning\.enabled = 1`, spawn the epic planner/i);
   assert.match(content, /explicitly tell the epic planner the exact output path/i);
+  assert.match(content, /WROTE: <path>/i);
   assert.match(content, /Treat an epic planner response as incomplete/i);
   assert.match(content, /verify that the plan file exists at the required path/i);
+  assert.match(content, /may write that exact plan to the canonical path and continue/i);
+  assert.match(content, /Do not rerun the planner only for the missing file write/i);
+  assert.match(content, /Keep the Team Lead orchestration-first/i);
+  assert.match(content, /Do not do open-ended architecture tours, large file sweeps, or broad grep passes yourself/i);
   assert.match(content, /storyPlanning\.enabled = 1/i);
   assert.match(content, /storyValidation\.enabled = 1/i);
   assert.match(content, /epicValidation\.enabled = 1/i);
@@ -294,6 +306,7 @@ test('ralph.sh injects opencode agent definitions into the workdir before launch
 
 test('ralph.sh prepares codex teammate variants so the team lead can choose per-task models', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
+  const runtimePrompt = fs.readFileSync(`${repoRoot}/prompts/team-lead-runtime.md`, 'utf-8');
 
   assert.match(script, /prepare_codex_agent_configs\(\)/);
   assert.match(script, /agents\.story_planner_easy\.config_file/);
@@ -302,7 +315,7 @@ test('ralph.sh prepares codex teammate variants so the team lead can choose per-
   assert.match(script, /agents\.story_validator_easy\.config_file/);
   assert.match(script, /agents\.epic_validator_easy\.config_file/);
   assert.match(script, /agents\.final_validator_easy\.config_file/);
-  assert.match(script, /If your runtime is Codex, use these exact named teammate roles when spawning/);
+  assert.match(runtimePrompt, /If your runtime is Codex, use these exact named teammate roles when spawning/);
 });
 
 test('codex shell launches add the Ralph package directory alongside the project workspace', () => {
@@ -362,26 +375,27 @@ test('ralph.sh final validation reads the machine-readable result artifact', () 
 
 test('ralph.sh requires one-shot builder and validator runs for shared team-lead prompt backends', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
+  const runtimePrompt = fs.readFileSync(`${repoRoot}/prompts/team-lead-runtime.md`, 'utf-8');
 
   assert.match(script, /TEAM_LEAD_POLICY="\$\(cat \"\$TEAM_LEAD_POLICY_FILE\"\)"/);
-  assert.match(script, /## Runtime-Specific Notes/);
-  assert.match(script, /If your runtime supports named sub-agents, use the dedicated story-planner, epic-planner, builder, story-validator, and epic-validator roles/i);
-  assert.match(script, /spawn a new Builder for the retry instead of reusing the previous Builder run/i);
-  assert.match(script, /If your runtime is Codex exec mode, \\`request_user_input\\` is unavailable/i);
+  assert.match(runtimePrompt, /## Runtime-Specific Notes/);
+  assert.match(runtimePrompt, /If your runtime supports named sub-agents, use the dedicated story-planner, epic-planner, builder, story-validator, and epic-validator roles/i);
+  assert.match(runtimePrompt, /spawn a new Builder for the retry instead of reusing the previous Builder run/i);
+  assert.match(runtimePrompt, /If your runtime is Codex exec mode, `request_user_input` is unavailable/i);
 });
 
 test('ralph.sh escapes request_user_input in the shell-built team lead prompt', () => {
-  const script = fs.readFileSync(scriptPath, 'utf-8');
+  const runtimePrompt = fs.readFileSync(`${repoRoot}/prompts/team-lead-runtime.md`, 'utf-8');
 
-  assert.match(script, /If your runtime is Codex exec mode, \\`request_user_input\\` is unavailable/);
+  assert.match(runtimePrompt, /If your runtime is Codex exec mode, `request_user_input` is unavailable/);
 });
 
 test('ralph.sh team lead prompt forbids epic replanning when the PRD already marks the epic planned', () => {
-  const script = fs.readFileSync(scriptPath, 'utf-8');
+  const runtimePrompt = fs.readFileSync(`${repoRoot}/prompts/team-lead-runtime.md`, 'utf-8');
 
-  assert.match(script, /## Planning Status/);
-  assert.match(script, /epic\.planned = \$\{EPIC_PLANNED\}/);
-  assert.match(script, /canonical_plan\.exists = \$\{WORKTREE_PLAN_EXISTS\}/);
-  assert.match(script, /If a usable canonical plan already exists, do NOT spawn the epic planner\. Use it even if epic\.planned is false/);
-  assert.match(script, /Only spawn the epic planner when epicPlanning\.enabled = 1 and there is no usable canonical plan for this epic/);
+  assert.match(runtimePrompt, /## Planning Status/);
+  assert.match(runtimePrompt, /epic\.planned = \{\{EPIC_PLANNED\}\}/);
+  assert.match(runtimePrompt, /canonical_plan\.exists = \{\{WORKTREE_PLAN_EXISTS\}\}/);
+  assert.match(runtimePrompt, /If a usable canonical plan already exists, do NOT spawn the epic planner\. Use it even if epic\.planned is false/);
+  assert.match(runtimePrompt, /Only spawn the epic planner when epicPlanning\.enabled = 1 and there is no usable canonical plan for this epic/);
 });
