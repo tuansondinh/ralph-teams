@@ -331,15 +331,17 @@ if [ ! -f "$PRD_FILE" ]; then
   exit 1
 fi
 
-ROOT_DIR="$(pwd)"
-RALPH_RUNTIME_DIR="${ROOT_DIR}/${RALPH_RUNTIME_DIRNAME}"
+SOURCE_ROOT_DIR="$(pwd)"
+ROOT_DIR="$SOURCE_ROOT_DIR"
+LOOP_ROOT_DIR=""
+RALPH_RUNTIME_DIR="${SOURCE_ROOT_DIR}/${RALPH_RUNTIME_DIRNAME}"
 PROGRESS_FILE="${RALPH_RUNTIME_DIR}/progress.txt"
 PLANS_DIR="${RALPH_RUNTIME_DIR}/plans"
 LOGS_DIR="${RALPH_RUNTIME_DIR}/logs"
 STATE_DIR="${RALPH_RUNTIME_DIR}/state"
 WORKTREES_DIR="${RALPH_RUNTIME_DIR}/.worktrees"
 
-repair_root_runtime_dir_if_needed() {
+repair_source_runtime_dir_if_needed() {
   if [ -L "$RALPH_RUNTIME_DIR" ]; then
     local runtime_link_target=""
     runtime_link_target=$(readlink "$RALPH_RUNTIME_DIR" 2>/dev/null || true)
@@ -357,7 +359,7 @@ unstage_runtime_artifacts() {
   git rm --cached -r --ignore-unmatch "$RALPH_RUNTIME_DIRNAME" >/dev/null 2>&1 || true
 }
 
-repair_root_runtime_dir_if_needed
+repair_source_runtime_dir_if_needed
 mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$STATE_DIR" "$WORKTREES_DIR"
 
 ensure_runtime_rjq_bin() {
@@ -581,7 +583,7 @@ ensure_runtime_gitignore_entries() {
 prompt_to_commit_dirty_worktree() {
   local target_branch="$1"
 
-  echo "Worktree has uncommitted changes and Ralph needs to create or switch to branch '$target_branch'."
+  echo "Worktree has uncommitted changes and Ralph needs a clean base commit before creating loop worktree branch '$target_branch'."
   echo "Ralph will now stage and commit all current changes before the run."
   git status --short
   git add -A
@@ -617,6 +619,15 @@ auto_remove_stale_worktree_dir() {
   rm -rf "$worktree_path"
 }
 
+find_worktree_for_branch() {
+  local branch_name="$1"
+
+  git worktree list --porcelain 2>/dev/null | awk -v branch="refs/heads/${branch_name}" '
+    $1 == "worktree" { path = substr($0, 10); next }
+    $1 == "branch" && $2 == branch { print path; exit }
+  '
+}
+
 cleanup_epic_worktree_artifacts() {
   local worktree_path="$1"
   local branch_name="$2"
@@ -637,34 +648,56 @@ cleanup_epic_worktree_artifacts() {
   git branch -D "$branch_name" >/dev/null 2>&1 || true
 }
 
-# --- Ensure loop branch exists and is checked out ---
+# --- Ensure loop branch exists and has a dedicated worktree ---
 ensure_runtime_gitignore_entries
 ensure_repo_has_initial_commit
 
 mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$STATE_DIR" "$WORKTREES_DIR"
 
-ensure_loop_branch_ready() {
-  local checkout_output=""
+ensure_loop_worktree_ready() {
+  local loop_worktree_path="${WORKTREES_DIR}/loop"
+  local add_output=""
+  local retry_output=""
+  local existing_worktree=""
 
-  if [ "$CURRENT_BRANCH" != "$LOOP_BRANCH" ]; then
-    if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
-      prompt_to_commit_dirty_worktree "$LOOP_BRANCH"
+  existing_worktree="$(find_worktree_for_branch "$LOOP_BRANCH" || true)"
+  if [ -n "$existing_worktree" ] && [ -d "$existing_worktree" ]; then
+    LOOP_ROOT_DIR="$existing_worktree"
+    ensure_worktree_runtime_link "$LOOP_ROOT_DIR"
+    return
+  fi
+
+  if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+    prompt_to_commit_dirty_worktree "$LOOP_BRANCH"
+  fi
+
+  if ! git show-ref --verify --quiet "refs/heads/${LOOP_BRANCH}"; then
+    echo "Creating loop branch: $LOOP_BRANCH (from $CURRENT_BRANCH)"
+    if ! add_output=$(git branch "$LOOP_BRANCH" "$CURRENT_BRANCH" 2>&1 >/dev/null); then
+      echo "Error: failed to create loop branch '$LOOP_BRANCH' from '$CURRENT_BRANCH'." >&2
+      [ -n "$add_output" ] && echo "$add_output" >&2
+      exit 1
     fi
+  fi
 
-    if git show-ref --verify --quiet "refs/heads/${LOOP_BRANCH}"; then
-      echo "Switching to loop branch: $LOOP_BRANCH"
-      if ! checkout_output=$(git checkout "$LOOP_BRANCH" 2>&1 >/dev/null); then
-        echo "Error: failed to switch to loop branch '$LOOP_BRANCH'." >&2
-        [ -n "$checkout_output" ] && echo "$checkout_output" >&2
-        exit 1
-      fi
-    else
-      echo "Creating loop branch: $LOOP_BRANCH (from $CURRENT_BRANCH)"
-      if ! checkout_output=$(git checkout -b "$LOOP_BRANCH" 2>&1 >/dev/null); then
-        echo "Error: failed to create loop branch '$LOOP_BRANCH' from '$CURRENT_BRANCH'." >&2
-        [ -n "$checkout_output" ] && echo "$checkout_output" >&2
-        exit 1
-      fi
+  git worktree prune >/dev/null 2>&1 || true
+  if [ -d "$loop_worktree_path" ] && ! git worktree list | grep -Fq "$loop_worktree_path"; then
+    auto_remove_stale_worktree_dir "$loop_worktree_path" "$LOOP_BRANCH"
+  fi
+
+  echo "Creating loop worktree: $loop_worktree_path ($LOOP_BRANCH)"
+  if ! add_output=$(git worktree add "$loop_worktree_path" "$LOOP_BRANCH" 2>&1 >/dev/null); then
+    echo "Loop worktree creation for '$LOOP_BRANCH' failed on the first attempt; pruning stale state and retrying once." >&2
+    [ -n "$add_output" ] && echo "$add_output" >&2
+    git worktree prune >/dev/null 2>&1 || true
+    git worktree remove "$loop_worktree_path" --force >/dev/null 2>&1 || true
+    if [ -d "$loop_worktree_path" ]; then
+      auto_remove_stale_worktree_dir "$loop_worktree_path" "$LOOP_BRANCH"
+    fi
+    if ! retry_output=$(git worktree add "$loop_worktree_path" "$LOOP_BRANCH" 2>&1 >/dev/null); then
+      echo "Error: failed to create loop worktree '$loop_worktree_path' for '$LOOP_BRANCH'." >&2
+      [ -n "$retry_output" ] && echo "$retry_output" >&2
+      exit 1
     fi
   fi
 
@@ -673,14 +706,16 @@ ensure_loop_branch_ready() {
     exit 1
   fi
 
-  CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
-  if [ "$CURRENT_BRANCH" != "$LOOP_BRANCH" ]; then
-    echo "Error: expected current branch '$LOOP_BRANCH' after setup, got '${CURRENT_BRANCH:-<none>}'." >&2
+  LOOP_ROOT_DIR="$loop_worktree_path"
+  ensure_worktree_runtime_link "$LOOP_ROOT_DIR"
+
+  local loop_branch_name=""
+  loop_branch_name=$(git -C "$LOOP_ROOT_DIR" branch --show-current 2>/dev/null || echo "")
+  if [ "$loop_branch_name" != "$LOOP_BRANCH" ]; then
+    echo "Error: expected loop worktree branch '$LOOP_BRANCH' after setup, got '${loop_branch_name:-<none>}'." >&2
     exit 1
   fi
 }
-
-ensure_loop_branch_ready
 
 epic_branch_name() {
   local epic_id="$1"
@@ -746,7 +781,7 @@ create_epic_worktree() {
   local epic_id="$1"
   local branch_name
   branch_name=$(epic_branch_name "$epic_id")
-  local worktree_path="${RALPH_RUNTIME_DIRNAME}/.worktrees/${epic_id}"
+  local worktree_path="${WORKTREES_DIR}/${epic_id}"
   local add_output
   local retry_output
 
@@ -785,6 +820,10 @@ ensure_worktree_runtime_link() {
   local worktree_abs_path="$1"
   local worktree_runtime_path="${worktree_abs_path}/${RALPH_RUNTIME_DIRNAME}"
 
+  if [ "$worktree_abs_path" = "$SOURCE_ROOT_DIR" ]; then
+    return 0
+  fi
+
   if [ -L "$worktree_runtime_path" ]; then
     return 0
   fi
@@ -796,15 +835,20 @@ ensure_worktree_runtime_link() {
   ln -s "$RALPH_RUNTIME_DIR" "$worktree_runtime_path"
 }
 
+ensure_loop_worktree_ready
+ROOT_DIR="$LOOP_ROOT_DIR"
+cd "$ROOT_DIR"
+CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+
 # Removes a worktree. The branch is kept for potential merge by a later agent.
 cleanup_epic_worktree() {
   local epic_id="$1"
-  git worktree remove "${RALPH_RUNTIME_DIRNAME}/.worktrees/${epic_id}" --force 2>/dev/null || true
+  git worktree remove "${WORKTREES_DIR}/${epic_id}" --force 2>/dev/null || true
 }
 
 # Removes ALL .worktrees/* entries (used on EXIT).
 cleanup_all_worktrees() {
-  for dir in "${RALPH_RUNTIME_DIRNAME}"/.worktrees/*/; do
+  for dir in "${WORKTREES_DIR}"/*/; do
     [ -d "$dir" ] && git worktree remove "$dir" --force 2>/dev/null || true
   done
 }
@@ -912,8 +956,8 @@ CURRENT_STORY_ID=""
 
 # Resolve absolute path to PRD file so team lead always has the correct path
 PRD_ABS_PATH="$(cd "$(dirname "$PRD_FILE")" && pwd)/$(basename "$PRD_FILE")"
-if [ "${PRD_ABS_PATH#"$ROOT_DIR"/}" != "$PRD_ABS_PATH" ]; then
-  PRD_REL_PATH="${PRD_ABS_PATH#"$ROOT_DIR"/}"
+if [ "${PRD_ABS_PATH#"$SOURCE_ROOT_DIR"/}" != "$PRD_ABS_PATH" ]; then
+  PRD_REL_PATH="${PRD_ABS_PATH#"$SOURCE_ROOT_DIR"/}"
 else
   PRD_REL_PATH="$(basename "$PRD_FILE")"
 fi
@@ -1305,7 +1349,7 @@ prepare_codex_agent_configs
 LOOP_STARTED_AT=$(date +%s)
 
 # Cleanup worktrees on exit only when NOT interrupted (on interrupt, worktrees are preserved for resume)
-trap 'if [ "$INTERRUPTED" = false ]; then cleanup_all_worktrees; fi; [ -n "${CODEX_AGENT_RUNTIME_DIR:-}" ] && rm -rf "${CODEX_AGENT_RUNTIME_DIR}"; kill $(jobs -p) 2>/dev/null || true' EXIT
+trap 'if [ "$INTERRUPTED" = false ]; then cd "$SOURCE_ROOT_DIR" 2>/dev/null || true; cleanup_all_worktrees; fi; [ -n "${CODEX_AGENT_RUNTIME_DIR:-}" ] && rm -rf "${CODEX_AGENT_RUNTIME_DIR}"; kill $(jobs -p) 2>/dev/null || true' EXIT
 
 render_team_lead_prompt() {
   TEAM_LEAD_TEMPLATE_PATH="$TEAM_LEAD_PROMPT_FILE" \
@@ -1550,7 +1594,7 @@ spawn_epic_bg() {
   local WORKTREE_PATH
   WORKTREE_PATH=$(create_epic_worktree "$EPIC_ID")
   local WORKTREE_ABS_PATH
-  WORKTREE_ABS_PATH="$(cd "${ROOT_DIR}/${WORKTREE_PATH}" && pwd)"
+  WORKTREE_ABS_PATH="$WORKTREE_PATH"
   local EPIC_BRANCH
   EPIC_BRANCH=$(epic_branch_name "$EPIC_ID")
   ensure_worktree_runtime_link "$WORKTREE_ABS_PATH"
@@ -1586,7 +1630,11 @@ spawn_epic_bg() {
     ) &
   elif [ "$BACKEND" = "codex" ]; then
     (
-      run_codex_exec "$WORKTREE_ABS_PATH" "$TEAM_PROMPT" --add-dir "$ROOT_DIR" --add-dir "$SCRIPT_DIR" > "$EPIC_LOG" 2>&1
+      if [ "$SOURCE_ROOT_DIR" != "$ROOT_DIR" ]; then
+        run_codex_exec "$WORKTREE_ABS_PATH" "$TEAM_PROMPT" --add-dir "$ROOT_DIR" --add-dir "$SOURCE_ROOT_DIR" --add-dir "$SCRIPT_DIR" > "$EPIC_LOG" 2>&1
+      else
+        run_codex_exec "$WORKTREE_ABS_PATH" "$TEAM_PROMPT" --add-dir "$ROOT_DIR" --add-dir "$SCRIPT_DIR" > "$EPIC_LOG" 2>&1
+      fi
     ) &
   else
     (
@@ -1623,6 +1671,8 @@ merge_wave() {
   for epic_id in "${completed_epic_ids[@]}"; do
     local branch_name
     branch_name=$(epic_branch_name "$epic_id")
+    local epic_index
+    epic_index=$(rjq find-index "$PRD_FILE" .epics id "$epic_id")
 
     # Check if branch exists
     if ! git show-ref --verify --quiet "refs/heads/${branch_name}"; then
@@ -1647,15 +1697,18 @@ merge_wave() {
     # be stripped before the merge result is recorded in git history.
     if git merge "${branch_name}" --no-commit --no-ff 2>/dev/null; then
       unstage_runtime_artifacts
-      repair_root_runtime_dir_if_needed
+      repair_source_runtime_dir_if_needed
       if [ -f ".git/MERGE_HEAD" ]; then
         git commit --no-edit >/dev/null 2>&1 || true
+      fi
+      if [ -n "$epic_index" ]; then
+        rjq set "$PRD_FILE" ".epics[$epic_index].status" '"completed"'
       fi
       echo "  [$epic_id] Merge successful (clean)"
       echo "[$epic_id] MERGED (clean) — $(date)" >> "$PROGRESS_FILE"
     else
       unstage_runtime_artifacts
-      repair_root_runtime_dir_if_needed
+      repair_source_runtime_dir_if_needed
       local conflicted_files
       conflicted_files=$(git diff --name-only --diff-filter=U 2>/dev/null || true)
       local conflict_count
@@ -1669,8 +1722,6 @@ merge_wave() {
         [ -n "$merge_error" ] && echo "  [$epic_id] Working tree state:" && printf '%s\n' "$merge_error" | sed 's/^/    /'
         merge_failures=$((merge_failures + 1))
 
-        local epic_index
-        epic_index=$(rjq find-index "$PRD_FILE" .epics id "$epic_id")
         if [ -n "$epic_index" ]; then
           rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"'
         fi
@@ -1687,6 +1738,9 @@ merge_wave() {
         git checkout --ours -- prd.json
         git add prd.json
         git commit --no-edit >/dev/null 2>&1 || true
+        if [ -n "$epic_index" ]; then
+          rjq set "$PRD_FILE" ".epics[$epic_index].status" '"completed"'
+        fi
         echo "  [$epic_id] Merge successful (kept projected prd.json)"
         echo "[$epic_id] MERGED (projected prd.json) — $(date)" >> "$PROGRESS_FILE"
         git branch -d "${branch_name}" 2>/dev/null || true
@@ -1698,8 +1752,6 @@ merge_wave() {
       echo "[$epic_id] MERGE FAILED (conflicts remain, files: ${conflicted_files}) — $(date)" >> "$PROGRESS_FILE"
       merge_failures=$((merge_failures + 1))
 
-      local epic_index
-      epic_index=$(rjq find-index "$PRD_FILE" .epics id "$epic_id")
       if [ -n "$epic_index" ]; then
         rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"'
       fi
@@ -1797,17 +1849,32 @@ run_backend_agent_session() {
       local prompt_file="${SCRIPT_DIR}/prompts/agents/${agent_name}.md"
       local role_body
       role_body="$(extract_prompt_body "$prompt_file")"
-      printf 'Runtime note: This Codex session runs in exec mode. `request_user_input` is unavailable. Never call it. Do not stop to ask the user questions. Make a reasonable assumption and continue.\n\n%s\n\n## Assignment\n%s\n' "$role_body" "$prompt" | codex \
-        -a never \
-        exec \
-        -C "$workdir" \
-        -m "$model" \
-        -s workspace-write \
-        --skip-git-repo-check \
-        --color never \
-        --add-dir "$ROOT_DIR" \
-        --add-dir "$SCRIPT_DIR" \
-        - > "$log_file" 2>&1 || true
+      if [ "$SOURCE_ROOT_DIR" != "$ROOT_DIR" ]; then
+        printf 'Runtime note: This Codex session runs in exec mode. `request_user_input` is unavailable. Never call it. Do not stop to ask the user questions. Make a reasonable assumption and continue.\n\n%s\n\n## Assignment\n%s\n' "$role_body" "$prompt" | codex \
+          -a never \
+          exec \
+          -C "$workdir" \
+          -m "$model" \
+          -s workspace-write \
+          --skip-git-repo-check \
+          --color never \
+          --add-dir "$ROOT_DIR" \
+          --add-dir "$SOURCE_ROOT_DIR" \
+          --add-dir "$SCRIPT_DIR" \
+          - > "$log_file" 2>&1 || true
+      else
+        printf 'Runtime note: This Codex session runs in exec mode. `request_user_input` is unavailable. Never call it. Do not stop to ask the user questions. Make a reasonable assumption and continue.\n\n%s\n\n## Assignment\n%s\n' "$role_body" "$prompt" | codex \
+          -a never \
+          exec \
+          -C "$workdir" \
+          -m "$model" \
+          -s workspace-write \
+          --skip-git-repo-check \
+          --color never \
+          --add-dir "$ROOT_DIR" \
+          --add-dir "$SCRIPT_DIR" \
+          - > "$log_file" 2>&1 || true
+      fi
       ;;
   esac
 }
@@ -1903,6 +1970,24 @@ $validation_result_file
   echo "[FINAL] FINAL VALIDATION FAILED — $(date)" >> "$PROGRESS_FILE"
   return 1
 
+}
+
+persist_loop_branch_state_if_dirty() {
+  local dirty_status=""
+  dirty_status=$(git status --porcelain --untracked-files=no 2>/dev/null || true)
+  [ -n "$dirty_status" ] || return 0
+
+  git add -u
+  unstage_runtime_artifacts
+
+  if git diff --cached --quiet >/dev/null 2>&1; then
+    git reset >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  if git commit -m "chore: persist loop branch state" >/dev/null 2>&1; then
+    echo "Persisted loop branch state on ${LOOP_BRANCH}"
+  fi
 }
 
 if ! recover_pending_merges "resume/startup"; then
@@ -2308,6 +2393,8 @@ initialize_counters
 if ! run_final_validation_cycle; then
   FAILED=$((FAILED + 1))
 fi
+
+persist_loop_branch_state_if_dirty
 
 # --- Summary ---
 REMAINING=$((TOTAL_EPICS - COMPLETED - FAILED))

@@ -46,6 +46,31 @@ export function createTestEnv(binDir: string): Record<string, string> {
   return env;
 }
 
+export function getSingleLoopBranch(repoDir: string): string {
+  const branches = execFileSync('git', ['branch', '--format=%(refname:short)', '--list', 'ralph/loop/*'], {
+    cwd: repoDir,
+    encoding: 'utf-8',
+  })
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  assert.equal(branches.length, 1, `expected exactly one loop branch in ${repoDir}, got ${branches.join(', ') || '<none>'}`);
+  return branches[0];
+}
+
+export function readFileFromLoopBranch(repoDir: string, relativePath: string): string {
+  const branch = getSingleLoopBranch(repoDir);
+  return execFileSync('git', ['show', `${branch}:${relativePath}`], {
+    cwd: repoDir,
+    encoding: 'utf-8',
+  });
+}
+
+export function readLoopBranchPrd(repoDir: string) {
+  return JSON.parse(readFileFromLoopBranch(repoDir, 'prd.json')) as Record<string, unknown>;
+}
+
 export function writeSampleJson(targetDir: string, value = 'sample-value') {
   fs.writeFileSync(path.join(targetDir, 'sample.json'), JSON.stringify({ value }, null, 2) + '\n');
 }
@@ -348,8 +373,7 @@ export function setupMergeRepo(
     '    git commit -m "feat: add $FILE_NAME for $EPIC_ID"',
     '  fi',
     '  if [ "$DIRTY_LOOP_BEFORE_MERGE" = "1" ]; then',
-    '    MAIN_ROOT=$(git worktree list --porcelain | awk \'/^worktree / {print $2; exit}\')',
-    '    if [ -n "$MAIN_ROOT" ] && [ -f "$MAIN_ROOT/prd.json" ]; then',
+    '    if [ -n "$ROOT_DIR" ] && [ -f "$ROOT_DIR/prd.json" ]; then',
     '      node -e "' +
       "const fs=require('fs');" +
       "const f=process.argv[1];" +
@@ -358,7 +382,7 @@ export function setupMergeRepo(
       "const t=f+'.tmp.'+process.pid;" +
       "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
       "fs.renameSync(t,f);" +
-      '" "$MAIN_ROOT/prd.json"',
+      '" "$ROOT_DIR/prd.json"',
     '    fi',
     '  fi',
     '  node -e "' +
@@ -408,7 +432,12 @@ export function setupMergeRepo(
     '  fi',
     'else',
     '  if printf "%s" "$STDIN" | grep -q "Validate the final integrated branch"; then',
-    '    touch final-validator-invoked.txt',
+    '    MAIN_ROOT=$(git worktree list --porcelain | awk \'/^worktree / {print $2; exit}\')',
+    '    if [ -n "$MAIN_ROOT" ] && [ -d "$MAIN_ROOT" ]; then',
+    '      touch "$MAIN_ROOT/final-validator-invoked.txt"',
+    '    else',
+    '      touch final-validator-invoked.txt',
+    '    fi',
     '    FINAL_ARTIFACT_ENABLED=$(printenv MOCK_FINAL_VALIDATION_ARTIFACT 2>/dev/null || true)',
     '    FINAL_VERDICT=$(printenv MOCK_FINAL_VALIDATION_VERDICT 2>/dev/null || true)',
     '    FINAL_LOG_LINE=$(printenv MOCK_FINAL_VALIDATION_LOG_LINE 2>/dev/null || true)',
@@ -489,11 +518,10 @@ export function setupConflictRepo(options?: { resolveWithTeamLead?: boolean }) {
     '  printf "epic version\\n" > "$WORKTREE/README.md"',
     '  git -C "$WORKTREE" add README.md',
     '  git -C "$WORKTREE" commit -m "feat: epic change to README"',
-    '  MAIN_ROOT=$(git -C "$WORKTREE" worktree list --porcelain | grep "^worktree" | head -1 | awk "{print \\$2}")',
-    '  if [ -n "$MAIN_ROOT" ] && [ -d "$MAIN_ROOT" ]; then',
-    '    printf "main version\\n" > "$MAIN_ROOT/README.md"',
-    '    git -C "$MAIN_ROOT" add README.md',
-    '    git -C "$MAIN_ROOT" -c user.name="Ralph Test" -c user.email="ralph@example.com" commit -m "chore: main change to README"',
+    '  if [ -n "$ROOT_DIR" ] && [ -d "$ROOT_DIR" ]; then',
+    '    printf "main version\\n" > "$ROOT_DIR/README.md"',
+    '    git -C "$ROOT_DIR" add README.md',
+    '    git -C "$ROOT_DIR" -c user.name="Ralph Test" -c user.email="ralph@example.com" commit -m "chore: main change to README"',
     '  fi',
     '  node -e "' +
       "const fs=require('fs');" +
@@ -517,7 +545,10 @@ export function setupConflictRepo(options?: { resolveWithTeamLead?: boolean }) {
       "fs.renameSync(t,f);" +
     '" "$EPIC_ID" "$PRD_PATH"',
     '  if [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
-    '    touch "$ROOT_DIR/team-lead-merge-invoked.txt"',
+    '    MAIN_ROOT=$(git -C "$ROOT_DIR" worktree list --porcelain | awk \'/^worktree / {print $2; exit}\')',
+    '    if [ -n "$MAIN_ROOT" ] && [ -d "$MAIN_ROOT" ]; then',
+    '      touch "$MAIN_ROOT/team-lead-merge-invoked.txt"',
+    '    fi',
     '    EPIC_BRANCH=$(git -C "$WORKTREE" branch --show-current)',
     '    git -C "$ROOT_DIR" checkout "$LOOP_BRANCH"',
     '    if git -C "$ROOT_DIR" merge "$EPIC_BRANCH" --no-commit --no-ff; then',
@@ -561,7 +592,12 @@ export function setupConflictRepo(options?: { resolveWithTeamLead?: boolean }) {
     '  exit 0',
     'fi',
     'if printf "%s" "$STDIN" | grep -q -- "Take over this merge conflict resolution directly"; then',
-    '  touch team-lead-merge-invoked.txt',
+    '  MAIN_ROOT=$(git worktree list --porcelain | awk \'/^worktree / {print $2; exit}\')',
+    '  if [ -n "$MAIN_ROOT" ] && [ -d "$MAIN_ROOT" ]; then',
+    '    touch "$MAIN_ROOT/team-lead-merge-invoked.txt"',
+    '  else',
+    '    touch team-lead-merge-invoked.txt',
+    '  fi',
     '  if [ "$RESOLVE_WITH_TEAM_LEAD" = "1" ]; then',
     '    printf "main version\\nepic version\\n" > README.md',
     '    git add README.md',

@@ -7,6 +7,9 @@ import { execFileSync, spawnSync } from 'node:child_process';
 
 import {
   BASH,
+  getSingleLoopBranch,
+  readFileFromLoopBranch,
+  readLoopBranchPrd,
   runRalph,
   scriptPath,
   setupConflictRepo,
@@ -113,7 +116,7 @@ test('US-004: epic success is preserved when only the worktree PRD is updated', 
   assert.match(result.stdout, /\[EPIC-001\] PASSED/);
   const progress = fs.readFileSync(path.join(tempDir, '.ralph-teams', 'progress.txt'), 'utf-8');
   assert.match(progress, /\[EPIC-001\] MERGED/);
-  const finalPrd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
+  const finalPrd = readLoopBranchPrd(tempDir) as { epics: Array<{ status?: string; userStories?: Array<{ passes?: boolean }> }> };
   assert.equal(finalPrd.epics[0]?.status, 'completed');
   assert.equal(finalPrd.epics[0]?.userStories[0]?.passes, true);
 });
@@ -157,7 +160,7 @@ test('US-004: dirty loop branch is auto-committed before merge', () => {
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
   assert.match(result.stdout, /\[EPIC-001\] Merge successful \(team lead, clean\)/);
-  const subjects = execFileSync('git', ['log', '--pretty=%s', '-n', '5'], { cwd: tempDir, encoding: 'utf-8' });
+  const subjects = execFileSync('git', ['log', getSingleLoopBranch(tempDir), '--pretty=%s', '-n', '5'], { cwd: tempDir, encoding: 'utf-8' });
   assert.match(subjects, /chore: checkpoint loop branch before merge wave/);
 });
 
@@ -169,16 +172,18 @@ test('US-004: runner waits for merge artifact instead of killing the team lead a
   env.RALPH_IDLE_TIMEOUT = '1';
 
   const result = runRalph(tempDir, env);
-  assert.equal(result.status, 1, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
   assert.match(result.stdout, /\[EPIC-001\] IDLE TIMEOUT — no output for 1s/);
-  assert.doesNotMatch(result.stdout, /--- Merging completed epic branches/);
+  assert.match(result.stdout, /--- Recovering completed epic branches before finalization ---/);
+  assert.match(result.stdout, /--- Merging completed epic branches into /);
 
-  const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
-  assert.equal(prd.epics[0].status, 'merge-failed');
+  const prd = readLoopBranchPrd(tempDir) as { epics: Array<{ status: string }> };
+  assert.equal(prd.epics[0].status, 'completed');
 
   const progress = fs.readFileSync(path.join(tempDir, '.ralph-teams', 'progress.txt'), 'utf-8');
   assert.match(progress, /\[EPIC-001\] MERGE FAILED \(missing team lead merge result artifact\)/);
-  assert.doesNotMatch(progress, /\[EPIC-001\] MERGED/);
+  assert.match(progress, /\[EPIC-001\] RECOVERED PENDING MERGE \(finalization\)/);
+  assert.match(progress, /\[EPIC-001\] MERGED \(clean\)/);
 });
 
 test('US-004: epic branch is deleted after successful merge', () => {
@@ -314,7 +319,7 @@ test('US-004: resume recovers completed-but-unmerged epic branches before finish
   assert.doesNotMatch(branches, /ralph\/epic\/loop\/test-resume\/EPIC-001/);
   assert.doesNotMatch(branches, /ralph\/epic\/loop\/test-resume\/EPIC-002/);
 
-  const finalPrd = JSON.parse(fs.readFileSync(prdPath, 'utf-8'));
+  const finalPrd = JSON.parse(execFileSync('git', ['show', `${loopBranch}:prd.json`], { cwd: tempDir, encoding: 'utf-8' }));
   assert.equal(finalPrd.epics[0].status, 'completed');
   assert.equal(finalPrd.epics[1].status, 'completed');
   assert.equal(fs.existsSync(path.join(tempDir, 'final-validator-invoked.txt')), true);
@@ -323,7 +328,7 @@ test('US-004: resume recovers completed-but-unmerged epic branches before finish
 test('US-005: merge-failed status set when conflict cannot be resolved', () => {
   const { tempDir, env } = setupConflictRepo();
   runRalph(tempDir, env);
-  const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
+  const prd = readLoopBranchPrd(tempDir) as { epics: Array<{ status: string }> };
   assert.equal(prd.epics[0].status, 'merge-failed');
 });
 
@@ -385,8 +390,8 @@ test('US-005: recovered pending merges do not respawn a fresh team lead when con
   const progress = fs.readFileSync(path.join(runtimeDir, 'progress.txt'), 'utf-8');
   assert.match(progress, /\[EPIC-001\] RECOVERED PENDING MERGE \(resume\/startup\)/);
   assert.match(progress, /\[EPIC-001\] MERGE FAILED \(conflicts remain, files: README.md\)/);
-  const prd = JSON.parse(fs.readFileSync(prdPath, 'utf-8'));
-  assert.equal(prd.epics[0].status, 'merge-failed');
+  const finalPrd = JSON.parse(execFileSync('git', ['show', `${loopBranch}:prd.json`], { cwd: tempDir, encoding: 'utf-8' }));
+  assert.equal(finalPrd.epics[0].status, 'merge-failed');
 });
 
 test('US-005: conflict resolution attempt is logged to progress.txt', () => {
@@ -436,10 +441,10 @@ test('US-005: epic team lead can resolve a simple conflict end to end', () => {
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
   assert.match(result.stdout, /\[EPIC-001\] Merge successful \(team lead, conflict-resolved\)/);
-  const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
+  const prd = readLoopBranchPrd(tempDir) as { epics: Array<{ status: string }> };
   assert.equal(prd.epics[0].status, 'completed');
   assert.ok(fs.existsSync(path.join(tempDir, 'team-lead-merge-invoked.txt')));
-  const readme = fs.readFileSync(path.join(tempDir, 'README.md'), 'utf-8');
+  const readme = readFileFromLoopBranch(tempDir, 'README.md');
   assert.equal(readme, 'main version\nepic version\n');
   const mergeArtifact = JSON.parse(fs.readFileSync(path.join(tempDir, '.ralph-teams', 'state', 'merge-EPIC-001.json'), 'utf-8'));
   assert.equal(mergeArtifact.status, 'merged');

@@ -7,6 +7,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 
 import {
   BASH,
+  getSingleLoopBranch,
   runRalph,
   scriptPath,
   setupMultiEpicRepo,
@@ -20,7 +21,7 @@ function epicBranch(loopBranch: string, epicId: string) {
   return `ralph/epic/${loopBranch.replace(/^ralph\//, '')}/${epicId}`;
 }
 
-test('ralph.sh auto-commits dirty changes without prompting before switching branches', () => {
+test('ralph.sh auto-commits dirty changes without prompting before creating the loop worktree', () => {
   const { tempDir, binDir } = setupTempRepo();
   const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
     cwd: tempDir,
@@ -30,7 +31,7 @@ test('ralph.sh auto-commits dirty changes without prompting before switching bra
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /Ralph will now stage and commit all current changes before the run\./);
-  assert.match(result.stdout, /create or switch to branch 'ralph\/loop\//);
+  assert.match(result.stdout, /creating loop worktree branch 'ralph\/loop\//);
   assert.doesNotMatch(result.stdout, /Proceed with auto-commit before continuing\? \[y\/N\]: /);
   assert.match(execFileSync('git', ['log', '-1', '--pretty=%s'], { cwd: tempDir, encoding: 'utf-8' }), /chore: auto-commit changes before ralph run/);
   assert.equal(execFileSync('git', ['status', '--short'], { cwd: tempDir, encoding: 'utf-8' }).trim(), '');
@@ -47,9 +48,11 @@ test('ralph.sh auto-commits dirty changes and continues', () => {
   assert.equal(result.status, 0);
   assert.doesNotMatch(result.stdout, /Proceed with auto-commit before continuing\? \[y\/N\]: /);
   assert.match(result.stdout, /Creating loop branch: ralph\/loop\//);
+  assert.match(result.stdout, /Creating loop worktree: .*ralph-teams\/\.worktrees\/loop \(ralph\/loop\//);
   assert.match(execFileSync('git', ['log', '-1', '--pretty=%s'], { cwd: tempDir, encoding: 'utf-8' }), /chore: auto-commit changes before ralph run/);
   assert.equal(execFileSync('git', ['status', '--short'], { cwd: tempDir, encoding: 'utf-8' }).trim(), '');
-  assert.match(execFileSync('git', ['branch', '--show-current'], { cwd: tempDir, encoding: 'utf-8' }).trim(), /^ralph\/loop\//);
+  assert.equal(execFileSync('git', ['branch', '--show-current'], { cwd: tempDir, encoding: 'utf-8' }).trim(), 'main');
+  assert.match(getSingleLoopBranch(tempDir), /^ralph\/loop\//);
 });
 
 test('ralph.sh creates an initial commit automatically for an unborn repo', () => {
@@ -77,7 +80,7 @@ test('ralph.sh fails early with the real error when loop branch creation fails',
   const mockGit = [
     '#!/bin/sh',
     `REAL_GIT='${realGit}'`,
-    'if [ "$1" = "checkout" ] && [ "$2" = "-b" ] && [ "${3#ralph/loop/}" != "$3" ]; then',
+    'if [ "$1" = "branch" ] && [ "${2#ralph/loop/}" != "$2" ]; then',
     '  echo "fatal: simulated loop branch creation failure" >&2',
     '  exit 1',
     'fi',
@@ -499,7 +502,8 @@ test('US-002: a loop branch is created for the run and an epic worktree is creat
   const { tempDir, env } = setupMultiEpicRepo([{ id: 'EPIC-001', title: 'Alpha' }], { 'EPIC-001': 'PASS' });
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0);
-  assert.match(execFileSync('git', ['branch', '--show-current'], { cwd: tempDir, encoding: 'utf-8' }).trim(), /^ralph\/loop\//);
+  assert.equal(execFileSync('git', ['branch', '--show-current'], { cwd: tempDir, encoding: 'utf-8' }).trim(), 'main');
+  assert.match(getSingleLoopBranch(tempDir), /^ralph\/loop\//);
   assert.ok(fs.existsSync(path.join(tempDir, '.ralph-teams', '.worktrees')));
 });
 

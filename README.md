@@ -44,9 +44,9 @@ This diagram shows the default `balanced` workflow only.
 
 ```mermaid
 flowchart TD
-    A[Start run] --> B[Validate PRD and create loop branch]
+    A[Start run] --> B[Validate PRD and create loop branch plus loop worktree]
     B --> C[Pick ready epic]
-    C --> D[Create worktree and run-scoped epic branch]
+    C --> D[Create epic worktree and run-scoped epic branch]
     D --> E[Team Lead decides on epic planner]
     E --> F[Team Lead runs stories with builder]
     F --> G{Epic validator needed?}
@@ -553,7 +553,7 @@ The current execution contract is:
 - blocked epics are skipped until dependencies are complete
 - runs sequentially by default
 - experimental wave parallelism is enabled only with `--parallel <n>`
-- at run start Ralph auto-commits any dirty worktree changes, then creates a fresh loop branch from your current branch
+- at run start Ralph auto-commits any dirty source-worktree changes, then creates a fresh loop branch and checks it out in `.ralph-teams/.worktrees/loop`
 - each epic gets its own worktree and a run-scoped branch rooted from that loop branch, using `ralph/epic/<loop-run>/<epic-id>`
 - before the Team Lead starts, Ralph creates the worktree and hands repo inspection, setup, build, and test command inference to the agents
 - agents are expected to prefer repo-defined scripts and docs over generic ecosystem defaults when choosing setup and verification commands
@@ -638,9 +638,9 @@ Install or relink the package so the bundled JSON CLI is on your `PATH`:
 npm install -g ralph-teams
 ```
 
-### Ralph needs to switch branches but the worktree is dirty
+### Ralph needs a clean base commit before creating the loop worktree
 
-Ralph auto-commits current changes before creating or switching to the loop branch. If you do not want that commit, clean up the worktree yourself before starting the run.
+Ralph auto-commits current source-worktree changes before creating the loop branch and loop worktree. If you do not want that commit, clean up the worktree yourself before starting the run.
 
 ## Development
 

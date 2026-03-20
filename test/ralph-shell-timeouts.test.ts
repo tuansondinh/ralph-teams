@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 
 import {
   BASH,
+  readLoopBranchPrd,
   runRalphWithSigint,
   scriptPath,
   setupIdleTimeoutRepo,
@@ -85,7 +86,7 @@ test('US-004 (timeout): epic is killed and marked failed after RALPH_EPIC_TIMEOU
   const result = spawnSync(BASH, [scriptPath, 'prd.json'], { cwd: tempDir, encoding: 'utf-8', env, timeout: 12000 });
   const elapsed = Date.now() - start;
   assert.ok(elapsed < 10000);
-  const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
+  const prd = readLoopBranchPrd(tempDir) as { epics: Array<{ status: string }> };
   assert.equal(prd.epics[0].status, 'failed');
   assert.match(result.stdout, /\[EPIC-001\] TIMED OUT after 1s/);
 });
@@ -119,7 +120,7 @@ test('US-004 (timeout): with two independent epics, one times out and the other 
   env['MOCK_HANG_EPIC_001'] = '1';
   env['RALPH_EPIC_TIMEOUT'] = '1';
   const result = spawnSync(BASH, [scriptPath, 'prd.json', '--parallel', '2'], { cwd: tempDir, encoding: 'utf-8', env, timeout: 12000 });
-  const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
+  const prd = readLoopBranchPrd(tempDir) as { epics: Array<{ status: string }> };
   const epic1Status = prd.epics.find((e: { id: string }) => e.id === 'EPIC-001').status;
   const epic2Status = prd.epics.find((e: { id: string }) => e.id === 'EPIC-002').status;
   assert.equal(epic1Status, 'failed');
@@ -134,7 +135,7 @@ test('US-005 (idle timeout): idle epic is killed and marked failed after RALPH_I
   const result = spawnSync(BASH, [scriptPath, 'prd.json'], { cwd: tempDir, encoding: 'utf-8', env, timeout: 12000 });
   const elapsed = Date.now() - start;
   assert.ok(elapsed < 10000);
-  const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
+  const prd = readLoopBranchPrd(tempDir) as { epics: Array<{ status: string }> };
   assert.equal(prd.epics[0].status, 'failed');
   assert.match(result.stdout, /\[EPIC-001\] IDLE TIMEOUT — no output for 1s/);
 });
@@ -157,7 +158,7 @@ test('US-005 (idle timeout): GNU stat -f output does not break log mtime parsing
   const result = spawnSync(BASH, [scriptPath, 'prd.json'], { cwd: tempDir, encoding: 'utf-8', env, timeout: 12000 });
   assert.notEqual(result.status, null);
   assert.doesNotMatch(result.stderr, /integer expression expected|unbound variable/);
-  const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
+  const prd = readLoopBranchPrd(tempDir) as { epics: Array<{ status: string }> };
   assert.equal(prd.epics[0].status, 'failed');
 });
 
@@ -178,7 +179,7 @@ test('US-005 (idle timeout): with two epics, only idle one is killed while activ
   env['MOCK_SILENT_EPIC_001'] = '1';
   env['RALPH_IDLE_TIMEOUT'] = '1';
   const result = spawnSync(BASH, [scriptPath, 'prd.json', '--parallel', '2'], { cwd: tempDir, encoding: 'utf-8', env, timeout: 12000 });
-  const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
+  const prd = readLoopBranchPrd(tempDir) as { epics: Array<{ status: string }> };
   const epic1Status = prd.epics.find((e: { id: string }) => e.id === 'EPIC-001').status;
   const epic2Status = prd.epics.find((e: { id: string }) => e.id === 'EPIC-002').status;
   assert.equal(epic1Status, 'failed');

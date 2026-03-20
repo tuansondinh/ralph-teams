@@ -82,7 +82,7 @@ Main file: `ralph.sh`
 This is the operational core of the project. It is responsible for:
 
 - validating backend dependencies and the PRD
-- creating or switching to the loop branch
+- creating the loop branch and dedicated loop worktree
 - creating one git worktree per active epic
 - deriving one run-scoped epic branch per active epic under `ralph/epic/<loop-run>/<epic-id>`
 - spawning the team lead agent for each epic
@@ -181,7 +181,7 @@ The shell runtime then:
 1. Validates the PRD structure with `rjq`.
 2. Detects circular dependencies.
 3. Auto-commits any dirty worktree changes.
-4. Establishes the run loop branch.
+4. Establishes the run loop branch in a dedicated loop worktree.
 5. Fails fast if the current loop branch already contains stale merge history for a pending run-scoped epic branch.
 6. Normalizes retryable PRD state.
 7. Repeatedly computes the next wave of runnable epics.

@@ -351,10 +351,11 @@ test('team lead policy requires in-session merge ownership with a scripted artif
 test('codex shell launches add the Ralph package directory alongside the project workspace', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
-  assert.match(script, /run_codex_exec "\$WORKTREE_ABS_PATH" "\$TEAM_PROMPT" --add-dir "\$ROOT_DIR" --add-dir "\$SCRIPT_DIR"/);
+  assert.match(script, /SOURCE_ROOT_DIR="\$\(pwd\)"/);
+  assert.match(script, /run_codex_exec "\$WORKTREE_ABS_PATH" "\$TEAM_PROMPT" --add-dir "\$ROOT_DIR" --add-dir "\$SOURCE_ROOT_DIR" --add-dir "\$SCRIPT_DIR"/);
   assert.match(script, /codex[\s\S]*-m "\$MODEL_TEAM_LEAD"[\s\S]*-c model_reasoning_effort='"high"'/);
   assert.match(script, /codex[\s\S]*--add-dir "\$SCRIPT_DIR"/);
-  assert.match(script, /codex[\s\S]*--add-dir "\$ROOT_DIR"[\s\S]*--add-dir "\$SCRIPT_DIR"[\s\S]*- > "\$log_file"/);
+  assert.match(script, /codex[\s\S]*--add-dir "\$ROOT_DIR"[\s\S]*(--add-dir "\$SOURCE_ROOT_DIR"[\s\S]*)?--add-dir "\$SCRIPT_DIR"[\s\S]*- > "\$log_file"/);
 });
 
 test('ralph.sh stages a runtime-local rjq binary inside .ralph-teams/bin and prepends it to PATH', () => {
@@ -371,11 +372,11 @@ test('ralph.sh stages a runtime-local rjq binary inside .ralph-teams/bin and pre
 test('ralph.sh repairs a merged-in root runtime symlink and keeps runtime artifacts out of git commits', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
-  assert.match(script, /repair_root_runtime_dir_if_needed\(\)/);
+  assert.match(script, /repair_source_runtime_dir_if_needed\(\)/);
   assert.match(script, /if \[ -L "\$RALPH_RUNTIME_DIR" \]; then/);
   assert.match(script, /git rm --cached -r --ignore-unmatch "\$RALPH_RUNTIME_DIRNAME"/);
   assert.match(script, /git add -A[\s\S]*unstage_runtime_artifacts/);
-  assert.match(script, /git merge "\$\{branch_name\}" --no-commit --no-ff[\s\S]*repair_root_runtime_dir_if_needed/);
+  assert.match(script, /git merge "\$\{branch_name\}" --no-commit --no-ff[\s\S]*repair_source_runtime_dir_if_needed/);
   assert.match(script, /if \[ -f "\.git\/MERGE_HEAD" \]; then[\s\S]*git commit --no-edit/);
 });
 
