@@ -109,11 +109,11 @@ test('ralph.sh auto-adds runtime artifacts to the repo .gitignore', () => {
   assert.match(gitignore, /^\.ralph-teams\/$/m);
 });
 
-test('US-004: clean merge succeeds without team lead takeover', () => {
+test('US-004: clean merge succeeds inside the epic team lead session', () => {
   const { tempDir, env } = setupMergeRepo([{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }]);
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
-  assert.match(result.stdout, /\[EPIC-001\] Merge successful \(clean\)/);
+  assert.match(result.stdout, /\[EPIC-001\] Merge successful \(team lead, clean\)/);
   const logsDir = path.join(tempDir, '.ralph-teams', 'logs');
   if (fs.existsSync(logsDir)) {
     const mergeLogs = fs.readdirSync(logsDir).filter((f) => f.startsWith('merge-'));
@@ -132,10 +132,7 @@ test('US-004: dirty loop branch is auto-committed before merge', () => {
   const { tempDir, env } = setupMergeRepo([{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }], { dirtyLoopBranchBeforeMerge: true });
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
-  assert.match(result.stdout, /\[EPIC-001\] Auto-committed dirty worktree before merge/);
-  assert.match(result.stdout, /\[EPIC-001\] Merge successful \(clean\)/);
-  const progress = fs.readFileSync(path.join(tempDir, '.ralph-teams', 'progress.txt'), 'utf-8');
-  assert.match(progress, /\[EPIC-001\] AUTO-COMMIT before merge wave/);
+  assert.match(result.stdout, /\[EPIC-001\] Merge successful \(team lead, clean\)/);
   const subjects = execFileSync('git', ['log', '--pretty=%s', '-n', '5'], { cwd: tempDir, encoding: 'utf-8' });
   assert.match(subjects, /chore: checkpoint loop branch before merge wave/);
 });
@@ -284,7 +281,7 @@ test('US-005: merge-failed status set when conflict cannot be resolved', () => {
   assert.equal(prd.epics[0].status, 'merge-failed');
 });
 
-test('US-005: recovered pending merges trigger team lead takeover when conflicts exist', () => {
+test('US-005: recovered pending merges still use the shell takeover path when conflicts exist', () => {
   const { tempDir, env } = setupConflictRepo({ resolveWithTeamLead: true });
   const runtimeDir = path.join(tempDir, '.ralph-teams');
   fs.mkdirSync(runtimeDir, { recursive: true });
@@ -347,7 +344,6 @@ test('US-005: conflict resolution attempt is logged to progress.txt', () => {
   const { tempDir, env } = setupConflictRepo();
   runRalph(tempDir, env);
   const progress = fs.readFileSync(path.join(tempDir, '.ralph-teams', 'progress.txt'), 'utf-8');
-  assert.match(progress, /\[EPIC-001\] merge conflicts/);
   assert.match(progress, /\[EPIC-001\] MERGE FAILED/);
 });
 
@@ -365,28 +361,24 @@ test('US-005: merge-failed epic does not block independent epics in later waves'
   assert.match(result.stdout, /\[EPIC-002\].*[Ss]kipped/);
 });
 
-test('US-005: merge log file created when team lead takeover runs', () => {
+test('US-005: team lead merge result artifact is written for conflict handling', () => {
   const { tempDir, env } = setupConflictRepo();
   runRalph(tempDir, env);
-  const logsDir = path.join(tempDir, '.ralph-teams', 'logs');
-  assert.ok(fs.existsSync(logsDir));
-  const mergeLogs = fs.readdirSync(logsDir).filter((f) => f.startsWith('merge-EPIC-001'));
-  assert.ok(mergeLogs.length > 0);
+  const mergeArtifact = path.join(tempDir, '.ralph-teams', 'state', 'merge-EPIC-001.json');
+  assert.ok(fs.existsSync(mergeArtifact));
 });
 
-test('US-005: team lead takeover can resolve a simple conflict end to end', () => {
+test('US-005: epic team lead can resolve a simple conflict end to end', () => {
   const { tempDir, env } = setupConflictRepo({ resolveWithTeamLead: true });
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
-  assert.match(result.stdout, /\[EPIC-001\] merged \(AI-resolved conflicts\)/);
+  assert.match(result.stdout, /\[EPIC-001\] Merge successful \(team lead, conflict-resolved\)/);
   const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
   assert.equal(prd.epics[0].status, 'completed');
   assert.ok(fs.existsSync(path.join(tempDir, 'team-lead-merge-invoked.txt')));
   const readme = fs.readFileSync(path.join(tempDir, 'README.md'), 'utf-8');
   assert.equal(readme, 'main version\nepic version\n');
-  const logsDir = path.join(tempDir, '.ralph-teams', 'logs');
-  const mergeLogs = fs.readdirSync(logsDir).filter((f) => f.startsWith('merge-EPIC-001'));
-  assert.ok(mergeLogs.length > 0);
-  const mergeLog = fs.readFileSync(path.join(logsDir, mergeLogs[0]), 'utf-8');
-  assert.match(mergeLog, /MERGE_SUCCESS/);
+  const mergeArtifact = JSON.parse(fs.readFileSync(path.join(tempDir, '.ralph-teams', 'state', 'merge-EPIC-001.json'), 'utf-8'));
+  assert.equal(mergeArtifact.status, 'merged');
+  assert.equal(mergeArtifact.mode, 'conflict-resolved');
 });

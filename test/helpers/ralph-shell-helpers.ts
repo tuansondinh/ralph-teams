@@ -291,11 +291,15 @@ export function setupMergeRepo(
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
     'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
+    'LOOP_BRANCH=$(printf "%s" "$STDIN" | sed -n \'s/^- Loop branch to merge into: //p\' | head -1)',
+    'ROOT_DIR=$(printf "%s" "$STDIN" | sed -n \'s/^- Repository root for the merge attempt: //p\' | head -1)',
+    'MERGE_RESULT_PATH=$(printf "%s" "$STDIN" | sed -n \'s/^- Write the final merge result artifact to: //p\' | head -1)',
     'FINAL_RESULT_PATH=$(printf "%s" "$STDIN" | grep -oE \'[^[:space:]]*final-validation-result[^[:space:]]*\\.json\' | head -1)',
     'if [ -z "$FINAL_RESULT_PATH" ]; then FINAL_RESULT_PATH="$(pwd)/.ralph-teams/state/final-validation-result-mock.json"; fi',
     'if [ -n "$EPIC_ID" ]; then',
     '  ENV_KEY="MOCK_FILE_$(printf "%s" "$EPIC_ID" | tr - _)"',
     '  FILE_NAME=$(printenv "$ENV_KEY" 2>/dev/null || true)',
+    '  EPIC_BRANCH=$(git branch --show-current)',
     '  if [ -n "$FILE_NAME" ]; then',
     '    printf "content for %s\\n" "$EPIC_ID" > "$FILE_NAME"',
     '    git add "$FILE_NAME"',
@@ -336,6 +340,26 @@ export function setupMergeRepo(
       "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
       "fs.renameSync(t,f);" +
     '" "$EPIC_ID" "$PRD_PATH"',
+    '  if [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
+    '    if [ -n "$(git -C "$ROOT_DIR" status --porcelain 2>/dev/null || true)" ]; then',
+    '      git -C "$ROOT_DIR" add -A',
+    '      git -C "$ROOT_DIR" commit -m "chore: checkpoint loop branch before merge wave"',
+    '    fi',
+    '    git -C "$ROOT_DIR" checkout "$LOOP_BRANCH"',
+    '    if git -C "$ROOT_DIR" merge "$EPIC_BRANCH" --no-commit --no-ff; then',
+    '      if [ -f "$ROOT_DIR/.git/MERGE_HEAD" ]; then',
+    '        git -C "$ROOT_DIR" commit --no-edit',
+    '      fi',
+    '      node -e "' +
+      "const fs=require('fs');" +
+      "const file=process.argv[1];" +
+      "const t=file+'.tmp.'+process.pid;" +
+      "const data={epicId:process.argv[2],status:'merged',mode:'clean',details:'',timestamp:'2026-03-20T17:30:00+01:00'};" +
+      "fs.writeFileSync(t,JSON.stringify(data,null,2)+'\\n');" +
+      "fs.renameSync(t,file);" +
+      '" "$MERGE_RESULT_PATH" "$EPIC_ID"',
+    '    fi',
+    '  fi',
     'else',
     '  if printf "%s" "$STDIN" | grep -q "Validate the final integrated branch"; then',
     '    touch final-validator-invoked.txt',
@@ -408,11 +432,13 @@ export function setupConflictRepo(options?: { resolveWithTeamLead?: boolean }) {
     '#!/bin/sh',
     `RESOLVE_WITH_TEAM_LEAD="${resolveWithTeamLead ? '1' : '0'}"`,
     'STDIN=$(cat)',
-    'ARGS="$*"',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
     'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
     'WORKTREE=$(printf "%s" "$STDIN" | grep -oE "[^ ]*\\.worktrees/[^ ]*" | head -1)',
+    'LOOP_BRANCH=$(printf "%s" "$STDIN" | sed -n \'s/^- Loop branch to merge into: //p\' | head -1)',
+    'ROOT_DIR=$(printf "%s" "$STDIN" | sed -n \'s/^- Repository root for the merge attempt: //p\' | head -1)',
+    'MERGE_RESULT_PATH=$(printf "%s" "$STDIN" | sed -n \'s/^- Write the final merge result artifact to: //p\' | head -1)',
     'if [ -n "$EPIC_ID" ] && [ -n "$WORKTREE" ] && [ -d "$WORKTREE" ]; then',
     '  printf "epic version\\n" > "$WORKTREE/README.md"',
     '  git -C "$WORKTREE" add README.md',
@@ -444,9 +470,51 @@ export function setupConflictRepo(options?: { resolveWithTeamLead?: boolean }) {
       "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
       "fs.renameSync(t,f);" +
     '" "$EPIC_ID" "$PRD_PATH"',
+    '  if [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
+    '    touch "$ROOT_DIR/team-lead-merge-invoked.txt"',
+    '    EPIC_BRANCH=$(git -C "$WORKTREE" branch --show-current)',
+    '    git -C "$ROOT_DIR" checkout "$LOOP_BRANCH"',
+    '    if git -C "$ROOT_DIR" merge "$EPIC_BRANCH" --no-commit --no-ff; then',
+    '      if [ -f "$ROOT_DIR/.git/MERGE_HEAD" ]; then',
+    '        git -C "$ROOT_DIR" commit --no-edit',
+    '      fi',
+    '      node -e "' +
+      "const fs=require('fs');" +
+      "const file=process.argv[1];" +
+      "const t=file+'.tmp.'+process.pid;" +
+      "const data={epicId:process.argv[2],status:'merged',mode:'clean',details:'',timestamp:'2026-03-20T17:30:00+01:00'};" +
+      "fs.writeFileSync(t,JSON.stringify(data,null,2)+'\\n');" +
+      "fs.renameSync(t,file);" +
+      '" "$MERGE_RESULT_PATH" "$EPIC_ID"',
+    '    else',
+    '      if [ "$RESOLVE_WITH_TEAM_LEAD" = "1" ]; then',
+    '        printf "main version\\nepic version\\n" > "$ROOT_DIR/README.md"',
+    '        git -C "$ROOT_DIR" add README.md',
+    '        git -C "$ROOT_DIR" commit --no-edit',
+    '        node -e "' +
+      "const fs=require('fs');" +
+      "const file=process.argv[1];" +
+      "const t=file+'.tmp.'+process.pid;" +
+      "const data={epicId:process.argv[2],status:'merged',mode:'conflict-resolved',details:'',timestamp:'2026-03-20T17:30:00+01:00'};" +
+      "fs.writeFileSync(t,JSON.stringify(data,null,2)+'\\n');" +
+      "fs.renameSync(t,file);" +
+      '" "$MERGE_RESULT_PATH" "$EPIC_ID"',
+    '      else',
+    '        git -C "$ROOT_DIR" merge --abort',
+    '        node -e "' +
+      "const fs=require('fs');" +
+      "const file=process.argv[1];" +
+      "const t=file+'.tmp.'+process.pid;" +
+      "const data={epicId:process.argv[2],status:'merge-failed',mode:'unknown',details:'team lead could not resolve conflict',timestamp:'2026-03-20T17:30:00+01:00'};" +
+      "fs.writeFileSync(t,JSON.stringify(data,null,2)+'\\n');" +
+      "fs.renameSync(t,file);" +
+      '" "$MERGE_RESULT_PATH" "$EPIC_ID"',
+    '      fi',
+    '    fi',
+    '  fi',
     '  exit 0',
     'fi',
-    'if printf "%s" "$ARGS" | grep -q -- "--agent team-lead" && printf "%s" "$STDIN" | grep -q -- "Take over this merge conflict resolution directly"; then',
+    'if printf "%s" "$STDIN" | grep -q -- "Take over this merge conflict resolution directly"; then',
     '  touch team-lead-merge-invoked.txt',
     '  if [ "$RESOLVE_WITH_TEAM_LEAD" = "1" ]; then',
     '    printf "main version\\nepic version\\n" > README.md',
@@ -454,6 +522,8 @@ export function setupConflictRepo(options?: { resolveWithTeamLead?: boolean }) {
     '    echo MERGE_SUCCESS',
     '    exit 0',
     '  fi',
+    '  echo MERGE_FAILED',
+    '  exit 0',
     'fi',
     'printf "VERDICT: PASS\\n"',
     'exit 0',

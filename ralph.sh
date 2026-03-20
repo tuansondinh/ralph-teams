@@ -1257,6 +1257,10 @@ render_team_lead_prompt() {
   TEAM_LEAD_TEMPLATE_WORKTREE_ABS_PATH="$WORKTREE_ABS_PATH" \
   TEAM_LEAD_TEMPLATE_WORKTREE_STATE_FILE="$WORKTREE_STATE_FILE" \
   TEAM_LEAD_TEMPLATE_WORKTREE_PRD_PATH="$WORKTREE_PRD_PATH" \
+  TEAM_LEAD_TEMPLATE_LOOP_BRANCH="$LOOP_BRANCH" \
+  TEAM_LEAD_TEMPLATE_EPIC_BRANCH="$EPIC_BRANCH" \
+  TEAM_LEAD_TEMPLATE_ROOT_DIR="$ROOT_DIR" \
+  TEAM_LEAD_TEMPLATE_WORKTREE_MERGE_RESULT_FILE="$WORKTREE_MERGE_RESULT_FILE" \
   TEAM_LEAD_TEMPLATE_EPIC_JSON="$EPIC_JSON" \
   TEAM_LEAD_TEMPLATE_WORKTREE_PLAN_FILE="$WORKTREE_PLAN_FILE" \
   TEAM_LEAD_TEMPLATE_EPIC_PLANNED="$EPIC_PLANNED" \
@@ -1290,6 +1294,12 @@ process_epic_result() {
   local epic_index="$1"
   local epic_id
   epic_id=$(rjq read "$PRD_FILE" ".epics[$epic_index].id")
+  local merge_status=""
+  merge_status=$(read_epic_merge_result_field "$epic_id" .status "" 2>/dev/null || true)
+  local merge_mode=""
+  merge_mode=$(read_epic_merge_result_field "$epic_id" .mode "unknown" 2>/dev/null || true)
+  local merge_details=""
+  merge_details=$(read_epic_merge_result_field "$epic_id" .details "" 2>/dev/null || true)
 
   local total_stories
   total_stories=$(rjq length "$PRD_FILE" ".epics[$epic_index].userStories")
@@ -1297,11 +1307,25 @@ process_epic_result() {
   passed_stories=$(rjq count-where "$PRD_FILE" ".epics[$epic_index].userStories" "passes=true")
 
   if [ "$passed_stories" -eq "$total_stories" ] && [ "$total_stories" -gt 0 ]; then
+    if [ "$merge_status" = "merge-failed" ]; then
+      echo ""
+      echo "  [$epic_id] MERGE FAILED — all stories passed but merge did not complete"
+      [ -n "$merge_details" ] && echo "  [$epic_id] Merge details: $merge_details"
+      rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"'
+      FAILED=$((FAILED + 1))
+      echo "[$epic_id] MERGE FAILED (${merge_details:-team lead merge failed}) — $(date)" >> "$PROGRESS_FILE"
+      return
+    fi
+
     echo ""
     echo "  [$epic_id] PASSED — all stories completed ($passed_stories/$total_stories)"
     rjq set "$PRD_FILE" ".epics[$epic_index].status" '"completed"'
     COMPLETED=$((COMPLETED + 1))
     echo "[$epic_id] PASSED — $(date)" >> "$PROGRESS_FILE"
+    if [ "$merge_status" = "merged" ]; then
+      echo "  [$epic_id] Merge successful (team lead, ${merge_mode:-unknown})"
+      echo "[$epic_id] MERGED (team lead ${merge_mode:-unknown}) — $(date)" >> "$PROGRESS_FILE"
+    fi
   elif [ "$passed_stories" -gt 0 ]; then
     echo ""
     echo "  [$epic_id] PARTIAL — $passed_stories/$total_stories stories passed"
@@ -1343,6 +1367,35 @@ NODE
   tmp_file=$(mktemp "${STATE_DIR}/.${epic_id}.json.XXXXXX")
   printf '%s\n' "$stories_json" > "$tmp_file"
   mv "$tmp_file" "$state_file"
+}
+
+reset_epic_merge_result_file() {
+  local epic_id="$1"
+  rm -f "${STATE_DIR}/merge-${epic_id}.json"
+}
+
+read_epic_merge_result_field() {
+  local epic_id="$1"
+  local field_path="$2"
+  local default_value="$3"
+  local result_file="${STATE_DIR}/merge-${epic_id}.json"
+
+  [ -f "$result_file" ] || return 1
+  rjq read "$result_file" "$field_path" "$default_value"
+}
+
+delete_epic_branch() {
+  local epic_id="$1"
+  git branch -d "ralph/${epic_id}" 2>/dev/null || true
+}
+
+verify_epic_branch_merged() {
+  local epic_id="$1"
+  local branch_name="ralph/${epic_id}"
+
+  git show-ref --verify --quiet "refs/heads/${branch_name}" || return 1
+  git show-ref --verify --quiet "refs/heads/${LOOP_BRANCH}" || return 1
+  git merge-base --is-ancestor "$branch_name" "$LOOP_BRANCH" 2>/dev/null
 }
 
 read_epic_state_passed() {
@@ -1430,16 +1483,19 @@ spawn_epic_bg() {
   WORKTREE_PATH=$(create_epic_worktree "$EPIC_ID")
   local WORKTREE_ABS_PATH
   WORKTREE_ABS_PATH="$(cd "${ROOT_DIR}/${WORKTREE_PATH}" && pwd)"
+  local EPIC_BRANCH="ralph/${EPIC_ID}"
   ensure_worktree_runtime_link "$WORKTREE_ABS_PATH"
   local WORKTREE_PRD_PATH="${WORKTREE_ABS_PATH}/${PRD_REL_PATH}"
   local WORKTREE_STATE_FILE="${WORKTREE_ABS_PATH}/${RALPH_RUNTIME_DIRNAME}/state/${EPIC_ID}.json"
   local WORKTREE_PLAN_FILE="${WORKTREE_ABS_PATH}/${RALPH_RUNTIME_DIRNAME}/plans/plan-${EPIC_ID}.md"
+  local WORKTREE_MERGE_RESULT_FILE="${WORKTREE_ABS_PATH}/${RALPH_RUNTIME_DIRNAME}/state/merge-${EPIC_ID}.json"
   local WORKTREE_PLAN_EXISTS="false"
   if [ -f "$WORKTREE_PLAN_FILE" ]; then
     WORKTREE_PLAN_EXISTS="true"
   fi
 
   init_epic_state_file "$EPIC_ID" "$EPIC_INDEX"
+  reset_epic_merge_result_file "$EPIC_ID"
 
   echo "  Spawning [$EPIC_ID] in worktree $WORKTREE_PATH"
 
@@ -1474,9 +1530,10 @@ spawn_epic_bg() {
   LAST_SPAWN_LOG="$EPIC_LOG"
 }
 
-# merge_wave: merges completed epic branches back to the loop branch sequentially.
-# Takes epic IDs as arguments. Clean merges succeed without AI intervention.
-# On conflict, hands the repo to a tightly-scoped Team Lead takeover. Logs all outcomes to progress.txt.
+# merge_wave: fallback merge pass for completed epic branches that were not already
+# merged by their original Team Lead sessions. Takes epic IDs as arguments.
+# Clean merges succeed without AI intervention. On conflict, hands the repo to a
+# tightly-scoped Team Lead takeover. Logs all outcomes to progress.txt.
 merge_wave() {
   local -a completed_epic_ids=("$@")
 
@@ -2138,14 +2195,25 @@ while true; do
 
           echo "  [$finished_epic_id] finished — processing result"
           project_state_to_prd "$finished_epic_id" || true
+          local merge_status
+          merge_status=$(read_epic_merge_result_field "$finished_epic_id" .status "" 2>/dev/null || true)
+          if [ "$merge_status" = "merged" ] && ! verify_epic_branch_merged "$finished_epic_id"; then
+            echo "  [$finished_epic_id] Team Lead reported merge success but scripted check failed"
+            echo "[$finished_epic_id] MERGE CHECK FAILED (team lead reported merged) — $(date)" >> "$PROGRESS_FILE"
+            reset_epic_merge_result_file "$finished_epic_id"
+            merge_status=""
+          fi
           process_epic_result "${active_indices[$slot]}"
-          # Track completed epics for merge_wave
+          # Track completed epics for merge_wave only when the Team Lead did not already merge.
           local post_status
           post_status=$(rjq read "$PRD_FILE" ".epics[${active_indices[$slot]}].status" "pending")
-          if [ "$post_status" = "completed" ]; then
+          if [ "$post_status" = "completed" ] && [ "$merge_status" != "merged" ]; then
             wave_completed_ids+=("$finished_epic_id")
           fi
           cleanup_epic_worktree "$finished_epic_id"
+          if [ "$merge_status" = "merged" ]; then
+            delete_epic_branch "$finished_epic_id"
+          fi
           unset 'active_pids[$slot]'
           unset 'active_indices[$slot]'
           unset 'active_start_times[$slot]'
