@@ -366,12 +366,13 @@ test('ralph.sh repairs a merged-in root runtime symlink and keeps runtime artifa
   assert.match(script, /if \[ -f "\.git\/MERGE_HEAD" \]; then[\s\S]*git commit --no-edit/);
 });
 
-test('ralph.sh banner includes workflow preset or enabled execution phases', () => {
+test('ralph.sh banner shows the workflow preset without enabled phases when a preset is present', () => {
   const script = fs.readFileSync(scriptPath, 'utf-8');
 
   assert.match(script, /WORKFLOW_PRESET="\$\{RALPH_WORKFLOW_PRESET:-\}"/);
   assert.match(script, /render_enabled_execution_phases\(\)/);
-  assert.match(script, /echo "  Workflow: \$WORKFLOW_PRESET \(enabled phases: \$\(render_enabled_execution_phases\)\)"/);
+  assert.match(script, /echo "  Workflow: \$WORKFLOW_PRESET"/);
+  assert.doesNotMatch(script, /echo "  Workflow: \$WORKFLOW_PRESET \(enabled phases: \$\(render_enabled_execution_phases\)\)"/);
   assert.match(script, /echo "  Execution phases enabled: \$\(render_enabled_execution_phases\)"/);
 });
 

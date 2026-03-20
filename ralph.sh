@@ -551,7 +551,7 @@ else
   echo "  Mode: sequential"
 fi
 if [ -n "$WORKFLOW_PRESET" ]; then
-  echo "  Workflow: $WORKFLOW_PRESET (enabled phases: $(render_enabled_execution_phases))"
+  echo "  Workflow: $WORKFLOW_PRESET"
 else
   echo "  Execution phases enabled: $(render_enabled_execution_phases)"
 fi
