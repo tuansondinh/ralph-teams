@@ -26,7 +26,8 @@ test('buildTaskExecutionPrompt references scoped teammate roles', () => {
 
   assert.match(prompt, /stay on the current branch/i);
   assert.match(prompt, /Do not create or switch branches/i);
-  assert.match(prompt, /If the runtime is Claude, use Claude agent teams/i);
+  assert.match(prompt, /If the runtime is Claude, create a Claude agent team at the start of the task/i);
+  assert.match(prompt, /do not execute the task as a solo Team Lead/i);
   assert.match(prompt, /story_planner_easy\/story_planner_medium\/story_planner_difficult/);
   assert.match(prompt, /story-planner/i);
   assert.match(prompt, /story-validator/i);
