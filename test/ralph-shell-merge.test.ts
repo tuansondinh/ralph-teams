@@ -327,7 +327,7 @@ test('US-005: merge-failed status set when conflict cannot be resolved', () => {
   assert.equal(prd.epics[0].status, 'merge-failed');
 });
 
-test('US-005: recovered pending merges still use the shell takeover path when conflicts exist', () => {
+test('US-005: recovered pending merges do not respawn a fresh team lead when conflicts remain', () => {
   const { tempDir, env } = setupConflictRepo({ resolveWithTeamLead: true });
   const runtimeDir = path.join(tempDir, '.ralph-teams');
   fs.mkdirSync(runtimeDir, { recursive: true });
@@ -379,13 +379,14 @@ test('US-005: recovered pending merges still use the shell takeover path when co
     },
   });
 
-  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
-  assert.match(result.stdout, /\[EPIC-001\] conflicts detected — team lead takeover/);
-  assert.match(result.stdout, /\[EPIC-001\] merged \(AI-resolved conflicts\)/);
-  assert.ok(fs.existsSync(path.join(tempDir, 'team-lead-merge-invoked.txt')));
+  assert.equal(result.status, 1, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.match(result.stdout, /\[EPIC-001\] Merge FAILED — conflicts remain; leaving .* for a later clean retry/);
+  assert.ok(!fs.existsSync(path.join(tempDir, 'team-lead-merge-invoked.txt')));
   const progress = fs.readFileSync(path.join(runtimeDir, 'progress.txt'), 'utf-8');
   assert.match(progress, /\[EPIC-001\] RECOVERED PENDING MERGE \(resume\/startup\)/);
-  assert.match(progress, /\[EPIC-001\] MERGED \(AI-resolved\)/);
+  assert.match(progress, /\[EPIC-001\] MERGE FAILED \(conflicts remain, files: README.md\)/);
+  const prd = JSON.parse(fs.readFileSync(prdPath, 'utf-8'));
+  assert.equal(prd.epics[0].status, 'merge-failed');
 });
 
 test('US-005: conflict resolution attempt is logged to progress.txt', () => {
@@ -407,6 +408,20 @@ test('US-005: merge-failed epic does not block independent epics in later waves'
   const result = runRalph(tempDir, env);
   assert.match(result.stdout, /\[EPIC-003\] PASSED/);
   assert.match(result.stdout, /\[EPIC-002\].*[Ss]kipped/);
+});
+
+test('US-005: final validation still runs when every epic is terminal but one merge failed', () => {
+  const { tempDir, env } = setupMultiEpicRepo(
+    [
+      { id: 'EPIC-001', title: 'Alpha', status: 'merge-failed' },
+      { id: 'EPIC-002', title: 'Beta', status: 'completed' },
+    ],
+    {},
+  );
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 1, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.match(result.stdout, /--- Final validation ---/);
+  assert.match(result.stdout, /Final validation PASSED/);
 });
 
 test('US-005: team lead merge result artifact is written for conflict handling', () => {

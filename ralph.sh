@@ -1599,10 +1599,10 @@ spawn_epic_bg() {
   LAST_SPAWN_LOG="$EPIC_LOG"
 }
 
-# merge_wave: fallback merge pass for completed epic branches that were not already
-# merged by their original Team Lead sessions. Takes epic IDs as arguments.
-# Clean merges succeed without AI intervention. On conflict, hands the repo to a
-# tightly-scoped Team Lead takeover. Logs all outcomes to progress.txt.
+# merge_wave: fallback merge pass for epic branches that still exist after
+# their original Team Lead session. Takes epic IDs as arguments.
+# Clean merges succeed without AI intervention. On conflict, Ralph records the
+# merge failure and leaves the branch in place for a later clean retry.
 merge_wave() {
   local -a completed_epic_ids=("$@")
 
@@ -1693,84 +1693,18 @@ merge_wave() {
         continue
       fi
 
-      # Conflicts detected — hand off the current merge state to the Team Lead.
-      echo "  [$epic_id] conflicts detected — team lead takeover..."
-      echo "[$epic_id] merge conflicts — team lead takeover — $(date)" >> "$PROGRESS_FILE"
+      git merge --abort 2>/dev/null || true
+      echo "  [$epic_id] Merge FAILED — conflicts remain; leaving ${branch_name} for a later clean retry"
+      echo "[$epic_id] MERGE FAILED (conflicts remain, files: ${conflicted_files}) — $(date)" >> "$PROGRESS_FILE"
+      merge_failures=$((merge_failures + 1))
 
-      local merge_prompt="You are the Team Lead. Take over this merge conflict resolution directly.
-
-## Context
-- Target branch: ${target_branch}
-- Source branch: ${branch_name}
-- Epic ID: ${epic_id}
-
-## Conflicted Files
-${conflicted_files}
-
-## Instructions
-1. Stay in the current repository and operate on the existing in-progress merge state.
-2. Do NOT delegate. Do NOT spawn merger, builder, planner, or validator work.
-3. For each conflicted file listed above, read the full file and inspect the conflict markers.
-4. Run: git log --oneline ${target_branch}..${branch_name} to see what the epic branch changed.
-5. Run: git log --oneline ${branch_name}..${target_branch} to see what changed on the target branch.
-6. Resolve each conflict by combining both sides' intent where possible.
-7. Stage each resolved file with: git add <filename>.
-8. Do NOT commit. ralph.sh will create the merge commit after all conflicts are resolved.
-9. Do NOT run git merge --abort.
-10. If you cannot safely resolve a conflict, leave the conflict markers in place.
-
-When you are finished, print exactly one final line:
-- MERGE_SUCCESS
-- MERGE_FAILED
-
-Begin resolving."
-
-      local merge_log="${LOGS_DIR}/merge-${epic_id}-$(date +%s).log"
-
-      case "$BACKEND" in
-        claude)
-          echo "$merge_prompt" | $AGENT_CMD --agent team-lead --model "$MODEL_TEAM_LEAD" --dangerously-skip-permissions --print --verbose --output-format stream-json > "$merge_log" 2>&1 || true
-          ;;
-        copilot)
-          COPILOT_MERGE_PROMPT="$merge_prompt" \
-            script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent team-lead --allow-all --no-ask-user --stream on -p "$COPILOT_MERGE_PROMPT"' \
-            > "$merge_log" 2>&1 || true
-          ;;
-        codex)
-          run_codex_exec "$ROOT_DIR" "$merge_prompt" > "$merge_log" 2>&1 || true
-          ;;
-        opencode)
-          run_opencode_exec "$ROOT_DIR" "$merge_prompt" team-lead "$MODEL_TEAM_LEAD" > "$merge_log" 2>&1 || true
-          ;;
-      esac
-
-      # Check for remaining unresolved conflicts
-      local remaining_conflicts
-      remaining_conflicts=$(git diff --name-only --diff-filter=U 2>/dev/null || true)
-
-      # Also check if agent aborted the merge (MERGE_HEAD won't exist)
-      if [ -z "$remaining_conflicts" ] && [ -f ".git/MERGE_HEAD" ]; then
-        # All conflicts resolved — complete the merge commit
-        git commit --no-edit 2>/dev/null || true
-        echo "  [$epic_id] merged (AI-resolved conflicts)"
-        echo "  [$epic_id] Merge log: ${merge_log}"
-        echo "[$epic_id] MERGED (AI-resolved) — $(date)" >> "$PROGRESS_FILE"
-        git branch -d "${branch_name}" 2>/dev/null || true
-      else
-        # AI failed or aborted — ensure clean state
-        git merge --abort 2>/dev/null || true
-        echo "  [$epic_id] Merge FAILED — AI could not resolve conflicts in: ${conflicted_files}"
-        echo "  [$epic_id] Merge log: ${merge_log}"
-        echo "[$epic_id] MERGE FAILED (AI resolution failed, files: ${conflicted_files}) — $(date)" >> "$PROGRESS_FILE"
-        merge_failures=$((merge_failures + 1))
-
-        # Update epic status to merge-failed
-        local epic_index
-        epic_index=$(rjq find-index "$PRD_FILE" .epics id "$epic_id")
-        if [ -n "$epic_index" ]; then
-          rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"'
-        fi
+      local epic_index
+      epic_index=$(rjq find-index "$PRD_FILE" .epics id "$epic_id")
+      if [ -n "$epic_index" ]; then
+        rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"'
       fi
+
+      continue
     fi
 
     # Clean up the merged branch
@@ -1786,7 +1720,7 @@ collect_pending_merge_epics() {
   for epic_index in $(seq 0 $((TOTAL_EPICS - 1))); do
     local epic_status
     epic_status=$(rjq read "$PRD_FILE" ".epics[$epic_index].status" "pending")
-    [ "$epic_status" = "completed" ] || continue
+    [ "$epic_status" = "completed" ] || [ "$epic_status" = "merge-failed" ] || continue
 
     local epic_id
     epic_id=$(rjq read "$PRD_FILE" ".epics[$epic_index].id")
@@ -1903,7 +1837,7 @@ read_final_validation_verdict() {
 
 run_final_validation_cycle() {
   [ "$FINAL_VALIDATION_ENABLED" = "1" ] || return 0
-  [ "$COMPLETED" -eq "$TOTAL_EPICS" ] || return 0
+  [ $((COMPLETED + FAILED)) -eq "$TOTAL_EPICS" ] || return 0
   [ "$TOTAL_EPICS" -ge 2 ] || return 0
 
   echo ""
