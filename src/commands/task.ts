@@ -152,6 +152,7 @@ export function buildTaskExecutionPrompt(task: string, cwd: string, branch: stri
     '- Work in the current repository and stay on the current branch.',
     '- Do not create or switch branches unless the user explicitly asks.',
     '- You may use story-planner, builder, and story-validator teammates when helpful.',
+    '- If the runtime is Claude, use Claude agent teams for delegated work instead of Claude subagents or a single-threaded solo workflow.',
     '- If the runtime supports teammate model choice, respect explicit config overrides first; otherwise choose cheaper models for easy work and stronger models for difficult work.',
     '- If the runtime is Codex, use these named teammate roles when spawning: story_planner_easy/story_planner_medium/story_planner_difficult, builder_easy/builder_medium/builder_difficult, story_validator_easy/story_validator_medium/story_validator_difficult.',
     '- You may skip planning for very simple tasks, but plan internally or via a story-planner teammate when the task has ambiguity or design risk.',
@@ -215,6 +216,58 @@ function buildSpawnEnv(
   };
 }
 
+export function buildTaskExecutionInvocation(
+  backend: SupportedBackend,
+  env: NodeJS.ProcessEnv,
+): { command: string; args: string[]; extraEnv?: NodeJS.ProcessEnv } {
+  const cwd = env.RALPH_TASK_PROJECT_ROOT ?? process.cwd();
+
+  if (backend === 'claude') {
+    return {
+      command: 'claude',
+      args: [
+        '--agent', 'team-lead',
+        '--model', env.RALPH_MODEL_TEAM_LEAD ?? 'opus',
+        '--dangerously-skip-permissions',
+        '--teammate-mode', 'in-process',
+      ],
+      extraEnv: {
+        ...env,
+        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS ?? '1',
+      },
+    };
+  }
+
+  if (backend === 'copilot') {
+    return {
+      command: 'gh',
+      args: ['copilot', '--', '--allow-all', '--no-ask-user', '-p'],
+    };
+  }
+
+  if (backend === 'opencode') {
+    return {
+      command: 'opencode',
+      args: ['.', '--prompt'],
+    };
+  }
+
+  return {
+    command: 'codex',
+    args: [
+      '-a', 'never',
+      'exec',
+      '-C', cwd,
+      '-m', env.RALPH_MODEL_TEAM_LEAD ?? 'gpt-5.3-codex',
+      '-c', 'model_reasoning_effort="high"',
+      '-s', 'workspace-write',
+      '--skip-git-repo-check',
+      '--color', 'never',
+      '--enable', 'multi_agent',
+    ],
+  };
+}
+
 function runSpawnedProcess(command: string, args: string[], env: NodeJS.ProcessEnv): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -246,35 +299,12 @@ async function runPlanningSession(prompt: string, backend: SupportedBackend, env
 }
 
 async function runExecutionSession(prompt: string, backend: SupportedBackend, env: NodeJS.ProcessEnv): Promise<void> {
-  const cwd = env.RALPH_TASK_PROJECT_ROOT ?? process.cwd();
-
-  if (backend === 'claude') {
-    await runSpawnedProcess('claude', ['--dangerously-skip-permissions', prompt], env);
-    return;
-  }
-
-  if (backend === 'copilot') {
-    await runSpawnedProcess('gh', ['copilot', '--', '--allow-all', '--no-ask-user', '-p', prompt], env);
-    return;
-  }
-
-  if (backend === 'opencode') {
-    await runSpawnedProcess('opencode', ['.', '--prompt', prompt], env);
-    return;
-  }
-
-  await runSpawnedProcess('codex', [
-    '-a', 'never',
-    'exec',
-    '-C', cwd,
-    '-m', env.RALPH_MODEL_TEAM_LEAD ?? 'gpt-5.3-codex',
-    '-c', 'model_reasoning_effort="high"',
-    '-s', 'workspace-write',
-    '--skip-git-repo-check',
-    '--color', 'never',
-    '--enable', 'multi_agent',
-    prompt,
-  ], env);
+  const invocation = buildTaskExecutionInvocation(backend, env);
+  await runSpawnedProcess(
+    invocation.command,
+    [...invocation.args, prompt],
+    invocation.extraEnv ?? env,
+  );
 }
 
 export async function taskCommand(

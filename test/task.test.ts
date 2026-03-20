@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildTaskExecutionInvocation,
   buildTaskExecutionPrompt,
   buildTaskPlanningPrompt,
   taskCommand,
@@ -25,10 +26,27 @@ test('buildTaskExecutionPrompt references scoped teammate roles', () => {
 
   assert.match(prompt, /stay on the current branch/i);
   assert.match(prompt, /Do not create or switch branches/i);
+  assert.match(prompt, /If the runtime is Claude, use Claude agent teams/i);
   assert.match(prompt, /story_planner_easy\/story_planner_medium\/story_planner_difficult/);
   assert.match(prompt, /story-planner/i);
   assert.match(prompt, /story-validator/i);
   assert.match(prompt, /builder must do TDD/i);
+});
+
+test('buildTaskExecutionInvocation routes Claude task execution through team-lead with agent teams enabled', () => {
+  const invocation = buildTaskExecutionInvocation('claude', {
+    RALPH_MODEL_TEAM_LEAD: 'opus',
+    RALPH_TASK_PROJECT_ROOT: '/repo',
+  });
+
+  assert.equal(invocation.command, 'claude');
+  assert.deepEqual(invocation.args, [
+    '--agent', 'team-lead',
+    '--model', 'opus',
+    '--dangerously-skip-permissions',
+    '--teammate-mode', 'in-process',
+  ]);
+  assert.equal(invocation.extraEnv?.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS, '1');
 });
 
 test('taskCommand starts planning session when user chooses planning', async () => {
