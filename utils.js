@@ -1,0 +1,10 @@
+function capitalize(str) {
+  if (str.length === 0) return '';
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
+
+function add(a, b) {
+  return a + b;
+}
+
+module.exports = { capitalize, add };
