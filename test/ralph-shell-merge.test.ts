@@ -44,6 +44,9 @@ test('US-004: epic success is preserved when only the worktree PRD is updated', 
     'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
+    'LOOP_BRANCH=$(printf "%s" "$STDIN" | sed -n \'s/^- Loop branch to merge into: //p\' | head -1)',
+    'ROOT_DIR=$(printf "%s" "$STDIN" | sed -n \'s/^- Repository root for the merge attempt: //p\' | head -1)',
+    'MERGE_RESULT_PATH=$(printf "%s" "$STDIN" | sed -n \'s/^- Write the final merge result artifact to: //p\' | head -1)',
     'if [ -n "$EPIC_ID" ] && [ -n "$WORKTREE" ]; then',
     '  cd "$WORKTREE" || exit 1',
     '  node -e "' +
@@ -70,6 +73,23 @@ test('US-004: epic success is preserved when only the worktree PRD is updated', 
     '" "$PRD_PATH" "$EPIC_ID"',
     '  git add prd.json',
     '  git commit -m "feat: mark story passed in worktree PRD"',
+    '  if [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
+    '    EPIC_BRANCH=$(git branch --show-current)',
+    '    git -C "$ROOT_DIR" checkout "$LOOP_BRANCH"',
+    '    if git -C "$ROOT_DIR" merge "$EPIC_BRANCH" --no-commit --no-ff; then',
+    '      if [ -f "$ROOT_DIR/.git/MERGE_HEAD" ]; then',
+    '        git -C "$ROOT_DIR" commit --no-edit',
+    '      fi',
+    '      node -e "' +
+      "const fs=require('fs');" +
+      "const file=process.argv[1];" +
+      "const t=file+'.tmp.'+process.pid;" +
+      "const data={epicId:process.argv[2],status:'merged',mode:'clean',details:'',timestamp:'2026-03-20T17:30:00+01:00'};" +
+      "fs.writeFileSync(t,JSON.stringify(data,null,2)+'\\n');" +
+      "fs.renameSync(t,file);" +
+    '" "$MERGE_RESULT_PATH" "$EPIC_ID"',
+    '    fi',
+    '  fi',
     'else',
     '  printf "VERDICT: PASS\\n"',
     'fi',
@@ -135,6 +155,26 @@ test('US-004: dirty loop branch is auto-committed before merge', () => {
   assert.match(result.stdout, /\[EPIC-001\] Merge successful \(team lead, clean\)/);
   const subjects = execFileSync('git', ['log', '--pretty=%s', '-n', '5'], { cwd: tempDir, encoding: 'utf-8' });
   assert.match(subjects, /chore: checkpoint loop branch before merge wave/);
+});
+
+test('US-004: runner waits for merge artifact instead of killing the team lead after stories pass', () => {
+  const { tempDir, env } = setupMergeRepo(
+    [{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }],
+    { hangAfterStoryPassBeforeMerge: true },
+  );
+  env.RALPH_IDLE_TIMEOUT = '1';
+
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 1, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.match(result.stdout, /\[EPIC-001\] IDLE TIMEOUT — no output for 1s/);
+  assert.doesNotMatch(result.stdout, /--- Merging completed epic branches/);
+
+  const prd = JSON.parse(fs.readFileSync(path.join(tempDir, 'prd.json'), 'utf-8'));
+  assert.equal(prd.epics[0].status, 'merge-failed');
+
+  const progress = fs.readFileSync(path.join(tempDir, '.ralph-teams', 'progress.txt'), 'utf-8');
+  assert.match(progress, /\[EPIC-001\] MERGE FAILED \(missing team lead merge result artifact\)/);
+  assert.doesNotMatch(progress, /\[EPIC-001\] MERGED/);
 });
 
 test('US-004: epic branch is deleted after successful merge', () => {

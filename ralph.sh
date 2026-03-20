@@ -1317,6 +1317,15 @@ process_epic_result() {
       return
     fi
 
+    if [ "$merge_status" != "merged" ]; then
+      echo ""
+      echo "  [$epic_id] MERGE FAILED — all stories passed but Team Lead did not record a merge result"
+      rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"'
+      FAILED=$((FAILED + 1))
+      echo "[$epic_id] MERGE FAILED (missing team lead merge result artifact) — $(date)" >> "$PROGRESS_FILE"
+      return
+    fi
+
     echo ""
     echo "  [$epic_id] PASSED — all stories completed ($passed_stories/$total_stories)"
     rjq set "$PRD_FILE" ".epics[$epic_index].status" '"completed"'
@@ -2159,18 +2168,30 @@ while true; do
         [ "$passed_s_prd" -gt "$passed_s" ] && passed_s="$passed_s_prd"
         local all_done=false
         [ "$passed_s" -eq "$total_s" ] && [ "$total_s" -gt 0 ] && all_done=true
+        local live_merge_status=""
+        live_merge_status=$(read_epic_merge_result_field "$finished_epic_id" .status "" 2>/dev/null || true)
+        local merge_recorded=false
+        if [ "$live_merge_status" = "merged" ] || [ "$live_merge_status" = "merge-failed" ]; then
+          merge_recorded=true
+        fi
+        local epic_flow_complete=false
+        if [ "$all_done" = true ] && [ "$merge_recorded" = true ]; then
+          epic_flow_complete=true
+        fi
 
-        if [ "$process_finished" = true ] || [ "$all_done" = true ]; then
-          # Treat fully-passed stories in the PRD as the authoritative completion
-          # signal, even if the backend session is still idling.
-          if [ "$process_finished" = false ]; then
+        if [ "$process_finished" = true ] || [ "$epic_flow_complete" = true ]; then
+          # Only terminate an in-flight session early after the Team Lead has
+          # written the merge result artifact. Fully-passed stories alone are
+          # not enough to declare the epic session complete.
+          if [ "$process_finished" = false ] && [ "$epic_flow_complete" = true ]; then
             terminate_process_tree "${active_pids[$slot]}"
           fi
           wait "${active_pids[$slot]}" 2>/dev/null || true
 
-          # If the process exited before the epic reached all stories passed,
-          # consider it a crash and retry when possible.
-          if [ "$all_done" = false ]; then
+          # If the process exited before the epic reached full completion
+          # (stories passed plus merge result recorded), consider it a crash
+          # and retry when possible.
+          if [ "$epic_flow_complete" = false ]; then
             local retry_count
             retry_count="$(get_crash_retry_count "$finished_epic_id")"
             if [ "$retry_count" -lt "$MAX_CRASH_RETRIES" ]; then

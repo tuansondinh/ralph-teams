@@ -97,6 +97,9 @@ export function setupUnbornRepo() {
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
     'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
+    'LOOP_BRANCH=$(printf "%s" "$STDIN" | sed -n \'s/^- Loop branch to merge into: //p\' | head -1)',
+    'ROOT_DIR=$(printf "%s" "$STDIN" | sed -n \'s/^- Repository root for the merge attempt: //p\' | head -1)',
+    'MERGE_RESULT_PATH=$(printf "%s" "$STDIN" | sed -n \'s/^- Write the final merge result artifact to: //p\' | head -1)',
     'if [ -n "$EPIC_ID" ]; then',
     '  node -e "' +
       "const fs=require('fs');" +
@@ -114,6 +117,23 @@ export function setupUnbornRepo() {
       "if(e)e.userStories.forEach(s=>{s.passes=true;});" +
       "fs.writeFileSync(f,JSON.stringify(p,null,2)+'\\n');" +
       '" "$EPIC_ID" "$PRD_PATH"',
+    '  if [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
+    '    EPIC_BRANCH=$(git branch --show-current)',
+    '    git -C "$ROOT_DIR" checkout "$LOOP_BRANCH"',
+    '    if git -C "$ROOT_DIR" merge "$EPIC_BRANCH" --no-commit --no-ff; then',
+    '      if [ -f "$ROOT_DIR/.git/MERGE_HEAD" ]; then',
+    '        git -C "$ROOT_DIR" commit --no-edit',
+    '      fi',
+    '      node -e "' +
+      "const fs=require('fs');" +
+      "const file=process.argv[1];" +
+      "const t=file+'.tmp.'+process.pid;" +
+      "const data={epicId:process.argv[2],status:'merged',mode:'clean',details:'',timestamp:'2026-03-20T17:30:00+01:00'};" +
+      "fs.writeFileSync(t,JSON.stringify(data,null,2)+'\\n');" +
+      "fs.renameSync(t,file);" +
+      '" "$MERGE_RESULT_PATH" "$EPIC_ID"',
+    '    fi',
+    '  fi',
     'else',
     '  printf "VERDICT: PASS\\n"',
     'fi',
@@ -155,6 +175,9 @@ export function setupMultiEpicRepo(
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
     'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
+    'LOOP_BRANCH=$(printf "%s" "$STDIN" | sed -n \'s/^- Loop branch to merge into: //p\' | head -1)',
+    'ROOT_DIR=$(printf "%s" "$STDIN" | sed -n \'s/^- Repository root for the merge attempt: //p\' | head -1)',
+    'MERGE_RESULT_PATH=$(printf "%s" "$STDIN" | sed -n \'s/^- Write the final merge result artifact to: //p\' | head -1)',
     'FINAL_RESULT_PATH=$(printf "%s" "$STDIN" | grep -oE \'[^[:space:]]*final-validation-result[^[:space:]]*\\.json\' | head -1)',
     'if [ -z "$FINAL_RESULT_PATH" ]; then FINAL_RESULT_PATH="$(pwd)/.ralph-teams/state/final-validation-result-mock.json"; fi',
     'if [ -n "$EPIC_ID" ]; then',
@@ -185,6 +208,23 @@ export function setupMultiEpicRepo(
       "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
       "fs.renameSync(t,f);" +
     '" "$EPIC_ID" "$PRD_PATH"',
+    '      EPIC_BRANCH=$(git branch --show-current)',
+    '      if [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
+    '        git -C "$ROOT_DIR" checkout "$LOOP_BRANCH"',
+    '        if git -C "$ROOT_DIR" merge "$EPIC_BRANCH" --no-commit --no-ff; then',
+    '          if [ -f "$ROOT_DIR/.git/MERGE_HEAD" ]; then',
+    '            git -C "$ROOT_DIR" commit --no-edit',
+    '          fi',
+    '          node -e "' +
+      "const fs=require('fs');" +
+      "const file=process.argv[1];" +
+      "const t=file+'.tmp.'+process.pid;" +
+      "const data={epicId:process.argv[2],status:'merged',mode:'clean',details:'',timestamp:'2026-03-20T17:30:00+01:00'};" +
+      "fs.writeFileSync(t,JSON.stringify(data,null,2)+'\\n');" +
+      "fs.renameSync(t,file);" +
+      '" "$MERGE_RESULT_PATH" "$EPIC_ID"',
+    '        fi',
+    '      fi',
     '    fi',
     '  fi',
     '  if [ "$HANG_VAL" = "1" ]; then',
@@ -259,12 +299,13 @@ export function runRalph(tempDir: string, env: Record<string, string>, args: str
 
 export function setupMergeRepo(
   epics: Array<{ id: string; title: string; fileName: string }>,
-  options?: { dirtyLoopBranchBeforeMerge?: boolean },
+  options?: { dirtyLoopBranchBeforeMerge?: boolean; hangAfterStoryPassBeforeMerge?: boolean },
 ) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-merge-'));
   const binDir = path.join(tempDir, 'bin');
   fs.mkdirSync(binDir);
   const dirtyLoopBranchBeforeMerge = options?.dirtyLoopBranchBeforeMerge === true;
+  const hangAfterStoryPassBeforeMerge = options?.hangAfterStoryPassBeforeMerge === true;
 
   execFileSync('git', ['init', '-b', 'main'], { cwd: tempDir });
   execFileSync('git', ['config', 'user.name', 'Ralph Test'], { cwd: tempDir });
@@ -287,6 +328,7 @@ export function setupMergeRepo(
   const mockClaude = [
     '#!/bin/sh',
     `DIRTY_LOOP_BEFORE_MERGE="${dirtyLoopBranchBeforeMerge ? '1' : '0'}"`,
+    `HANG_AFTER_STORY_PASS_BEFORE_MERGE="${hangAfterStoryPassBeforeMerge ? '1' : '0'}"`,
     'STDIN=$(cat)',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
     'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
@@ -340,6 +382,10 @@ export function setupMergeRepo(
       "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
       "fs.renameSync(t,f);" +
     '" "$EPIC_ID" "$PRD_PATH"',
+    '  if [ "$HANG_AFTER_STORY_PASS_BEFORE_MERGE" = "1" ]; then',
+    '    sleep 5',
+    '    exit 0',
+    '  fi',
     '  if [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
     '    if [ -n "$(git -C "$ROOT_DIR" status --porcelain 2>/dev/null || true)" ]; then',
     '      git -C "$ROOT_DIR" add -A',
@@ -550,6 +596,9 @@ export function setupIdleTimeoutRepo(
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
     'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
+    'LOOP_BRANCH=$(printf "%s" "$STDIN" | sed -n \'s/^- Loop branch to merge into: //p\' | head -1)',
+    'ROOT_DIR=$(printf "%s" "$STDIN" | sed -n \'s/^- Repository root for the merge attempt: //p\' | head -1)',
+    'MERGE_RESULT_PATH=$(printf "%s" "$STDIN" | sed -n \'s/^- Write the final merge result artifact to: //p\' | head -1)',
     'if [ -n "$EPIC_ID" ]; then',
     '  SILENT_KEY="MOCK_SILENT_$(printf "%s" "$EPIC_ID" | tr - _)"',
     '  SILENT_VAL=$(printenv "$SILENT_KEY" 2>/dev/null || true)',
@@ -580,6 +629,23 @@ export function setupIdleTimeoutRepo(
       "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
       "fs.renameSync(t,f);" +
     '" "$EPIC_ID" "$PRD_PATH"',
+    '      EPIC_BRANCH=$(git branch --show-current)',
+    '      if [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
+    '        git -C "$ROOT_DIR" checkout "$LOOP_BRANCH"',
+    '        if git -C "$ROOT_DIR" merge "$EPIC_BRANCH" --no-commit --no-ff; then',
+    '          if [ -f "$ROOT_DIR/.git/MERGE_HEAD" ]; then',
+    '            git -C "$ROOT_DIR" commit --no-edit',
+    '          fi',
+    '          node -e "' +
+      "const fs=require('fs');" +
+      "const file=process.argv[1];" +
+      "const t=file+'.tmp.'+process.pid;" +
+      "const data={epicId:process.argv[2],status:'merged',mode:'clean',details:'',timestamp:'2026-03-20T17:30:00+01:00'};" +
+      "fs.writeFileSync(t,JSON.stringify(data,null,2)+'\\n');" +
+      "fs.renameSync(t,file);" +
+      '" "$MERGE_RESULT_PATH" "$EPIC_ID"',
+    '        fi',
+    '      fi',
     '    fi',
     '  fi',
     'else',
