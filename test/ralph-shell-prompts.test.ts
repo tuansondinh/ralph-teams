@@ -202,9 +202,6 @@ test('canonical Team Lead policy covers scoped planner and validator heuristics'
 
   assert.match(content, /If a usable canonical plan file already exists at the path provided in the prompt, do not spawn the epic planner/i);
   assert.match(content, /If `epicPlanning\.enabled = 1`, spawn the epic planner/i);
-  assert.match(content, /If epic planning is required, do not explore the epic codebase first/i);
-  assert.match(content, /The epic planner owns codebase exploration for the epic/i);
-  assert.match(content, /Before spawning the epic planner, do only the minimum local prep needed to delegate correctly/i);
   assert.match(content, /explicitly tell the epic planner the exact output path/i);
   assert.match(content, /WROTE: <path>/i);
   assert.match(content, /Treat an epic planner response as incomplete/i);
@@ -319,13 +316,6 @@ test('ralph.sh prepares codex teammate variants so the team lead can choose per-
   assert.match(script, /agents\.epic_validator_easy\.config_file/);
   assert.match(script, /agents\.final_validator_easy\.config_file/);
   assert.match(runtimePrompt, /If your runtime is Codex, use these exact named teammate roles when spawning/);
-});
-
-test('team lead runtime prompt tells the lead to delegate to the epic planner before file exploration', () => {
-  const runtimePrompt = fs.readFileSync(`${repoRoot}/prompts/team-lead-runtime.md`, 'utf-8');
-
-  assert.match(runtimePrompt, /If you do need the epic planner, delegate early/i);
-  assert.match(runtimePrompt, /Do not do implementation-file exploration that the planner should own before spawning it/i);
 });
 
 test('codex shell launches add the Ralph package directory alongside the project workspace', () => {

@@ -34,7 +34,6 @@ If this epic has planned=true in the PRD, the canonical implementation plan is:
 - canonical_plan.exists = {{WORKTREE_PLAN_EXISTS}}
 - If a usable canonical plan already exists, do NOT spawn the epic planner. Use it even if epic.planned is false.
 - Only spawn the epic planner when epicPlanning.enabled = 1 and there is no usable canonical plan for this epic.
-- If you do need the epic planner, delegate early. Do not do implementation-file exploration that the planner should own before spawning it.
 
 ## Stories To Plan And Execute
 Only these stories should be planned or worked in this run. Stories omitted here are already passed and must be treated as done context only.
