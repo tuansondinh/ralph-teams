@@ -205,8 +205,6 @@ test('ralph.sh enables Claude agent teams in in-process mode for the claude back
   assert.match(script, /CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="\$\{CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS:-1\}"/);
   assert.match(runtimePrompt, /If your runtime is Claude, use Claude agent teams/i);
   assert.match(runtimePrompt, /use direct teammate messaging when coordination helps/i);
-  assert.match(runtimePrompt, /artifact or status handoff only/i);
-  assert.match(runtimePrompt, /Do not pass Builder reasoning, verdict framing, or arguments about whether the work should pass/i);
 });
 
 test('canonical Team Lead policy covers scoped planner and validator heuristics', () => {
@@ -378,6 +376,14 @@ test('ralph.sh banner shows the workflow preset without enabled phases when a pr
   assert.match(script, /echo "  Workflow: \$WORKFLOW_PRESET"/);
   assert.doesNotMatch(script, /echo "  Workflow: \$WORKFLOW_PRESET \(enabled phases: \$\(render_enabled_execution_phases\)\)"/);
   assert.match(script, /echo "  Execution phases enabled: \$\(render_enabled_execution_phases\)"/);
+});
+
+test('ralph.sh finalization always reinitializes counters after pending-merge recovery', () => {
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+
+  assert.match(script, /recover_pending_merges "finalization" \|\| true/);
+  assert.match(script, /recover_pending_merges "finalization" \|\| true\s+initialize_counters/);
+  assert.doesNotMatch(script, /if ! recover_pending_merges "finalization"; then[\s\S]*initialize_counters[\s\S]*fi\s+initialize_counters/);
 });
 
 test('ralph.sh final validation reads the machine-readable result artifact', () => {

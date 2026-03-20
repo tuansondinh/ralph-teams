@@ -2209,9 +2209,7 @@ while true; do
   fi
 done
 
-if ! recover_pending_merges "finalization"; then
-  initialize_counters
-fi
+recover_pending_merges "finalization" || true
 initialize_counters
 
 if ! run_final_validation_cycle; then
