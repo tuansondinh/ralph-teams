@@ -9,4 +9,8 @@ function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
 
-module.exports = { add, capitalize };
+function multiply(a, b) {
+  return a * b;
+}
+
+module.exports = { add, capitalize, multiply };
