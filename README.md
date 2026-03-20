@@ -19,6 +19,7 @@ Many spec-driven tools are heavy, burn a lot of tokens, and are harder to adapt 
 
 The default `balanced` mode is intentionally simple:
 - the Team Lead orchestrates the epic
+- for clearly easy, low-risk mechanical work, the Team Lead may implement directly
 - it can spawn the epic planner if needed
 - it spawns one Builder per story attempt
 - it validates inline or spawns a validator when independent verification is needed
@@ -45,16 +46,16 @@ This diagram shows the default `balanced` workflow only.
 flowchart TD
     A[Start run] --> B[Validate PRD and create loop branch]
     B --> C[Pick ready epic]
-    C --> D[Create worktree and epic branch]
+    C --> D[Create worktree and run-scoped epic branch]
     D --> E[Team Lead decides on epic planner]
     E --> F[Team Lead runs stories with builder]
     F --> G{Epic validator needed?}
-    G -->|No| J[Merge epic branch]
+    G -->|No| J[Team Lead merges epic branch and writes merge artifact]
     G -->|Yes| H[Run epic validator]
     H -->|PASS| J
     H -->|FAIL and retries left| I[Builder fixes epic-level findings]
     I --> H
-    J --> K[If needed, run merger]
+    J --> K[If needed, fallback merge recovery handles leftovers]
     K --> L{More epics?}
     L -->|Yes| C
     L -->|No| M{2+ epics and final validation enabled?}
@@ -74,7 +75,7 @@ Other presets:
 
 At a high level:
 - `ralph.sh` owns the run loop, worktrees, merges, resume state, and backend process lifecycle.
-- one Team Lead session runs per epic and delegates to planner, builder, validator, and merger roles as needed.
+- one Team Lead session runs per epic and delegates to planner, builder, validator, and merger roles as needed, or implements trivial work directly.
 - `ralph.config.yml` controls backend choice, workflow toggles, parallelism, timeouts, and model selection.
 
 Workflow presets:
@@ -534,6 +535,7 @@ During a run, Ralph writes:
 - `.ralph-teams/progress.txt`: high-level run log
 - `.ralph-teams/.worktrees/EPIC-xxx/`: isolated git worktree for an active epic
 - `.ralph-teams/state/EPIC-xxx.json`: per-epic story pass/fail state (Team Lead reads/writes)
+- `.ralph-teams/state/merge-EPIC-xxx.json`: per-epic merge-result artifact written by the Team Lead or merge recovery path
 - `.ralph-teams/plans/plan-EPIC-xxx.md`: epic-planner output for an epic
 - planned epics are expected to use these files as their implementation contract
 - `.ralph-teams/logs/epic-EPIC-xxx-<timestamp>.log`: raw backend session log
@@ -552,11 +554,11 @@ The current execution contract is:
 - runs sequentially by default
 - experimental wave parallelism is enabled only with `--parallel <n>`
 - at run start Ralph auto-commits any dirty worktree changes, then creates a fresh loop branch from your current branch
-- each epic gets its own worktree and branch rooted from that loop branch
+- each epic gets its own worktree and a run-scoped branch rooted from that loop branch, using `ralph/epic/<loop-run>/<epic-id>`
 - before the Team Lead starts, Ralph creates the worktree and hands repo inspection, setup, build, and test command inference to the agents
 - agents are expected to prefer repo-defined scripts and docs over generic ecosystem defaults when choosing setup and verification commands
 - the shell-built Team Lead prompt must keep literal filenames shell-safe; do not add raw Markdown backticks inside that Bash string because Bash will treat them as command substitution
-- when an epic completes, its branch is merged back into the loop branch
+- when an epic completes successfully, the Team Lead is expected to merge its epic branch back into the loop branch and write the merge-result artifact
 - the backend team processes one epic per session
 - stories run sequentially inside that epic
 - already-passed stories are skipped
@@ -566,8 +568,10 @@ The current execution contract is:
 - a Builder attempt only counts when the Team Lead receives a concrete commit SHA for that story attempt
 - scoped validators check output independently from the builder's reasoning
 - the Team Lead is expected to delegate early and not inspect the codebase beyond the minimum needed before delegation
-- `DONE: X/Y stories passed` is a required session footer, but the durable completion signal is the epic state file updated by the Team Lead
-- after updating the epic state file for all attempted stories, the team lead must print `DONE: X/Y stories passed` and exit the session immediately
+- for clearly easy, low-risk mechanical tasks, the Team Lead may implement directly instead of delegating
+- `DONE: X/Y stories passed` is a required session footer, but it is not enough to complete an epic on its own
+- the durable epic-completion contract is: projected story state plus a valid merge-result artifact
+- if PRD state says an epic is pending but the current loop branch already contains prior merge history for that run-scoped epic branch, Ralph fails fast instead of silently reusing stale history
 - pressing `Ctrl-C` writes `.ralph-teams/ralph-state.json` so the run can be resumed later with `ralph-teams resume`
 
 ## Troubleshooting

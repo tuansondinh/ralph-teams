@@ -84,11 +84,12 @@ This is the operational core of the project. It is responsible for:
 - validating backend dependencies and the PRD
 - creating or switching to the loop branch
 - creating one git worktree per active epic
+- deriving one run-scoped epic branch per active epic under `ralph/epic/<loop-run>/<epic-id>`
 - spawning the team lead agent for each epic
 - enforcing epic timeout, idle timeout, and overall loop timeout
 - reading and mutating `prd.json`
 - writing progress and resume artifacts
-- merging completed epic branches back into the loop branch
+- enforcing the merge-result artifact contract and recovering leftover merges when needed
 
 The Bash layer is stateful and process-oriented. That is why it owns:
 
@@ -181,14 +182,15 @@ The shell runtime then:
 2. Detects circular dependencies.
 3. Auto-commits any dirty worktree changes.
 4. Establishes the run loop branch.
-5. Normalizes retryable PRD state.
-6. Repeatedly computes the next wave of runnable epics.
-7. Creates or reuses each epic worktree and initializes the per-epic state file.
-8. Spawns each epic in its own worktree and backend process.
-9. Watches logs, timeout thresholds, and PRD progress.
-10. Updates `prd.json`, `.ralph-teams/progress.txt`, and stats after completion.
-11. Merges completed epic branches back into the loop branch.
-12. Repeats until no runnable epics remain.
+5. Fails fast if the current loop branch already contains stale merge history for a pending run-scoped epic branch.
+6. Normalizes retryable PRD state.
+7. Repeatedly computes the next wave of runnable epics.
+8. Creates or reuses each epic worktree and initializes the per-epic state file.
+9. Spawns each epic in its own worktree and backend process.
+10. Watches logs, timeout thresholds, PRD progress, and merge-result artifacts.
+11. Updates `prd.json`, `.ralph-teams/progress.txt`, and stats after completion.
+12. Recovers leftover completed-but-unmerged epic branches when resuming or finalizing a run.
+13. Repeats until no runnable epics remain.
 
 ### Epic execution
 
@@ -201,6 +203,7 @@ The team lead is instructed to:
 - follow `.ralph-teams/plans/plan-EPIC-xxx.md` directly when the epic is already marked `planned: true`
 - spawn the epic planner for unplanned medium- and high-complexity epics when epic planning is enabled
 - skip epic planning only for clearly low-complexity unplanned epics or when epic planning is disabled
+- implement directly only for clearly easy, low-risk mechanical work
 - plan only the pending stories for that epic
 - avoid inspecting the codebase beyond the minimum needed before delegation
 - process stories sequentially
@@ -208,13 +211,18 @@ The team lead is instructed to:
 - spawn a fresh Validator only when independent verification is needed, and only for that single story attempt
 - require a concrete Builder commit SHA before a build attempt can advance to verification
 - infer repo-specific setup, build, and test commands from project docs, task runners, and manifests instead of relying on centralized runtime bootstrap logic
-- update the epic state file after each attempted story and finish with a DONE summary
+- update the epic state file after each attempted story
+- attempt the merge in the same epic session
+- write the merge-result artifact to `.ralph-teams/state/merge-{epic-id}.json`
+- finish with a DONE summary only after the merge path has completed or explicitly failed
 
 The shell contract is simple and important:
 
 - agents communicate progress by writing logs
 - agents communicate durable completion by updating the epic state file in `.ralph-teams/state/{epic-id}.json`
+- agents communicate integration outcome by writing `.ralph-teams/state/merge-{epic-id}.json`
 - `DONE: X/Y stories passed` is treated as a required footer, not as authoritative state on its own
+- an epic is not treated as complete until the merge-result artifact exists with either `merged` or `merge-failed`
 
 The shell never tries to infer completion from agent intent alone. It trusts the epic state file and the projected PRD state.
 
@@ -245,6 +253,23 @@ Each epic has its own state file tracking:
 
 The Team Lead reads and updates these files after each story attempt.
 The shell watches for `DONE` markers in agent output, but uses the state file as the durable source of story-level truth.
+
+### Merge Result Files (`.ralph-teams/state/merge-{epic-id}.json`)
+
+Per-epic integration outcome.
+
+Each merge result records:
+
+- `epicId`
+- `status`: `merged` or `merge-failed`
+- `mode`: clean, conflict-resolved, or another merge-mode label
+- `details`: optional failure or resolution detail
+
+The runner uses this artifact to distinguish:
+
+- story execution succeeded and merge completed
+- story execution succeeded but merge failed
+- story execution appeared to finish, but the Team Lead session ended before merge handoff
 
 ### `.ralph-teams/progress.txt`
 
@@ -333,16 +358,23 @@ Everything else is kept backend-agnostic at the orchestration layer.
 
 ## Merge Architecture
 
-Completed epic branches are merged back into the loop branch only after epic execution succeeds.
+The intended merge owner is the same Team Lead session that executed the epic.
 
-Merge flow in `ralph.sh`:
+Primary merge flow:
 
-1. Attempt a clean git merge.
-2. If there is a conflict, spawn a dedicated merger agent.
-3. If conflicts are resolved and staged, create the merge commit.
-4. If not, abort the merge and mark the epic `merge-failed` in `prd.json`.
+1. The Team Lead finishes story execution.
+2. The Team Lead attempts the merge from its run-scoped epic branch into the loop branch.
+3. The Team Lead writes `.ralph-teams/state/merge-{epic-id}.json`.
+4. `ralph.sh` marks the epic `completed` only if that artifact reports `merged`.
 
-This separates "implementation succeeded in isolation" from "integration succeeded into the loop branch". That distinction is important throughout the codebase.
+Recovery flow:
+
+1. If a completed epic branch still exists without a merge artifact during resume/startup or finalization, `ralph.sh` can recover that leftover branch.
+2. Ralph attempts a clean merge first.
+3. If conflicts remain, Ralph hands the in-progress merge state to a tightly scoped Team Lead takeover in the root repo.
+4. If conflicts cannot be resolved, the merge is aborted and the epic becomes `merge-failed`.
+
+This separates "implementation succeeded in isolation" from "integration succeeded into the loop branch" and makes the merge handoff explicit.
 
 ## Failure and Recovery
 
@@ -356,6 +388,7 @@ Key mechanisms:
 - process exit before PRD completion triggers crash handling
 - dependency failure blocks downstream epics
 - merge failure is tracked separately from implementation failure
+- PRD/git history mismatch for pending epics is treated as a hard startup failure
 - `SIGINT` writes `.ralph-teams/ralph-state.json` and preserves worktrees for resume
 
 This makes failure modes inspectable after the fact because evidence is left on disk.
