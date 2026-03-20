@@ -7,7 +7,7 @@
 The architecture is intentionally split:
 
 - The Node CLI is the control plane for user-facing commands, config loading, validation, planning, and stats.
-- `ralph.sh` is the execution engine. It owns the run loop, git worktrees, backend process lifecycle, timeouts, merges, and resume state.
+- `ralph.sh` is the execution engine. It owns the run loop, git worktrees, backend process lifecycle, timeouts, merges, and resume state, while delegating structured PRD/state mutations to `src/runtime-tool.ts`.
 - `ralph.sh` creates each epic worktree and passes repo inspection, setup, build, and test command inference to the agents running inside it.
 - External agent CLIs (`claude`, `gh copilot`, `codex`) do the implementation work. This repo provides prompts, agent role definitions, and orchestration around them.
 
@@ -108,6 +108,8 @@ Core shared modules:
 - `src/commands/setup.ts`: interactive repository configuration
 - `src/commands/plan.ts`: guided epic planning entrypoint and prompt builder
 - `src/discuss.ts`: shared agent spawning and discussion helpers
+- `src/runtime-tool.ts`: PRD validation, epic-state projection, resume snapshot writing, and other structured runtime mutations invoked from `ralph.sh`
+- `src/runtime-env.ts` / `src/runtime-paths.ts`: shared runtime env and path contracts between the CLI and shell layers
 
 Workflow presets in `ralph.config.yml`:
 
@@ -190,9 +192,9 @@ The shell runtime then:
 
 ### Epic execution
 
-Each epic is executed through a team-lead prompt assembled in `ralph.sh`.
+Each epic is executed through the runtime Team Lead prompt template in `prompts/team-lead-runtime.md`, rendered by `ralph.sh` with the current epic, worktree, and workflow settings.
 
-Because that prompt is assembled inside a double-quoted Bash string, any literal backticks in shell-authored sections must be escaped or avoided. Raw Markdown code spans in that block will execute as command substitution and corrupt the run.
+That runtime prompt includes the shared operational addon from `prompts/team-lead-policy.md`, so the execution contract is centralized even though the final prompt is rendered at runtime.
 
 The team lead is instructed to:
 
@@ -228,8 +230,9 @@ Contains:
 - epics and dependencies
 - epic `status` (derived from story states)
 - epic `planned` flag
+- projected story `passes` and `failureReason` fields
 
-The scheduler reads dependencies and completion state directly from this file on each wave. Story-level `passes` is stored in epic state files, not in the PRD itself.
+The scheduler reads dependencies and completion state directly from this file on each wave. During execution, per-epic state files are the immediate write target; Ralph then projects that story state back into the PRD so resume, summary, and final validation operate on current repository state.
 
 ### Epic State Files (`.ralph-teams/state/{epic-id}.json`)
 
@@ -280,7 +283,7 @@ Contains enough state to restart the run consistently:
 - active epics
 - current wave
 - loop/source branch info
-- story pass snapshot (from epic state files)
+- story pass snapshot (from the current PRD after active epic state has been projected)
 
 `src/commands/resume.ts` reloads this file and simply restarts `ralph.sh` with the saved backend/parallel settings.
 
@@ -394,9 +397,9 @@ Scoped roles:
 - Validation: `story-validator`, `epic-validator`, `final-validator`
 - Integration: `merger`
 
-For Codex specifically, `.codex/agents/` defines the spawned teammate roles. The Codex Team Lead policy itself is injected by `ralph.sh` at runtime rather than coming from a separate `.codex/agents/team-lead.toml` file.
+For Codex specifically, `.codex/agents/` defines the spawned teammate roles. Codex does not use a separate repo-local Team Lead role file; instead, `ralph.sh` renders `prompts/team-lead-runtime.md` and injects the shared Team Lead policy into that runtime prompt.
 
-For Claude, Copilot, and opencode, the Team Lead contract lives in `.claude/agents/team-lead.md`, `.github/agents/team-lead.agent.md`, and `.opencode/agents/team-lead.md`. All backends now share the same coordination rule: planning and validation are scope-specific and configurable, while Builder attempts remain one-shot and are never reused as persistent teammates.
+For Claude, Copilot, and opencode, the Team Lead wrappers live in `.claude/agents/team-lead.md`, `.github/agents/team-lead.agent.md`, and `.opencode/agents/team-lead.md`, but the shared runtime contract now lives in `prompts/team-lead-runtime.md` plus `prompts/team-lead-policy.md`. All backends share the same coordination rule: planning and validation are scope-specific and configurable, while Builder attempts remain one-shot and are never reused as persistent teammates.
 
 The worker-role instruction bodies are canonicalized in `prompts/agents/*.md` and rendered into the backend-specific agent files via `npm run sync:agents`. The backend directories remain the runtime contract, but contributors should edit the canonical prompts and regenerate the rendered files instead of hand-editing every backend copy.
 
