@@ -682,9 +682,15 @@ ensure_loop_branch_ready() {
 
 ensure_loop_branch_ready
 
+epic_branch_name() {
+  local epic_id="$1"
+  echo "ralph/epic/${LOOP_BRANCH#ralph/}/${epic_id}"
+}
+
 find_pending_epic_loop_history_conflict() {
   local epic_id="$1"
-  local epic_branch="ralph/${epic_id}"
+  local epic_branch
+  epic_branch=$(epic_branch_name "$epic_id")
 
   if git show-ref --verify --quiet "refs/heads/${epic_branch}" && git merge-base --is-ancestor "$epic_branch" "$LOOP_BRANCH" >/dev/null 2>&1; then
     echo "pending epic branch '${epic_branch}' is already an ancestor of loop branch '${LOOP_BRANCH}'"
@@ -731,13 +737,15 @@ fail_on_pending_epic_git_state_mismatch() {
 fail_on_pending_epic_git_state_mismatch
 
 # --- Worktree Management ---
-# Creates a git worktree at .worktrees/<epic_id> on branch ralph/<epic_id>,
+# Creates a git worktree at .worktrees/<epic_id> on a run-scoped branch under
+# the current loop branch name, rooted from the loop branch for this run.
 # rooted from the loop branch for this run.
 # If the worktree already exists and is valid (e.g. from an interrupted run),
 # it is reused as-is. Otherwise, any stale entries are cleaned up first.
 create_epic_worktree() {
   local epic_id="$1"
-  local branch_name="ralph/${epic_id}"
+  local branch_name
+  branch_name=$(epic_branch_name "$epic_id")
   local worktree_path="${RALPH_RUNTIME_DIRNAME}/.worktrees/${epic_id}"
   local add_output
   local retry_output
@@ -1443,12 +1451,15 @@ read_epic_merge_result_field() {
 
 delete_epic_branch() {
   local epic_id="$1"
-  git branch -d "ralph/${epic_id}" 2>/dev/null || true
+  local branch_name
+  branch_name=$(epic_branch_name "$epic_id")
+  git branch -d "$branch_name" 2>/dev/null || true
 }
 
 verify_epic_branch_merged() {
   local epic_id="$1"
-  local branch_name="ralph/${epic_id}"
+  local branch_name
+  branch_name=$(epic_branch_name "$epic_id")
 
   git show-ref --verify --quiet "refs/heads/${branch_name}" || return 1
   git show-ref --verify --quiet "refs/heads/${LOOP_BRANCH}" || return 1
@@ -1540,7 +1551,8 @@ spawn_epic_bg() {
   WORKTREE_PATH=$(create_epic_worktree "$EPIC_ID")
   local WORKTREE_ABS_PATH
   WORKTREE_ABS_PATH="$(cd "${ROOT_DIR}/${WORKTREE_PATH}" && pwd)"
-  local EPIC_BRANCH="ralph/${EPIC_ID}"
+  local EPIC_BRANCH
+  EPIC_BRANCH=$(epic_branch_name "$EPIC_ID")
   ensure_worktree_runtime_link "$WORKTREE_ABS_PATH"
   local WORKTREE_PRD_PATH="${WORKTREE_ABS_PATH}/${PRD_REL_PATH}"
   local WORKTREE_STATE_FILE="${WORKTREE_ABS_PATH}/${RALPH_RUNTIME_DIRNAME}/state/${EPIC_ID}.json"
@@ -1609,7 +1621,8 @@ merge_wave() {
   fi
 
   for epic_id in "${completed_epic_ids[@]}"; do
-    local branch_name="ralph/${epic_id}"
+    local branch_name
+    branch_name=$(epic_branch_name "$epic_id")
 
     # Check if branch exists
     if ! git show-ref --verify --quiet "refs/heads/${branch_name}"; then
@@ -1779,7 +1792,8 @@ collect_pending_merge_epics() {
     epic_id=$(rjq read "$PRD_FILE" ".epics[$epic_index].id")
     [ -n "$epic_id" ] || continue
 
-    local branch_name="ralph/${epic_id}"
+    local branch_name
+    branch_name=$(epic_branch_name "$epic_id")
     if git show-ref --verify --quiet "refs/heads/${branch_name}"; then
       pending_merge_ids+=("$epic_id")
     fi
@@ -1804,7 +1818,9 @@ recover_pending_merges() {
   echo "  --- Recovering completed epic branches before ${context} ---"
   local epic_id
   for epic_id in "${pending_merge_ids[@]}"; do
-    echo "  [$epic_id] Recovered pending merge from existing epic branch"
+    local branch_name
+    branch_name=$(epic_branch_name "$epic_id")
+    echo "  [$epic_id] Recovered pending merge from existing epic branch (${branch_name})"
     echo "[$epic_id] RECOVERED PENDING MERGE (${context}) — $(date)" >> "$PROGRESS_FILE"
   done
 
