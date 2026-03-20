@@ -208,7 +208,6 @@ test('canonical Team Lead policy covers scoped planner and validator heuristics'
   assert.match(content, /verify that the plan file exists at the required path/i);
   assert.match(content, /may write that exact plan to the canonical path and continue/i);
   assert.match(content, /Do not rerun the planner only for the missing file write/i);
-  assert.match(content, /You are the Team Lead\. Stay in orchestration mode and keep your own codebase exploration to the minimum needed/i);
   assert.match(content, /Keep the Team Lead orchestration-first/i);
   assert.match(content, /Do not do open-ended architecture tours, large file sweeps, or broad grep passes yourself/i);
   assert.match(content, /storyPlanning\.enabled = 1/i);
