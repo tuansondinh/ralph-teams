@@ -845,9 +845,6 @@ if [ "${PRD_ABS_PATH#"$ROOT_DIR"/}" != "$PRD_ABS_PATH" ]; then
 else
   PRD_REL_PATH="$(basename "$PRD_FILE")"
 fi
-
-# Update PRD_FILE so local json-tool commands read/write the correct copy
-PRD_FILE="$PRD_ABS_PATH"
 OPENCODE_AGENT_DIR="${SCRIPT_DIR}/agent"
 CODEX_AGENT_DIR="${SCRIPT_DIR}/.codex/agents"
 CODEX_AGENT_RUNTIME_DIR=""
@@ -1755,19 +1752,13 @@ run_backend_agent_session() {
 
   case "$BACKEND" in
     claude)
-      (
-        cd "$workdir" || exit 1
-        echo "$prompt" | $AGENT_CMD --agent "$agent_name" --model "$model" --dangerously-skip-permissions --print --verbose --output-format stream-json > "$log_file" 2>&1 || true
-      )
+      echo "$prompt" | $AGENT_CMD --agent "$agent_name" --model "$model" --dangerously-skip-permissions --print --verbose --output-format stream-json > "$log_file" 2>&1 || true
       ;;
     copilot)
-      (
-        cd "$workdir" || exit 1
-        COPILOT_ROLE_PROMPT="$prompt" \
-          script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent "$0" --allow-all --no-ask-user --stream on -p "$1"' \
-          "$agent_name" "$COPILOT_ROLE_PROMPT" \
-          > "$log_file" 2>&1 || true
-      )
+      COPILOT_ROLE_PROMPT="$prompt" \
+        script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent "$0" --allow-all --no-ask-user --stream on -p "$1"' \
+        "$agent_name" "$COPILOT_ROLE_PROMPT" \
+        > "$log_file" 2>&1 || true
       ;;
     opencode)
       run_opencode_exec "$workdir" "$prompt" "$agent_name" "$model" > "$log_file" 2>&1 || true

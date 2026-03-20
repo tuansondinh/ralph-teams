@@ -1,0 +1,24 @@
+--- ralph.sh
++++ ralph.sh
+@@ -1753,13 +1753,15 @@
+ 
+   case "$BACKEND" in
+     claude)
+-      echo "$prompt" | $AGENT_CMD --agent "$agent_name" --model "$model" --dangerously-skip-permissions --print --verbose --output-format stream-json > "$log_file" 2>&1 || true
++      (
++        cd "$workdir" || exit 1
++        echo "$prompt" | $AGENT_CMD --agent "$agent_name" --model "$model" --dangerously-skip-permissions --print --verbose --output-format stream-json > "$log_file" 2>&1 || true
++      )
+       ;;
+     copilot)
+-      COPILOT_ROLE_PROMPT="$prompt" \
+-        script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent "$0" --allow-all --no-ask-user --stream on -p "$1"' \
+-        "$agent_name" "$COPILOT_ROLE_PROMPT" \
+-        > "$log_file" 2>&1 || true
++      (
++        cd "$workdir" || exit 1
++        COPILOT_ROLE_PROMPT="$prompt" script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent "$0" --allow-all --no-ask-user --stream on -p "$1"' "$agent_name" "$COPILOT_ROLE_PROMPT" > "$log_file" 2>&1 || true
++      )
+       ;;
+     opencode)
+       run_opencode_exec "$workdir" "$prompt" "$agent_name" "$model" > "$log_file" 2>&1 || true

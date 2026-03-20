@@ -641,24 +641,37 @@ mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$STATE_DIR" "$WORKTREES_
 ensure_loop_branch_ready() {
   local checkout_output=""
 
-  if ! git show-ref --verify --quiet "refs/heads/${LOOP_BRANCH}"; then
+  if [ "$CURRENT_BRANCH" != "$LOOP_BRANCH" ]; then
     if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
       prompt_to_commit_dirty_worktree "$LOOP_BRANCH"
     fi
-    echo "Creating loop branch: $LOOP_BRANCH (from $CURRENT_BRANCH)"
-    if ! checkout_output=$(git branch "$LOOP_BRANCH" HEAD 2>&1 >/dev/null); then
-      echo "Error: failed to create loop branch '$LOOP_BRANCH' from '$CURRENT_BRANCH'." >&2
-      [ -n "$checkout_output" ] && echo "$checkout_output" >&2
-      exit 1
+
+    if git show-ref --verify --quiet "refs/heads/${LOOP_BRANCH}"; then
+      echo "Switching to loop branch: $LOOP_BRANCH"
+      if ! checkout_output=$(git checkout "$LOOP_BRANCH" 2>&1 >/dev/null); then
+        echo "Error: failed to switch to loop branch '$LOOP_BRANCH'." >&2
+        [ -n "$checkout_output" ] && echo "$checkout_output" >&2
+        exit 1
+      fi
+    else
+      echo "Creating loop branch: $LOOP_BRANCH (from $CURRENT_BRANCH)"
+      if ! checkout_output=$(git checkout -b "$LOOP_BRANCH" 2>&1 >/dev/null); then
+        echo "Error: failed to create loop branch '$LOOP_BRANCH' from '$CURRENT_BRANCH'." >&2
+        [ -n "$checkout_output" ] && echo "$checkout_output" >&2
+        exit 1
+      fi
     fi
   fi
 
-  if [ ! -d "$LOOP_WORKTREE_DIR" ]; then
-    cleanup_epic_worktree_artifacts "$LOOP_WORKTREE_DIR" "$LOOP_BRANCH"
-    if ! git worktree add "$LOOP_WORKTREE_DIR" "$LOOP_BRANCH" 2>&1 >/dev/null; then
-      echo "Error: failed to create loop worktree at '$LOOP_WORKTREE_DIR'." >&2
-      exit 1
-    fi
+  if ! git show-ref --verify --quiet "refs/heads/${LOOP_BRANCH}"; then
+    echo "Error: loop branch '$LOOP_BRANCH' does not exist locally after setup." >&2
+    exit 1
+  fi
+
+  CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+  if [ "$CURRENT_BRANCH" != "$LOOP_BRANCH" ]; then
+    echo "Error: expected current branch '$LOOP_BRANCH' after setup, got '${CURRENT_BRANCH:-<none>}'." >&2
+    exit 1
   fi
 }
 
@@ -845,9 +858,6 @@ if [ "${PRD_ABS_PATH#"$ROOT_DIR"/}" != "$PRD_ABS_PATH" ]; then
 else
   PRD_REL_PATH="$(basename "$PRD_FILE")"
 fi
-
-# Update PRD_FILE so local json-tool commands read/write the correct copy
-PRD_FILE="$PRD_ABS_PATH"
 OPENCODE_AGENT_DIR="${SCRIPT_DIR}/agent"
 CODEX_AGENT_DIR="${SCRIPT_DIR}/.codex/agents"
 CODEX_AGENT_RUNTIME_DIR=""
@@ -1533,8 +1543,10 @@ merge_wave() {
 
   local merge_failures=0
   local target_branch="$LOOP_BRANCH"
-  local original_dir="$(pwd)"
-  cd "$LOOP_WORKTREE_DIR" || exit 1
+
+  if [ "$(git branch --show-current 2>/dev/null || echo "")" != "$target_branch" ]; then
+    git checkout "$target_branch" >/dev/null 2>&1
+  fi
 
   for epic_id in "${completed_epic_ids[@]}"; do
     local branch_name="ralph/${epic_id}"
@@ -1646,10 +1658,10 @@ Begin resolving."
             > "$merge_log" 2>&1 || true
           ;;
         codex)
-          MODEL_TEAM_LEAD="$MODEL_MERGER" run_codex_exec "$LOOP_WORKTREE_DIR" "$merge_prompt" > "$merge_log" 2>&1 || true
+          MODEL_TEAM_LEAD="$MODEL_MERGER" run_codex_exec "$ROOT_DIR" "$merge_prompt" > "$merge_log" 2>&1 || true
           ;;
         opencode)
-          run_opencode_exec "$LOOP_WORKTREE_DIR" "$merge_prompt" merger "$MODEL_MERGER" > "$merge_log" 2>&1 || true
+          run_opencode_exec "$ROOT_DIR" "$merge_prompt" merger "$MODEL_MERGER" > "$merge_log" 2>&1 || true
           ;;
       esac
 
@@ -1686,7 +1698,6 @@ Begin resolving."
     git branch -d "${branch_name}" 2>/dev/null || true
   done
 
-  cd "$original_dir" || true
   return $merge_failures
 }
 
@@ -1755,19 +1766,13 @@ run_backend_agent_session() {
 
   case "$BACKEND" in
     claude)
-      (
-        cd "$workdir" || exit 1
-        echo "$prompt" | $AGENT_CMD --agent "$agent_name" --model "$model" --dangerously-skip-permissions --print --verbose --output-format stream-json > "$log_file" 2>&1 || true
-      )
+      echo "$prompt" | $AGENT_CMD --agent "$agent_name" --model "$model" --dangerously-skip-permissions --print --verbose --output-format stream-json > "$log_file" 2>&1 || true
       ;;
     copilot)
-      (
-        cd "$workdir" || exit 1
-        COPILOT_ROLE_PROMPT="$prompt" \
-          script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent "$0" --allow-all --no-ask-user --stream on -p "$1"' \
-          "$agent_name" "$COPILOT_ROLE_PROMPT" \
-          > "$log_file" 2>&1 || true
-      )
+      COPILOT_ROLE_PROMPT="$prompt" \
+        script -q /dev/null /bin/sh -lc 'exec gh copilot -- --agent "$0" --allow-all --no-ask-user --stream on -p "$1"' \
+        "$agent_name" "$COPILOT_ROLE_PROMPT" \
+        > "$log_file" 2>&1 || true
       ;;
     opencode)
       run_opencode_exec "$workdir" "$prompt" "$agent_name" "$model" > "$log_file" 2>&1 || true
@@ -1862,7 +1867,7 @@ $validation_result_file
 
   rm -f "$validation_result_file"
   echo "  Spawning final validator..."
-  run_backend_agent_session "$LOOP_WORKTREE_DIR" final-validator "$MODEL_FINAL_VALIDATOR" "$validation_prompt" "$validation_log"
+  run_backend_agent_session "$ROOT_DIR" final-validator "$MODEL_FINAL_VALIDATOR" "$validation_prompt" "$validation_log"
 
   validation_verdict="$(read_final_validation_verdict "$validation_result_file" || true)"
 
