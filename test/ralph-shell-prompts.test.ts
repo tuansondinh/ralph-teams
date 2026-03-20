@@ -191,9 +191,15 @@ test('ralph.sh loads the canonical Team Lead policy for runtime prompts', () => 
   assert.match(script, /TEAM_LEAD_POLICY="\$\(cat \"\$TEAM_LEAD_POLICY_FILE\"\)"/);
   assert.match(script, /TEAM_PROMPT="\$\(render_team_lead_prompt\)"/);
   assert.match(script, /TEAM_LEAD_TEMPLATE_PATH="\$TEAM_LEAD_PROMPT_FILE"/);
+  assert.match(script, /TEAM_LEAD_TEMPLATE_SOURCE_ROOT_DIR="\$SOURCE_ROOT_DIR"/);
   assert.match(runtimePrompt, /## Canonical Team Lead Policy/);
   assert.match(runtimePrompt, /## Project Setup Strategy/);
   assert.match(runtimePrompt, /Ralph does not preinstall dependencies or preselect build\/test commands/);
+  assert.match(runtimePrompt, /## Source Checkout/);
+  assert.match(runtimePrompt, /Source checkout path: \{\{SOURCE_ROOT_DIR\}\}/);
+  assert.match(runtimePrompt, /establish the epic worktree environment once for this epic/i);
+  assert.match(runtimePrompt, /first check whether the source checkout already has reusable artifacts/i);
+  assert.match(runtimePrompt, /pass those exact commands to every Builder/i);
   assert.match(runtimePrompt, /Check repo instructions first: 'AGENTS\.md', 'README\*'/);
   assert.doesNotMatch(runtimePrompt, /Check repo instructions first: `AGENTS\.md`, `README\*`/);
   assert.match(runtimePrompt, /\{\{PROJECT\}\}/);
@@ -223,6 +229,10 @@ test('canonical Team Lead policy covers scoped planner and validator heuristics'
   assert.match(content, /Do not rerun the planner only for the missing file write/i);
   assert.match(content, /Keep the Team Lead orchestration-first/i);
   assert.match(content, /Do not do open-ended architecture tours, large file sweeps, or broad grep passes yourself/i);
+  assert.match(content, /prepare the epic worktree environment once/i);
+  assert.match(content, /source checkout path provided in the runtime prompt/i);
+  assert.match(content, /pass the exact commands and any required environment-prep steps to every Builder/i);
+  assert.match(content, /Before delegating the first story, ensure the epic worktree environment is actually runnable/i);
   assert.match(content, /storyPlanning\.enabled = 1/i);
   assert.match(content, /storyValidation\.enabled = 1/i);
   assert.match(content, /epicValidation\.enabled = 1/i);
@@ -338,6 +348,7 @@ test('team lead runtime prompt keeps the lead in orchestration mode', () => {
   assert.match(runtimePrompt, /Keep your own repo exploration minimal and delegate the actual work/i);
   assert.match(runtimePrompt, /## Merge Responsibility/);
   assert.match(runtimePrompt, /this same Team Lead session owns the merge attempt before exiting/i);
+  assert.match(runtimePrompt, /Do NOT modify the source checkout during normal implementation/i);
 });
 
 test('team lead policy requires in-session merge ownership with a scripted artifact handoff', () => {
@@ -346,6 +357,14 @@ test('team lead policy requires in-session merge ownership with a scripted artif
   assert.match(policy, /## Merge Completion/);
   assert.match(policy, /same Team Lead session must attempt the merge before exiting/i);
   assert.match(policy, /merge-result artifact/i);
+});
+
+test('builder prompt follows Team Lead setup instructions before re-discovering commands', () => {
+  const content = fs.readFileSync(`${repoRoot}/prompts/agents/builder.md`, 'utf-8');
+
+  assert.match(content, /If the Team Lead already provided bootstrap, build, or test commands, follow those exact commands first/i);
+  assert.match(content, /do not rediscover them unless they fail/i);
+  assert.match(content, /If the Team Lead gives exact bootstrap, build, or test commands, use them instead of re-probing the repository with generic commands/i);
 });
 
 test('codex shell launches add the Ralph package directory alongside the project workspace', () => {

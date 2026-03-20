@@ -210,7 +210,7 @@ The team lead is instructed to:
 - spawn a fresh Builder for each story attempt
 - spawn a fresh Validator only when independent verification is needed, and only for that single story attempt
 - require a concrete Builder commit SHA before a build attempt can advance to verification
-- infer repo-specific setup, build, and test commands from project docs, task runners, and manifests instead of relying on centralized runtime bootstrap logic
+- infer repo-specific setup, build, and test commands from project docs, task runners, and manifests, prepare the epic worktree environment once, and then hand exact commands to Builders instead of relying on centralized runtime bootstrap logic
 - update the epic state file after each attempted story
 - attempt the merge in the same epic session
 - write the merge-result artifact to `.ralph-teams/state/merge-{epic-id}.json`

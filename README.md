@@ -555,7 +555,7 @@ The current execution contract is:
 - experimental wave parallelism is enabled only with `--parallel <n>`
 - at run start Ralph auto-commits any dirty source-worktree changes, then creates a fresh loop branch and checks it out in `.ralph-teams/.worktrees/loop`
 - each epic gets its own worktree and a run-scoped branch rooted from that loop branch, using `ralph/epic/<loop-run>/<epic-id>`
-- before the Team Lead starts, Ralph creates the worktree and hands repo inspection, setup, build, and test command inference to the agents
+- before the Team Lead starts, Ralph creates the worktree and expects the Team Lead to establish that epic worktree's setup once, then hand the exact bootstrap, build, and test commands to Builders
 - agents are expected to prefer repo-defined scripts and docs over generic ecosystem defaults when choosing setup and verification commands
 - the shell-built Team Lead prompt must keep literal filenames shell-safe; do not add raw Markdown backticks inside that Bash string because Bash will treat them as command substitution
 - when an epic completes successfully, the Team Lead is expected to merge its epic branch back into the loop branch and write the merge-result artifact

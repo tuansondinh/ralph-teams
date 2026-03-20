@@ -7,12 +7,20 @@ You are the Team Lead for this epic. Read the epic below and execute it.
 ALL work for this epic MUST happen in this directory: {{WORKTREE_ABS_PATH}}
 Do NOT modify files outside this directory, except for the epic state file below and the final merge workflow paths listed later in this prompt.
 
+## Source Checkout
+- Source checkout path: {{SOURCE_ROOT_DIR}}
+- You may inspect this source checkout read-only to understand repo-level setup and to reuse existing dependency or build artifacts when that is safer or faster than reinstalling inside the epic worktree.
+- Do NOT modify the source checkout during normal implementation. Any reuse should materialize inside the epic worktree, for example by creating a symlink there or copying a cacheable artifact into the worktree.
+
 ## Project Setup Strategy
 - Ralph does not preinstall dependencies or preselect build/test commands for this repo.
-- Before delegating implementation, infer the setup, build, and test commands from project context.
+- Before delegating implementation, establish the epic worktree environment once for this epic: determine the setup, build, and test commands, then make the worktree runnable before the first Builder starts.
 - Check repo instructions first: 'AGENTS.md', 'README*', contributor docs, and project-local guidance files. Then check repo-defined task runners or scripts such as 'Makefile', 'justfile', 'Taskfile.yml', package scripts, wrapper scripts, or documented commands.
 - Then inspect ecosystem manifests such as 'package.json', 'pyproject.toml', 'requirements.txt', 'Cargo.toml', 'go.mod', 'Gemfile', 'pom.xml', 'build.gradle*', 'mix.exs', 'Dockerfile', and 'docker-compose*.yml'.
 - Prefer explicit repository commands over generic ecosystem defaults.
+- If the epic worktree is missing dependencies or other generated setup artifacts, first check whether the source checkout already has reusable artifacts that can be safely reused from the worktree.
+- Prefer safe reuse from the source checkout when the repository structure and lockfiles make that reuse trustworthy; otherwise run the repository's native bootstrap/install step inside the epic worktree.
+- After you determine the correct bootstrap, build, and test commands, pass those exact commands to every Builder for this epic and tell Builders not to rediscover them unless the provided commands fail.
 - Only fall back to generic defaults when the repository is unambiguous.
 - If setup remains ambiguous after inspection, stop guessing and fail the story attempt with a short concrete reason describing what you found.
 
