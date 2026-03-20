@@ -149,6 +149,9 @@ test('scoped validator prompt assets cover story, epic, and final validation', (
       assert.match(content, /"final-validation"|phase.*final-validation|verdict.*pass.*fail/i);
       assert.match(content, /captures stdout into its own raw validation log|Never overwrite, truncate, or rewrite/i);
       assert.match(content, /Allowed final-fix retries|spawn the Builder directly|you may spawn the Builder directly/i);
+      assert.match(content, /merge-failed.*epics/i);
+      assert.match(content, /attempt a clean merge retry/i);
+      assert.match(content, /do not hand merge-conflict resolution to a fresh Team Lead session/i);
       assert.doesNotMatch(content, /log_file.*final validation log path provided by the caller/i);
     }
     assert.match(content, /NEVER fix code|do not implement fixes|Never edit code yourself/i);
