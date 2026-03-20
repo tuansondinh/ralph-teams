@@ -2,4 +2,13 @@ function multiply(a, b) {
   return a * b;
 }
 
-module.exports = { multiply };
+function capitalize(str) {
+  if (str.length === 0) return '';
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
+
+function add(a, b) {
+  return a + b;
+}
+
+module.exports = { multiply, capitalize, add };
