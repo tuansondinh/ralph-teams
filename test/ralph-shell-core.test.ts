@@ -16,6 +16,10 @@ import {
   createTestEnv,
 } from './helpers/ralph-shell-helpers.js';
 
+function epicBranch(loopBranch: string, epicId: string) {
+  return `ralph/epic/${loopBranch.replace(/^ralph\//, '')}/${epicId}`;
+}
+
 test('ralph.sh auto-commits dirty changes without prompting before switching branches', () => {
   const { tempDir, binDir } = setupTempRepo();
   const result = spawnSync(BASH, [scriptPath, 'prd.json'], {
@@ -540,22 +544,24 @@ test('US-002: a transient worktree creation failure is retried automatically', (
 
 test('US-002: Ralph fails fast when a pending epic was already merged into the reused loop branch', () => {
   const { tempDir, env } = setupMultiEpicRepo([{ id: 'EPIC-001', title: 'Alpha' }], { 'EPIC-001': 'PASS' });
+  const loopBranch = 'ralph/loop/20260320-163740';
+  const staleEpicBranch = epicBranch(loopBranch, 'EPIC-001');
 
-  execFileSync('git', ['checkout', '-b', 'ralph/loop/20260320-163740'], { cwd: tempDir });
-  execFileSync('git', ['checkout', '-b', 'ralph/EPIC-001'], { cwd: tempDir });
+  execFileSync('git', ['checkout', '-b', loopBranch], { cwd: tempDir });
+  execFileSync('git', ['checkout', '-b', staleEpicBranch], { cwd: tempDir });
   fs.writeFileSync(path.join(tempDir, 'README.md'), 'epic merged already\n');
   execFileSync('git', ['add', 'README.md'], { cwd: tempDir });
   execFileSync('git', ['commit', '-m', 'feat: stale merged epic'], { cwd: tempDir });
-  execFileSync('git', ['checkout', 'ralph/loop/20260320-163740'], { cwd: tempDir });
-  execFileSync('git', ['merge', '--no-ff', 'ralph/EPIC-001', '-m', "Merge branch 'ralph/EPIC-001' into ralph/loop/20260320-163740"], { cwd: tempDir });
-  execFileSync('git', ['branch', '-D', 'ralph/EPIC-001'], { cwd: tempDir });
+  execFileSync('git', ['checkout', loopBranch], { cwd: tempDir });
+  execFileSync('git', ['merge', '--no-ff', staleEpicBranch, '-m', "Merge branch 'ralph/epic/loop/20260320-163740/EPIC-001' into ralph/loop/20260320-163740"], { cwd: tempDir });
+  execFileSync('git', ['branch', '-D', staleEpicBranch], { cwd: tempDir });
 
   const result = runRalph(tempDir, env);
   const combined = `${result.stdout}\n${result.stderr}`;
 
   assert.equal(result.status, 1, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
   assert.match(combined, /Error: pending epics in 'prd\.json' conflict with the current loop branch state\./);
-  assert.match(combined, /\[EPIC-001\] loop branch 'ralph\/loop\/20260320-163740' already contains prior merge history for 'ralph\/EPIC-001'/);
+  assert.match(combined, /\[EPIC-001\] loop branch 'ralph\/loop\/20260320-163740' already contains prior merge history for 'ralph\/epic\/loop\/20260320-163740\/EPIC-001'/);
   assert.match(combined, /Mark the already-merged epic\(s\) completed in 'prd\.json'/);
 });
 

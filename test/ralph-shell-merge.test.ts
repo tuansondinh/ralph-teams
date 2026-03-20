@@ -14,6 +14,10 @@ import {
   setupMultiEpicRepo,
 } from './helpers/ralph-shell-helpers.js';
 
+function epicBranch(loopBranch: string, epicId: string) {
+  return `ralph/epic/${loopBranch.replace(/^ralph\//, '')}/${epicId}`;
+}
+
 test('US-004: merge is attempted after wave completes — progress.txt contains merge entry', () => {
   const { tempDir, env } = setupMergeRepo([{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }]);
   const result = runRalph(tempDir, env);
@@ -250,13 +254,15 @@ test('US-004: resume recovers completed-but-unmerged epic branches before finish
 
   const runtimeDir = path.join(tempDir, '.ralph-teams');
   fs.mkdirSync(runtimeDir, { recursive: true });
+  const loopBranch = 'ralph/loop/test-resume';
+  const recoveredEpicBranch = epicBranch(loopBranch, 'EPIC-001');
 
-  execFileSync('git', ['checkout', '-b', 'ralph/loop/test-resume'], { cwd: tempDir });
-  execFileSync('git', ['checkout', '-b', 'ralph/EPIC-001'], { cwd: tempDir });
+  execFileSync('git', ['checkout', '-b', loopBranch], { cwd: tempDir });
+  execFileSync('git', ['checkout', '-b', recoveredEpicBranch], { cwd: tempDir });
   fs.writeFileSync(path.join(tempDir, 'alpha.txt'), 'content for EPIC-001\n');
   execFileSync('git', ['add', 'alpha.txt'], { cwd: tempDir });
   execFileSync('git', ['commit', '-m', 'feat: add alpha.txt for EPIC-001'], { cwd: tempDir });
-  execFileSync('git', ['checkout', 'ralph/loop/test-resume'], { cwd: tempDir });
+  execFileSync('git', ['checkout', loopBranch], { cwd: tempDir });
 
   const prdPath = path.join(tempDir, 'prd.json');
   const prd = JSON.parse(fs.readFileSync(prdPath, 'utf-8'));
@@ -271,7 +277,7 @@ test('US-004: resume recovers completed-but-unmerged epic branches before finish
     version: 1,
     prdFile: prdPath,
     sourceBranch: 'main',
-    loopBranch: 'ralph/loop/test-resume',
+    loopBranch,
     currentWave: 1,
     activeEpics: [],
     backend: 'claude',
@@ -295,7 +301,7 @@ test('US-004: resume recovers completed-but-unmerged epic branches before finish
   });
 
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
-  assert.match(result.stdout, /Recovered pending merge from existing epic branch/);
+  assert.match(result.stdout, /Recovered pending merge from existing epic branch \(ralph\/epic\/loop\/test-resume\/EPIC-001\)/);
   assert.match(result.stdout, /\[EPIC-001\] Merge successful \(clean\)/);
   assert.match(result.stdout, /\[EPIC-002\] Merge successful \(team lead, clean\)/);
 
@@ -305,8 +311,8 @@ test('US-004: resume recovers completed-but-unmerged epic branches before finish
   assert.match(progress, /\[EPIC-002\] MERGED \(team lead clean\)/);
 
   const branches = execFileSync('git', ['branch'], { cwd: tempDir, encoding: 'utf-8' });
-  assert.doesNotMatch(branches, /ralph\/EPIC-001/);
-  assert.doesNotMatch(branches, /ralph\/EPIC-002/);
+  assert.doesNotMatch(branches, /ralph\/epic\/loop\/test-resume\/EPIC-001/);
+  assert.doesNotMatch(branches, /ralph\/epic\/loop\/test-resume\/EPIC-002/);
 
   const finalPrd = JSON.parse(fs.readFileSync(prdPath, 'utf-8'));
   assert.equal(finalPrd.epics[0].status, 'completed');
@@ -325,13 +331,15 @@ test('US-005: recovered pending merges still use the shell takeover path when co
   const { tempDir, env } = setupConflictRepo({ resolveWithTeamLead: true });
   const runtimeDir = path.join(tempDir, '.ralph-teams');
   fs.mkdirSync(runtimeDir, { recursive: true });
+  const loopBranch = 'ralph/loop/test-resume-conflict';
+  const recoveredEpicBranch = epicBranch(loopBranch, 'EPIC-001');
 
-  execFileSync('git', ['checkout', '-b', 'ralph/loop/test-resume-conflict'], { cwd: tempDir });
-  execFileSync('git', ['checkout', '-b', 'ralph/EPIC-001'], { cwd: tempDir });
+  execFileSync('git', ['checkout', '-b', loopBranch], { cwd: tempDir });
+  execFileSync('git', ['checkout', '-b', recoveredEpicBranch], { cwd: tempDir });
   fs.writeFileSync(path.join(tempDir, 'README.md'), 'epic version\n');
   execFileSync('git', ['add', 'README.md'], { cwd: tempDir });
   execFileSync('git', ['commit', '-m', 'feat: epic change to README'], { cwd: tempDir });
-  execFileSync('git', ['checkout', 'ralph/loop/test-resume-conflict'], { cwd: tempDir });
+  execFileSync('git', ['checkout', loopBranch], { cwd: tempDir });
   fs.writeFileSync(path.join(tempDir, 'README.md'), 'main version\n');
   execFileSync('git', ['add', 'README.md'], { cwd: tempDir });
   execFileSync('git', ['commit', '-m', 'chore: main change to README'], { cwd: tempDir });
@@ -349,7 +357,7 @@ test('US-005: recovered pending merges still use the shell takeover path when co
     version: 1,
     prdFile: prdPath,
     sourceBranch: 'main',
-    loopBranch: 'ralph/loop/test-resume-conflict',
+    loopBranch,
     currentWave: 1,
     activeEpics: [],
     backend: 'claude',
