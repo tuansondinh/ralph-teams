@@ -208,6 +208,7 @@ test('canonical Team Lead policy covers scoped planner and validator heuristics'
   assert.match(content, /verify that the plan file exists at the required path/i);
   assert.match(content, /may write that exact plan to the canonical path and continue/i);
   assert.match(content, /Do not rerun the planner only for the missing file write/i);
+  assert.match(content, /You are the Team Lead\. Stay in orchestration mode and keep your own codebase exploration to the minimum needed/i);
   assert.match(content, /Keep the Team Lead orchestration-first/i);
   assert.match(content, /Do not do open-ended architecture tours, large file sweeps, or broad grep passes yourself/i);
   assert.match(content, /storyPlanning\.enabled = 1/i);
@@ -316,6 +317,13 @@ test('ralph.sh prepares codex teammate variants so the team lead can choose per-
   assert.match(script, /agents\.epic_validator_easy\.config_file/);
   assert.match(script, /agents\.final_validator_easy\.config_file/);
   assert.match(runtimePrompt, /If your runtime is Codex, use these exact named teammate roles when spawning/);
+});
+
+test('team lead runtime prompt keeps the lead in orchestration mode', () => {
+  const runtimePrompt = fs.readFileSync(`${repoRoot}/prompts/team-lead-runtime.md`, 'utf-8');
+
+  assert.match(runtimePrompt, /You are the Team Lead for execution, not the primary implementer or explorer/i);
+  assert.match(runtimePrompt, /Keep your own repo exploration minimal and delegate the actual work/i);
 });
 
 test('codex shell launches add the Ralph package directory alongside the project workspace', () => {

@@ -42,6 +42,8 @@ Only these stories should be planned or worked in this run. Stories omitted here
 ## Canonical Team Lead Policy
 {{TEAM_LEAD_POLICY}}
 
+You are the Team Lead for execution, not the primary implementer or explorer. Keep your own repo exploration minimal and delegate the actual work.
+
 ## Workflow Configuration
 - storyPlanning.enabled = {{STORY_PLANNING_ENABLED}}, storyValidation.enabled = {{STORY_VALIDATION_ENABLED}}, storyValidation.maxFixCycles = {{STORY_VALIDATION_MAX_FIX_CYCLES}}
 - epicPlanning.enabled = {{EPIC_PLANNING_ENABLED}}, epicValidation.enabled = {{EPIC_VALIDATION_ENABLED}}, epicValidation.maxFixCycles = {{EPIC_VALIDATION_MAX_FIX_CYCLES}}
