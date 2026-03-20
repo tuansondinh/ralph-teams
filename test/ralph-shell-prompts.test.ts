@@ -205,6 +205,8 @@ test('ralph.sh enables Claude agent teams in in-process mode for the claude back
   assert.match(script, /CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="\$\{CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS:-1\}"/);
   assert.match(runtimePrompt, /If your runtime is Claude, use Claude agent teams/i);
   assert.match(runtimePrompt, /use direct teammate messaging when coordination helps/i);
+  assert.match(runtimePrompt, /artifact or status handoff only/i);
+  assert.match(runtimePrompt, /Do not pass Builder reasoning, verdict framing, or arguments about whether the work should pass/i);
 });
 
 test('canonical Team Lead policy covers scoped planner and validator heuristics', () => {
@@ -251,6 +253,8 @@ test('claude team-lead prompt uses Claude agent teams for delegated work', () =>
   assert.match(content, /SendMessage/);
   assert.match(content, /fresh Builder/i);
   assert.match(content, /validators independent from builder reasoning/i);
+  assert.match(content, /Builder-to-validator direct messaging is restricted to artifact or status handoff only/i);
+  assert.match(content, /Do not let the Builder send reasoning, verdict framing, acceptance-criteria arguments, or coaching/i);
   assert.doesNotMatch(content, /subagent_type:/);
 });
 

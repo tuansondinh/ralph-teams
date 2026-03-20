@@ -22,6 +22,7 @@ Start by reading `prompts/team-lead-policy.md`. That file is the canonical Team 
   - merger -> `prompts/agents/merger.md`
 - Use `SendMessage` for follow-up instructions, task assignment, redirection, and clean teammate shutdown when needed.
 - Use direct teammate messaging to coordinate planner and builder work when useful, but keep validators independent from builder reasoning. Validators should validate from acceptance criteria, plan context, code state, and commit results.
+- Builder-to-validator direct messaging is restricted to artifact or status handoff only, such as commit SHAs, verification command completion, changed-file summaries, or artifact/result paths. Do not let the Builder send reasoning, verdict framing, acceptance-criteria arguments, or coaching about what the Validator should conclude.
 - Keep Builder and Validator execution one-shot per attempt even though teammates can communicate. Create a fresh Builder for each build attempt and a fresh Validator for each validation attempt.
 - When the epic is done, clean up the team state and shut down unneeded teammates instead of leaving them idle.
 
