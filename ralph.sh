@@ -253,7 +253,7 @@ export RALPH_MODEL_MERGER="$MODEL_MERGER"
 case "$BACKEND" in
   claude)
     AGENT_CMD="claude"
-    AGENT_FLAGS="--agent team-lead --model $MODEL_TEAM_LEAD --dangerously-skip-permissions --print --verbose --output-format stream-json"
+    AGENT_FLAGS="--agent team-lead --model $MODEL_TEAM_LEAD --dangerously-skip-permissions --teammate-mode in-process --print --verbose --output-format stream-json"
     STREAM_FORMAT="stream-json"
     ;;
   copilot)
@@ -1453,6 +1453,8 @@ spawn_epic_bg() {
     (
       if [ "$BACKEND" = "opencode" ]; then
         run_opencode_exec "$WORKTREE_ABS_PATH" "$TEAM_PROMPT" team-lead "$MODEL_TEAM_LEAD" > "$EPIC_LOG" 2>&1
+      elif [ "$BACKEND" = "claude" ]; then
+        echo "$TEAM_PROMPT" | env CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="${CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS:-1}" $AGENT_CMD $AGENT_FLAGS > "$EPIC_LOG" 2>&1
       else
         echo "$TEAM_PROMPT" | $AGENT_CMD $AGENT_FLAGS > "$EPIC_LOG" 2>&1
       fi

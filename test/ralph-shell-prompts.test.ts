@@ -197,6 +197,16 @@ test('ralph.sh loads the canonical Team Lead policy for runtime prompts', () => 
   assert.match(runtimePrompt, /\{\{TEAM_LEAD_POLICY\}\}/);
 });
 
+test('ralph.sh enables Claude agent teams in in-process mode for the claude backend', () => {
+  const script = fs.readFileSync(scriptPath, 'utf-8');
+  const runtimePrompt = fs.readFileSync(`${repoRoot}/prompts/team-lead-runtime.md`, 'utf-8');
+
+  assert.match(script, /--teammate-mode in-process/);
+  assert.match(script, /CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="\$\{CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS:-1\}"/);
+  assert.match(runtimePrompt, /If your runtime is Claude, use Claude agent teams/i);
+  assert.match(runtimePrompt, /use direct teammate messaging when coordination helps/i);
+});
+
 test('canonical Team Lead policy covers scoped planner and validator heuristics', () => {
   const content = fs.readFileSync(`${repoRoot}/prompts/team-lead-policy.md`, 'utf-8');
 
@@ -232,16 +242,16 @@ test('claude team-lead prompt uses difficulty-based model selection unless confi
   assert.match(content, /difficult task -> `opus`/);
 });
 
-test('claude team-lead prompt requires one-shot builder spawns instead of a persistent mailbox', () => {
+test('claude team-lead prompt uses Claude agent teams for delegated work', () => {
   const content = fs.readFileSync(`${repoRoot}/.claude/agents/team-lead.md`, 'utf-8');
 
   assert.match(content, /prompts\/team-lead-policy\.md/);
-  assert.match(content, /spawn a fresh Builder/i);
-  assert.match(content, /subagent_type: "story-validator"/);
-  assert.match(content, /subagent_type: "builder"/);
-  assert.match(content, /Do NOT use `SendMessage` or `shutdown_request`/);
-  assert.doesNotMatch(content, /wait for story assignments from you via direct messages/i);
-  assert.doesNotMatch(content, /Send Builder a direct message/i);
+  assert.match(content, /Use Claude agent teams, not Claude subagents/i);
+  assert.match(content, /TeamCreate/);
+  assert.match(content, /SendMessage/);
+  assert.match(content, /fresh Builder/i);
+  assert.match(content, /validators independent from builder reasoning/i);
+  assert.doesNotMatch(content, /subagent_type:/);
 });
 
 test('copilot team-lead prompt uses difficulty-based model selection unless config overrides are set', () => {
