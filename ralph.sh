@@ -682,6 +682,54 @@ ensure_loop_branch_ready() {
 
 ensure_loop_branch_ready
 
+find_pending_epic_loop_history_conflict() {
+  local epic_id="$1"
+  local epic_branch="ralph/${epic_id}"
+
+  if git show-ref --verify --quiet "refs/heads/${epic_branch}" && git merge-base --is-ancestor "$epic_branch" "$LOOP_BRANCH" >/dev/null 2>&1; then
+    echo "pending epic branch '${epic_branch}' is already an ancestor of loop branch '${LOOP_BRANCH}'"
+    return 0
+  fi
+
+  local merge_subject
+  merge_subject=$(git log "$LOOP_BRANCH" --merges --format=%s --grep="^Merge branch '${epic_branch}' into " -n 1 2>/dev/null || true)
+  if [ -n "$merge_subject" ]; then
+    echo "loop branch '${LOOP_BRANCH}' already contains prior merge history for '${epic_branch}' (${merge_subject})"
+    return 0
+  fi
+
+  return 1
+}
+
+fail_on_pending_epic_git_state_mismatch() {
+  local mismatch_found=0
+
+  for epic_index in $(seq 0 $((TOTAL_EPICS - 1))); do
+    local epic_status epic_id conflict_reason
+    epic_status=$(rjq read "$PRD_FILE" ".epics[$epic_index].status" "pending")
+    [ "$epic_status" = "pending" ] || continue
+
+    epic_id=$(rjq read "$PRD_FILE" ".epics[$epic_index].id")
+    conflict_reason=$(find_pending_epic_loop_history_conflict "$epic_id" || true)
+    [ -n "$conflict_reason" ] || continue
+
+    if [ "$mismatch_found" -eq 0 ]; then
+      echo "Error: pending epics in '$PRD_FILE' conflict with the current loop branch state." >&2
+    fi
+    mismatch_found=1
+    echo "  [$epic_id] $conflict_reason" >&2
+  done
+
+  if [ "$mismatch_found" -eq 1 ]; then
+    echo "Fix the mismatch before rerunning Ralph:" >&2
+    echo "  1. Mark the already-merged epic(s) completed in '$PRD_FILE', or" >&2
+    echo "  2. Start from a fresh loop branch that does not already contain those merges." >&2
+    exit 1
+  fi
+}
+
+fail_on_pending_epic_git_state_mismatch
+
 # --- Worktree Management ---
 # Creates a git worktree at .worktrees/<epic_id> on branch ralph/<epic_id>,
 # rooted from the loop branch for this run.
