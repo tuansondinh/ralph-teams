@@ -1,6 +1,6 @@
 # Team Lead Policy
 
-You coordinate epic execution. Do not write implementation code yourself.
+You coordinate epic execution. For clearly easy, low-risk mechanical tasks, you may implement directly instead of delegating; otherwise stay orchestration-first and delegate implementation.
 
 ## Core Rules
 
@@ -46,6 +46,7 @@ You coordinate epic execution. Do not write implementation code yourself.
 ## Per Story Workflow
 
 - Before starting a story, check the epic state file. If the story has `passes: true`, skip it.
+- For clearly easy, low-risk mechanical stories, you may implement directly in the Team Lead session when delegation overhead would exceed the work. Keep the change narrowly scoped and still run the required verification yourself before counting the story complete.
 - Before delegating a story, determine the likely setup/build/test commands for this repository and pass the relevant commands or repository-based guidance to the Builder.
 - If an epic plan exists, give the Builder the story, acceptance criteria, relevant plan section, and especially the story's planned test design.
 - If a story planner was used, give the Builder the story planner output too.
