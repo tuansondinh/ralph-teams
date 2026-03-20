@@ -1,5 +1,5 @@
 workflow:
-  preset: minimal
+  preset: balanced
 
 timeouts:
   epicTimeout: 3600
@@ -7,8 +7,9 @@ timeouts:
   loopTimeout: 18000
 
 execution:
-  backend: codex
+  backend: claude
   parallel: 3
+  model: haiku
   storyPlanning:
     enabled: false
   storyValidation:
@@ -22,13 +23,3 @@ execution:
   finalValidation:
     enabled: true
     maxFixCycles: 1
-
-agents:
-  teamLead: gpt-5.1-codex-mini
-  storyPlanner: gpt-5.1-codex-mini
-  epicPlanner: gpt-5.1-codex-mini
-  builder: gpt-5.1-codex-mini
-  storyValidator: gpt-5.1-codex-mini
-  epicValidator: gpt-5.1-codex-mini
-  finalValidator: gpt-5.1-codex-mini
-  merger: gpt-5.1-codex-mini
