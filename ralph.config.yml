@@ -9,7 +9,7 @@ timeouts:
 execution:
   backend: claude
   parallel: 3
-  model: haiku
+  model: sonnet
   storyPlanning:
     enabled: false
   storyValidation:
