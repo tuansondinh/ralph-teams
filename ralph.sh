@@ -340,6 +340,7 @@ PLANS_DIR="${RALPH_RUNTIME_DIR}/plans"
 LOGS_DIR="${RALPH_RUNTIME_DIR}/logs"
 STATE_DIR="${RALPH_RUNTIME_DIR}/state"
 WORKTREES_DIR="${RALPH_RUNTIME_DIR}/.worktrees"
+OUTER_LOOP_LOG=""
 
 repair_source_runtime_dir_if_needed() {
   if [ -L "$RALPH_RUNTIME_DIR" ]; then
@@ -361,6 +362,23 @@ unstage_runtime_artifacts() {
 
 repair_source_runtime_dir_if_needed
 mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$STATE_DIR" "$WORKTREES_DIR"
+
+enable_outer_loop_logging() {
+  if [ "${RALPH_OUTER_LOOP_LOGGING_ACTIVE:-0}" = "1" ]; then
+    return 0
+  fi
+
+  OUTER_LOOP_LOG="${LOGS_DIR}/loop-$(date +%s).log"
+  export RALPH_OUTER_LOOP_LOGGING_ACTIVE="1"
+  export RALPH_OUTER_LOOP_LOG="$OUTER_LOOP_LOG"
+
+  exec > >(tee -a "$OUTER_LOOP_LOG")
+  exec 2>&1
+
+  echo "Outer loop log: $OUTER_LOOP_LOG"
+}
+
+enable_outer_loop_logging
 
 ensure_runtime_rjq_bin() {
   if [ "${RALPH_SKIP_RUNTIME_RJQ:-}" = "1" ]; then

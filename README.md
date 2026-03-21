@@ -538,12 +538,13 @@ During a run, Ralph writes:
 - `.ralph-teams/state/merge-EPIC-xxx.json`: per-epic merge-result artifact written by the Team Lead or merge recovery path
 - `.ralph-teams/plans/plan-EPIC-xxx.md`: epic-planner output for an epic
 - planned epics are expected to use these files as their implementation contract
+- `.ralph-teams/logs/loop-<timestamp>.log`: outer `ralph-teams run` orchestration log mirroring terminal output
 - `.ralph-teams/logs/epic-EPIC-xxx-<timestamp>.log`: raw backend session log
 - `.ralph-teams/ralph-state.json`: saved interrupt/resume state
 
 Ralph also updates the original `prd.json` in place as epic status changes.
 
-The team lead agent log for each epic is written to `.ralph-teams/logs/` regardless of backend.
+The outer run log and the team lead agent log for each epic are written to `.ralph-teams/logs/` regardless of backend.
 
 ## Runtime Rules
 

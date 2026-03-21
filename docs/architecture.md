@@ -283,7 +283,7 @@ Used for:
 
 ### `.ralph-teams/logs/`
 
-Raw backend output per epic and per merge attempt.
+Raw backend output per outer run, per epic, and per merge attempt.
 
 Used for:
 
