@@ -150,6 +150,18 @@ test('US-004: sequential runs perform a clean scripted merge after epic completi
   }
 });
 
+test('US-004: sequential runs do not flag a completed epic as a crash before scripted merge', () => {
+  const { tempDir, env } = setupMergeRepo([{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }]);
+  const result = runRalph(tempDir, env);
+  assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
+  assert.doesNotMatch(result.stdout, /\[EPIC-001\] CRASH/);
+
+  const progress = fs.readFileSync(path.join(tempDir, '.ralph-teams', 'progress.txt'), 'utf-8');
+  assert.doesNotMatch(progress, /\[EPIC-001\] CRASH/);
+  assert.match(progress, /\[EPIC-001\] PASSED/);
+  assert.match(progress, /\[EPIC-001\] MERGED \(clean\)/);
+});
+
 test('US-004: single-epic runs skip final validation', () => {
   const { tempDir, env } = setupMergeRepo([{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }]);
   const result = runRalph(tempDir, env);

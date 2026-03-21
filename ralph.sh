@@ -2466,6 +2466,16 @@ while true; do
         if [ "$all_done" = true ] && [ "$merge_recorded" = true ]; then
           epic_flow_complete=true
         fi
+        local process_exit_complete=false
+        if [ "$all_done" = true ]; then
+          # In parallel mode the Team Lead owns the merge, so a completed
+          # session must include the merge result artifact. In sequential mode
+          # Ralph performs the scripted merge after the Team Lead exits, so a
+          # normal exit with all stories passed is already a complete session.
+          if [ "$merge_recorded" = true ] || ! use_dedicated_epic_worktrees; then
+            process_exit_complete=true
+          fi
+        fi
 
         if [ "$process_finished" = true ] || [ "$epic_flow_complete" = true ]; then
           # Only terminate an in-flight session early after the Team Lead has
@@ -2476,10 +2486,10 @@ while true; do
           fi
           wait "${active_pids[$slot]}" 2>/dev/null || true
 
-          # If the process exited before the epic reached full completion
-          # (stories passed plus merge result recorded), consider it a crash
+          # If the process exited before the Team Lead session reached the
+          # expected completion point for this run mode, consider it a crash
           # and retry when possible.
-          if [ "$epic_flow_complete" = false ]; then
+          if [ "$process_exit_complete" = false ]; then
             local retry_count
             retry_count="$(get_crash_retry_count "$finished_epic_id")"
             if [ "$retry_count" -lt "$MAX_CRASH_RETRIES" ]; then
