@@ -1240,8 +1240,8 @@ normalize_epic_statuses() {
 }
 
 initialize_counters() {
-  COMPLETED=$(rjq count-where "$PRD_FILE" .epics "status=completed" --default pending 2>/dev/null) || COMPLETED=0
-  FAILED=$(rjq count-where "$PRD_FILE" .epics "status=failed|merge-failed" --default pending 2>/dev/null) || FAILED=0
+  COMPLETED=$(rjq count-where "$PRD_FILE" .epics "status=completed" --default pending)
+  FAILED=$(rjq count-where "$PRD_FILE" .epics "status=failed|merge-failed" --default pending)
 }
 
 handle_loop_timeout() {
@@ -1721,7 +1721,7 @@ merge_wave() {
     local branch_name
     branch_name=$(epic_branch_name "$epic_id")
     local epic_index
-    epic_index=$(rjq find-index "$PRD_FILE" .epics id "$epic_id" 2>/dev/null) || epic_index=""
+    epic_index=$(rjq find-index "$PRD_FILE" .epics id "$epic_id")
 
     # Check if branch exists
     if ! git show-ref --verify --quiet "refs/heads/${branch_name}"; then
@@ -1751,7 +1751,7 @@ merge_wave() {
         git commit --no-edit >/dev/null 2>&1 || true
       fi
       if [ -n "$epic_index" ]; then
-        rjq set "$PRD_FILE" ".epics[$epic_index].status" '"completed"' 2>/dev/null || echo "  [WARN] Failed to set epic $epic_id status" >&2
+        rjq set "$PRD_FILE" ".epics[$epic_index].status" '"completed"'
       fi
       echo "  [$epic_id] Merge successful (clean)"
       echo "[$epic_id] MERGED (clean) — $(date)" >> "$PROGRESS_FILE"
@@ -1772,7 +1772,7 @@ merge_wave() {
         merge_failures=$((merge_failures + 1))
 
         if [ -n "$epic_index" ]; then
-          rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"' 2>/dev/null || echo "  [WARN] Failed to set epic $epic_id status" >&2
+          rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"'
         fi
 
         git merge --abort 2>/dev/null || true
@@ -1788,7 +1788,7 @@ merge_wave() {
         git add prd.json
         git commit --no-edit >/dev/null 2>&1 || true
         if [ -n "$epic_index" ]; then
-          rjq set "$PRD_FILE" ".epics[$epic_index].status" '"completed"' 2>/dev/null || echo "  [WARN] Failed to set epic $epic_id status" >&2
+          rjq set "$PRD_FILE" ".epics[$epic_index].status" '"completed"'
         fi
         echo "  [$epic_id] Merge successful (kept projected prd.json)"
         echo "[$epic_id] MERGED (projected prd.json) — $(date)" >> "$PROGRESS_FILE"
@@ -1802,7 +1802,7 @@ merge_wave() {
       merge_failures=$((merge_failures + 1))
 
       if [ -n "$epic_index" ]; then
-        rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"' 2>/dev/null || echo "  [WARN] Failed to set epic $epic_id status" >&2
+        rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"'
       fi
 
       continue
@@ -1820,11 +1820,11 @@ collect_pending_merge_epics() {
 
   for epic_index in $(seq 0 $((TOTAL_EPICS - 1))); do
     local epic_status
-    epic_status=$(rjq read "$PRD_FILE" ".epics[$epic_index].status" "pending" 2>/dev/null) || epic_status="pending"
+    epic_status=$(rjq read "$PRD_FILE" ".epics[$epic_index].status" "pending")
     [ "$epic_status" = "completed" ] || [ "$epic_status" = "merge-failed" ] || continue
 
     local epic_id
-    epic_id=$(rjq read "$PRD_FILE" ".epics[$epic_index].id" 2>/dev/null) || continue
+    epic_id=$(rjq read "$PRD_FILE" ".epics[$epic_index].id")
     [ -n "$epic_id" ] || continue
 
     local branch_name
