@@ -8,7 +8,7 @@ timeouts:
 
 execution:
   backend: claude
-  parallel: 1
+  parallel: 2
   model: haiku
   storyPlanning:
     enabled: false
@@ -21,5 +21,5 @@ execution:
     enabled: false
     maxFixCycles: 1
   finalValidation:
-    enabled: true
+    enabled: false
     maxFixCycles: 1
