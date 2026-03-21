@@ -1432,7 +1432,7 @@ NODE
 process_epic_result() {
   local epic_index="$1"
   local epic_id
-  epic_id=$(rjq read "$PRD_FILE" ".epics[$epic_index].id")
+  epic_id=$(rjq read "$PRD_FILE" ".epics[$epic_index].id" 2>/dev/null) || epic_id="EPIC-???"
   local merge_status=""
   merge_status=$(read_epic_merge_result_field "$epic_id" .status "" 2>/dev/null || true)
   local merge_mode=""
@@ -1441,16 +1441,16 @@ process_epic_result() {
   merge_details=$(read_epic_merge_result_field "$epic_id" .details "" 2>/dev/null || true)
 
   local total_stories
-  total_stories=$(rjq length "$PRD_FILE" ".epics[$epic_index].userStories")
+  total_stories=$(rjq length "$PRD_FILE" ".epics[$epic_index].userStories" 2>/dev/null) || total_stories=0
   local passed_stories
-  passed_stories=$(rjq count-where "$PRD_FILE" ".epics[$epic_index].userStories" "passes=true")
+  passed_stories=$(rjq count-where "$PRD_FILE" ".epics[$epic_index].userStories" "passes=true" 2>/dev/null) || passed_stories=0
 
   if [ "$passed_stories" -eq "$total_stories" ] && [ "$total_stories" -gt 0 ]; then
     if [ "$merge_status" = "merge-failed" ]; then
       echo ""
       echo "  [$epic_id] MERGE FAILED — all stories passed but merge did not complete"
       [ -n "$merge_details" ] && echo "  [$epic_id] Merge details: $merge_details"
-      rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"'
+      rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"' 2>/dev/null || echo "  [WARN] Failed to set epic $epic_index status" >&2
       FAILED=$((FAILED + 1))
       echo "[$epic_id] MERGE FAILED (${merge_details:-team lead merge failed}) — $(date)" >> "$PROGRESS_FILE"
       return
@@ -1459,7 +1459,7 @@ process_epic_result() {
     if [ "$merge_status" != "merged" ]; then
       echo ""
       echo "  [$epic_id] MERGE FAILED — all stories passed but Team Lead did not record a merge result"
-      rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"'
+      rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"' 2>/dev/null || echo "  [WARN] Failed to set epic $epic_index status" >&2
       FAILED=$((FAILED + 1))
       echo "[$epic_id] MERGE FAILED (missing team lead merge result artifact) — $(date)" >> "$PROGRESS_FILE"
       return
@@ -1467,7 +1467,7 @@ process_epic_result() {
 
     echo ""
     echo "  [$epic_id] PASSED — all stories completed ($passed_stories/$total_stories)"
-    rjq set "$PRD_FILE" ".epics[$epic_index].status" '"completed"'
+    rjq set "$PRD_FILE" ".epics[$epic_index].status" '"completed"' 2>/dev/null || echo "  [WARN] Failed to set epic $epic_index status" >&2
     COMPLETED=$((COMPLETED + 1))
     echo "[$epic_id] PASSED — $(date)" >> "$PROGRESS_FILE"
     if [ "$merge_status" = "merged" ]; then
@@ -1477,12 +1477,12 @@ process_epic_result() {
   elif [ "$passed_stories" -gt 0 ]; then
     echo ""
     echo "  [$epic_id] PARTIAL — $passed_stories/$total_stories stories passed"
-    rjq set "$PRD_FILE" ".epics[$epic_index].status" '"partial"'
+    rjq set "$PRD_FILE" ".epics[$epic_index].status" '"partial"' 2>/dev/null || echo "  [WARN] Failed to set epic $epic_index status" >&2
     echo "[$epic_id] PARTIAL ($passed_stories/$total_stories) — $(date)" >> "$PROGRESS_FILE"
   else
     echo ""
     echo "  [$epic_id] FAILED — 0/$total_stories stories passed"
-    rjq set "$PRD_FILE" ".epics[$epic_index].status" '"failed"'
+    rjq set "$PRD_FILE" ".epics[$epic_index].status" '"failed"' 2>/dev/null || echo "  [WARN] Failed to set epic $epic_index status" >&2
     FAILED=$((FAILED + 1))
     echo "[$epic_id] FAILED (0/$total_stories) — $(date)" >> "$PROGRESS_FILE"
   fi
@@ -1564,7 +1564,7 @@ NODE
 
 read_epic_prd_passed() {
   local epic_index="$1"
-  rjq count-where "$PRD_FILE" ".epics[$epic_index].userStories" "passes=true"
+  rjq count-where "$PRD_FILE" ".epics[$epic_index].userStories" "passes=true" 2>/dev/null || echo 0
 }
 
 project_state_to_prd() {
@@ -1616,16 +1616,26 @@ NODE
 spawn_epic_bg() {
   local EPIC_INDEX="$1"
   local EPIC_ID
-  EPIC_ID=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].id")
+  EPIC_ID=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].id" 2>/dev/null) || {
+    echo "  [ERROR] Cannot read epic id for index $EPIC_INDEX — skipping spawn" >&2
+    LAST_SPAWN_PID=0
+    LAST_SPAWN_LOG="/dev/null"
+    return 1
+  }
   local EPIC_TITLE
-  EPIC_TITLE=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].title")
+  EPIC_TITLE=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].title" 2>/dev/null) || EPIC_TITLE="(unknown)"
   local EPIC_JSON
-  EPIC_JSON=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX]")
+  EPIC_JSON=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX]" 2>/dev/null) || {
+    echo "  [ERROR] Cannot read epic JSON for $EPIC_ID — skipping spawn" >&2
+    LAST_SPAWN_PID=0
+    LAST_SPAWN_LOG="/dev/null"
+    return 1
+  }
   local EPIC_PLANNED
-  EPIC_PLANNED=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].planned" "false")
+  EPIC_PLANNED=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].planned" "false" 2>/dev/null) || EPIC_PLANNED="false"
   local PENDING_STORIES_JSON
-  PENDING_STORIES_JSON=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].userStories" | \
-    node -e 'const fs=require("fs"); const stories=JSON.parse(fs.readFileSync(0,"utf8")); process.stdout.write(JSON.stringify(stories.filter(s => s.passes !== true)));')
+  PENDING_STORIES_JSON=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].userStories" 2>/dev/null | \
+    node -e 'const fs=require("fs"); const stories=JSON.parse(fs.readFileSync(0,"utf8")); process.stdout.write(JSON.stringify(stories.filter(s => s.passes !== true)));') || PENDING_STORIES_JSON="[]"
 
   local EPIC_LOG="${LOGS_DIR}/epic-${EPIC_ID}-$(date +%s).log"
 
@@ -2039,7 +2049,7 @@ WAVE_NUM=0
 # Count total stories across all epics for running estimate calculations
 TOTAL_STORIES=0
 for i in $(seq 0 $((TOTAL_EPICS - 1))); do
-  sc=$(rjq length "$PRD_FILE" ".epics[$i].userStories")
+  sc=$(rjq length "$PRD_FILE" ".epics[$i].userStories" 2>/dev/null) || sc=0
   TOTAL_STORIES=$((TOTAL_STORIES + sc))
 done
 
@@ -2048,20 +2058,20 @@ while true; do
   WAVE_EPICS=()
 
   for EPIC_INDEX in $(seq 0 $((TOTAL_EPICS - 1))); do
-    EPIC_STATUS=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].status" "pending")
+    EPIC_STATUS=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].status" "pending" 2>/dev/null) || EPIC_STATUS="pending"
     [ "$EPIC_STATUS" != "pending" ] && continue
 
     # Check all dependencies
     ALL_DEPS_MET=true
-    DEPS=$(rjq list "$PRD_FILE" ".epics[$EPIC_INDEX].dependsOn")
+    DEPS=$(rjq list "$PRD_FILE" ".epics[$EPIC_INDEX].dependsOn" 2>/dev/null) || DEPS=""
     for DEP in $DEPS; do
-      DEP_STATUS=$(rjq read-where "$PRD_FILE" .epics id "$DEP" status "pending")
+      DEP_STATUS=$(rjq read-where "$PRD_FILE" .epics id "$DEP" status "pending" 2>/dev/null) || DEP_STATUS="pending"
       if [ "$DEP_STATUS" = "failed" ] || [ "$DEP_STATUS" = "partial" ] || [ "$DEP_STATUS" = "merge-failed" ]; then
         # Dependency failed — skip this epic permanently
-        EPIC_ID=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].id")
-        EPIC_TITLE=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].title")
+        EPIC_ID=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].id" 2>/dev/null) || EPIC_ID="EPIC-???"
+        EPIC_TITLE=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].title" 2>/dev/null) || EPIC_TITLE="(unknown)"
         echo "  [$EPIC_ID] $EPIC_TITLE — skipped (dependency $DEP has status: $DEP_STATUS)"
-        rjq set "$PRD_FILE" ".epics[$EPIC_INDEX].status" '"failed"'
+        rjq set "$PRD_FILE" ".epics[$EPIC_INDEX].status" '"failed"' 2>/dev/null || echo "  [WARN] Failed to set epic $EPIC_INDEX status to failed" >&2
         FAILED=$((FAILED + 1))
         echo "[$EPIC_ID] SKIPPED (dependency $DEP failed) — $(date)" >> "$PROGRESS_FILE"
         ALL_DEPS_MET=false
@@ -2089,7 +2099,7 @@ while true; do
   if [ -n "$PARALLEL" ]; then
     echo "  Wave $WAVE_NUM — ${#WAVE_EPICS[@]} epic(s), $PARALLEL at a time"
   else
-    REMAINING_EPICS=$(rjq count-where "$PRD_FILE" .epics "status=pending" --default pending)
+    REMAINING_EPICS=$(rjq count-where "$PRD_FILE" .epics "status=pending" --default pending 2>/dev/null) || REMAINING_EPICS="?"
     echo "  ${REMAINING_EPICS} epic(s) remaining to run sequentially"
   fi
   echo "========================================================"
@@ -2102,7 +2112,7 @@ while true; do
     echo "=== Run — $(date) ===" >> "$PROGRESS_FILE"
   fi
   for IDX in "${WAVE_EPICS[@]}"; do
-    W_EPIC_ID=$(rjq read "$PRD_FILE" ".epics[$IDX].id")
+    W_EPIC_ID=$(rjq read "$PRD_FILE" ".epics[$IDX].id" 2>/dev/null) || W_EPIC_ID="EPIC-???"
     echo "  $W_EPIC_ID" >> "$PROGRESS_FILE"
   done
 
@@ -2166,7 +2176,10 @@ while true; do
       now=$(date +%s)
       for slot in "${!active_pids[@]}"; do
         local finished_epic_id
-        finished_epic_id=$(rjq read "$PRD_FILE" ".epics[${active_indices[$slot]}].id")
+        finished_epic_id=$(rjq read "$PRD_FILE" ".epics[${active_indices[$slot]}].id" 2>/dev/null) || {
+          echo "  [WARN] rjq failed reading epic id for index ${active_indices[$slot]} — skipping slot" >&2
+          continue
+        }
         local process_finished=false
 
         emit_new_log_output "$finished_epic_id" "${active_logs[$slot]}" "${active_log_lines[$slot]:-0}"
@@ -2181,7 +2194,7 @@ while true; do
           wait "${active_pids[$slot]}" 2>/dev/null || true
           # Check progress and retry if possible
           local _to_total _to_state_passed _to_prd_passed _to_passed
-          _to_total=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories")
+          _to_total=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories" 2>/dev/null) || _to_total=0
           _to_state_passed=$(read_epic_state_passed "$finished_epic_id")
           _to_prd_passed=$(read_epic_prd_passed "${active_indices[$slot]}")
           _to_passed="$_to_state_passed"
@@ -2194,12 +2207,14 @@ while true; do
             echo "[$finished_epic_id] TIMEOUT RETRY $((_to_retry_count + 1))/$MAX_CRASH_RETRIES ($_to_passed/$_to_total passed) — $(date)" >> "$PROGRESS_FILE"
             project_state_to_prd "$finished_epic_id" || true
             cleanup_epic_worktree "$finished_epic_id"
-            spawn_epic_bg "${active_indices[$slot]}"
-            active_pids[$slot]="$LAST_SPAWN_PID"
-            active_start_times[$slot]="$(date +%s)"
-            active_logs[$slot]="$LAST_SPAWN_LOG"
-            active_log_lines[$slot]="0"
-            continue
+            if spawn_epic_bg "${active_indices[$slot]}"; then
+              active_pids[$slot]="$LAST_SPAWN_PID"
+              active_start_times[$slot]="$(date +%s)"
+              active_logs[$slot]="$LAST_SPAWN_LOG"
+              active_log_lines[$slot]="0"
+              continue
+            fi
+            echo "  [$finished_epic_id] Retry spawn failed — treating as timeout failure" >&2
           fi
           project_state_to_prd "$finished_epic_id" || true
           cleanup_epic_worktree "$finished_epic_id"
@@ -2239,7 +2254,7 @@ while true; do
           wait "${active_pids[$slot]}" 2>/dev/null || true
           # Check progress and retry if possible
           local _it_total _it_state_passed _it_prd_passed _it_passed
-          _it_total=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories")
+          _it_total=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories" 2>/dev/null) || _it_total=0
           _it_state_passed=$(read_epic_state_passed "$finished_epic_id")
           _it_prd_passed=$(read_epic_prd_passed "${active_indices[$slot]}")
           _it_passed="$_it_state_passed"
@@ -2252,12 +2267,14 @@ while true; do
             echo "[$finished_epic_id] IDLE RETRY $((_it_retry_count + 1))/$MAX_CRASH_RETRIES ($_it_passed/$_it_total passed) — $(date)" >> "$PROGRESS_FILE"
             project_state_to_prd "$finished_epic_id" || true
             cleanup_epic_worktree "$finished_epic_id"
-            spawn_epic_bg "${active_indices[$slot]}"
-            active_pids[$slot]="$LAST_SPAWN_PID"
-            active_start_times[$slot]="$(date +%s)"
-            active_logs[$slot]="$LAST_SPAWN_LOG"
-            active_log_lines[$slot]="0"
-            continue
+            if spawn_epic_bg "${active_indices[$slot]}"; then
+              active_pids[$slot]="$LAST_SPAWN_PID"
+              active_start_times[$slot]="$(date +%s)"
+              active_logs[$slot]="$LAST_SPAWN_LOG"
+              active_log_lines[$slot]="0"
+              continue
+            fi
+            echo "  [$finished_epic_id] Retry spawn failed — treating as idle timeout failure" >&2
           fi
           project_state_to_prd "$finished_epic_id" || true
           cleanup_epic_worktree "$finished_epic_id"
@@ -2283,7 +2300,7 @@ while true; do
         fi
 
         local total_s passed_s_state passed_s_prd passed_s
-        total_s=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories")
+        total_s=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories" 2>/dev/null) || total_s=0
         passed_s_state=$(read_epic_state_passed "$finished_epic_id")
         passed_s_prd=$(read_epic_prd_passed "${active_indices[$slot]}")
         passed_s="$passed_s_state"
@@ -2323,13 +2340,15 @@ while true; do
               echo "[$finished_epic_id] CRASH RETRY $((retry_count + 1))/$MAX_CRASH_RETRIES ($passed_s/$total_s passed so far) — $(date)" >> "$PROGRESS_FILE"
               project_state_to_prd "$finished_epic_id" || true
               cleanup_epic_worktree "$finished_epic_id"
-              spawn_epic_bg "${active_indices[$slot]}"
-              active_pids[$slot]="$LAST_SPAWN_PID"
-              active_start_times[$slot]="$(date +%s)"
-              active_logs[$slot]="$LAST_SPAWN_LOG"
-              active_log_lines[$slot]="0"
-              # Don't free slot — respawned epic reuses it. Continue polling.
-              continue
+              if spawn_epic_bg "${active_indices[$slot]}"; then
+                active_pids[$slot]="$LAST_SPAWN_PID"
+                active_start_times[$slot]="$(date +%s)"
+                active_logs[$slot]="$LAST_SPAWN_LOG"
+                active_log_lines[$slot]="0"
+                # Don't free slot — respawned epic reuses it. Continue polling.
+                continue
+              fi
+              echo "  [$finished_epic_id] Retry spawn failed — treating as crash failure" >&2
             fi
             echo ""
             echo "  [$finished_epic_id] CRASH — retries exhausted ($passed_s/$total_s stories passed)"
@@ -2349,7 +2368,7 @@ while true; do
           process_epic_result "${active_indices[$slot]}"
           # Track completed epics for merge_wave only when the Team Lead did not already merge.
           local post_status
-          post_status=$(rjq read "$PRD_FILE" ".epics[${active_indices[$slot]}].status" "pending")
+          post_status=$(rjq read "$PRD_FILE" ".epics[${active_indices[$slot]}].status" "pending" 2>/dev/null) || post_status="pending"
           if [ "$post_status" = "completed" ] && [ "$merge_status" != "merged" ]; then
             wave_completed_ids+=("$finished_epic_id")
           fi
@@ -2386,10 +2405,10 @@ while true; do
       break
     fi
 
-    EPIC_STATUS=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].status" "pending")
+    EPIC_STATUS=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].status" "pending" 2>/dev/null) || EPIC_STATUS="pending"
     if [ "$EPIC_STATUS" = "completed" ]; then
-      local_epic_id=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].id")
-      local_epic_title=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].title")
+      local_epic_id=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].id" 2>/dev/null) || local_epic_id="EPIC-???"
+      local_epic_title=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].title" 2>/dev/null) || local_epic_title="(unknown)"
       echo "  [$local_epic_id] $local_epic_title — already completed, skipping"
       COMPLETED=$((COMPLETED + 1))
       continue
@@ -2401,7 +2420,11 @@ while true; do
     done
 
     PROCESSED=$((PROCESSED + 1))
-    spawn_epic_bg "$EPIC_INDEX"
+    if ! spawn_epic_bg "$EPIC_INDEX"; then
+      echo "  [WARN] Failed to spawn epic at index $EPIC_INDEX — skipping" >&2
+      FAILED=$((FAILED + 1))
+      continue
+    fi
     active_pids+=("$LAST_SPAWN_PID")
     active_indices+=("$EPIC_INDEX")
     active_start_times+=("$(date +%s)")
