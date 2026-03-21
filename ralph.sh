@@ -825,7 +825,13 @@ ensure_worktree_runtime_link() {
   fi
 
   if [ -L "$worktree_runtime_path" ]; then
-    return 0
+    local current_target
+    current_target="$(readlink "$worktree_runtime_path")"
+    if [ "$current_target" = "$RALPH_RUNTIME_DIR" ]; then
+      return 0
+    fi
+    log_warn "Stale runtime symlink in worktree (points to '${current_target}', expected '${RALPH_RUNTIME_DIR}') — relinking"
+    rm -f "$worktree_runtime_path"
   fi
 
   if [ -e "$worktree_runtime_path" ] && [ ! -L "$worktree_runtime_path" ]; then
