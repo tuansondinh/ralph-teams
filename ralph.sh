@@ -341,6 +341,7 @@ LOGS_DIR="${RALPH_RUNTIME_DIR}/logs"
 STATE_DIR="${RALPH_RUNTIME_DIR}/state"
 WORKTREES_DIR="${RALPH_RUNTIME_DIR}/.worktrees"
 OUTER_LOOP_LOG=""
+RALPH_VERSION="unknown"
 
 repair_source_runtime_dir_if_needed() {
   if [ -L "$RALPH_RUNTIME_DIR" ]; then
@@ -379,6 +380,19 @@ enable_outer_loop_logging() {
 }
 
 enable_outer_loop_logging
+
+resolve_ralph_version() {
+  local package_json="${SCRIPT_DIR}/package.json"
+
+  if [ -f "$package_json" ] && command -v node >/dev/null 2>&1; then
+    node -p "try { require(process.argv[1]).version || 'unknown' } catch { 'unknown' }" "$package_json" 2>/dev/null || echo "unknown"
+    return 0
+  fi
+
+  echo "unknown"
+}
+
+RALPH_VERSION="$(resolve_ralph_version)"
 
 ensure_runtime_rjq_bin() {
   if [ "${RALPH_SKIP_RUNTIME_RJQ:-}" = "1" ]; then
@@ -559,7 +573,7 @@ fi
 
 echo ""
 echo "========================================================"
-echo "  Ralph Teams — Project Manager"
+echo "  Ralph Teams v${RALPH_VERSION} — Project Manager"
 echo "  Project: $PROJECT"
 echo "  Source Branch: ${SOURCE_BRANCH:-<unknown>}"
 echo "  Loop Branch: $LOOP_BRANCH"
