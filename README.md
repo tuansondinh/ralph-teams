@@ -24,7 +24,7 @@ The default `balanced` mode is intentionally simple:
 - it spawns one Builder per story attempt
 - it validates inline or spawns a validator when independent verification is needed
 - it works through the user stories sequentially until the epic is done
-- Ralph then moves to the next epic, and after all epics finish, runs final validation
+- Ralph then moves to the next epic until all epics are done
 
 ## Quickest Start
 
@@ -58,12 +58,7 @@ flowchart TD
     J --> K[If needed, fallback merge recovery handles leftovers]
     K --> L{More epics?}
     L -->|Yes| C
-    L -->|No| M{2+ epics and final validation enabled?}
-    M -->|No| P[Finish]
-    M -->|Yes| N[Run final validator]
-    N -->|PASS| P
-    N -->|FAIL and retries left| O[Builder fixes final-validation findings]
-    O --> N
+    L -->|No| P[Finish]
 ```
 
 Other presets:
@@ -79,8 +74,8 @@ At a high level:
 - `ralph.config.yml` controls backend choice, workflow toggles, parallelism, timeouts, and model selection.
 
 Workflow presets:
-- `balanced`: epic planning enabled, heuristic epic validation enabled, and final validation enabled
-- `full`: `balanced`, plus story planning and heuristic story validation
+- `balanced`: epic planning enabled, heuristic epic validation enabled (no final validation)
+- `full`: `balanced`, plus story planning, heuristic story validation, and final validation
 - `minimal`: planning and validation toggles disabled; no planner or validator subagents are spawned
 
 Default agent model assignments:
@@ -209,8 +204,8 @@ Prompts for:
 - Agent model overrides (optional)
 
 Workflow presets:
-- `balanced`: epic planning enabled, heuristic epic validation enabled, and final validation enabled
-- `full`: `balanced`, plus story planning and heuristic story validation
+- `balanced`: epic planning enabled, heuristic epic validation enabled (no final validation)
+- `full`: `balanced`, plus story planning, heuristic story validation, and final validation
 - `minimal`: planning and validation toggles disabled; no planner or validator subagents are spawned
 
 Preset behavior notes:
