@@ -46,7 +46,11 @@ test('US-008: the shared loop worktree is preserved after SIGINT', { timeout: 10
   const { tempDir, env } = setupMultiEpicRepo([{ id: 'EPIC-001', title: 'Alpha' }], {});
   env['MOCK_HANG_EPIC_001'] = '1';
   await runRalphWithSigint(tempDir, env);
-  assert.ok(fs.existsSync(path.join(tempDir, '.ralph-teams', '.worktrees', 'loop')));
+  const worktreesDir = path.join(tempDir, '.ralph-teams', '.worktrees');
+  const loopDirs = fs.existsSync(worktreesDir)
+    ? fs.readdirSync(worktreesDir).filter((entry) => entry.startsWith('loop-'))
+    : [];
+  assert.equal(loopDirs.length, 1);
   assert.ok(!fs.existsSync(path.join(tempDir, '.ralph-teams', '.worktrees', 'EPIC-001')));
 });
 

@@ -48,7 +48,7 @@ test('ralph.sh auto-commits dirty changes and continues', () => {
   assert.equal(result.status, 0);
   assert.doesNotMatch(result.stdout, /Proceed with auto-commit before continuing\? \[y\/N\]: /);
   assert.match(result.stdout, /Creating loop branch: ralph\/loop\//);
-  assert.match(result.stdout, /Creating loop worktree: .*ralph-teams\/\.worktrees\/loop \(ralph\/loop\//);
+  assert.match(result.stdout, /Creating loop worktree: .*ralph-teams\/\.worktrees\/loop-[^ )]+ \(ralph\/loop\//);
   assert.match(execFileSync('git', ['log', '-1', '--pretty=%s'], { cwd: tempDir, encoding: 'utf-8' }), /chore: auto-commit changes before ralph run/);
   assert.equal(execFileSync('git', ['status', '--short'], { cwd: tempDir, encoding: 'utf-8' }).trim(), '');
   assert.equal(execFileSync('git', ['branch', '--show-current'], { cwd: tempDir, encoding: 'utf-8' }).trim(), 'main');
@@ -513,7 +513,11 @@ test('US-002: sequential mode reuses the loop worktree and creates no dedicated 
 test('US-002: sequential mode leaves no dedicated epic worktree behind after the wave completes', () => {
   const { tempDir, env } = setupMultiEpicRepo([{ id: 'EPIC-001', title: 'Alpha' }], { 'EPIC-001': 'PASS' });
   runRalph(tempDir, env);
-  assert.ok(!fs.existsSync(path.join(tempDir, '.ralph-teams', '.worktrees', 'loop')));
+  const worktreesDir = path.join(tempDir, '.ralph-teams', '.worktrees');
+  const remainingLoopDirs = fs.existsSync(worktreesDir)
+    ? fs.readdirSync(worktreesDir).filter((entry) => entry.startsWith('loop-'))
+    : [];
+  assert.equal(remainingLoopDirs.length, 0);
   assert.ok(!fs.existsSync(path.join(tempDir, '.ralph-teams', '.worktrees', 'EPIC-001')));
 });
 

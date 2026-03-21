@@ -686,8 +686,15 @@ ensure_repo_has_initial_commit
 
 mkdir -p "$RALPH_RUNTIME_DIR" "$PLANS_DIR" "$LOGS_DIR" "$STATE_DIR" "$WORKTREES_DIR"
 
+loop_worktree_path() {
+  local loop_suffix="${LOOP_BRANCH#ralph/loop/}"
+  loop_suffix=$(printf '%s' "$loop_suffix" | tr '/:' '--')
+  echo "${WORKTREES_DIR}/loop-${loop_suffix}"
+}
+
 ensure_loop_worktree_ready() {
-  local loop_worktree_path="${WORKTREES_DIR}/loop"
+  local loop_worktree_path
+  loop_worktree_path="$(loop_worktree_path)"
   local add_output=""
   local retry_output=""
   local existing_worktree=""
