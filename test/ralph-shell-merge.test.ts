@@ -137,11 +137,13 @@ test('ralph.sh auto-adds runtime artifacts to the repo .gitignore', () => {
   assert.match(gitignore, /^\.ralph-teams\/$/m);
 });
 
-test('US-004: sequential runs perform a clean scripted merge after epic completion', () => {
+test('US-004: sequential runs fall back cleanly when Ralph cannot verify the Team Lead merge', () => {
   const { tempDir, env } = setupMergeRepo([{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }]);
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
-  assert.match(result.stdout, /\[EPIC-001\] Awaiting scripted merge on /);
+  assert.match(result.stdout, /\[EPIC-001\] Team Lead reported merge success but scripted check failed/);
+  assert.match(result.stdout, /\[EPIC-001\] Merge result missing — Ralph will verify and may retry on /);
+  assert.match(result.stdout, /--- Merging completed epic branches into /);
   assert.match(result.stdout, /\[EPIC-001\] Merge successful \(clean\)/);
   const logsDir = path.join(tempDir, '.ralph-teams', 'logs');
   if (fs.existsSync(logsDir)) {
@@ -150,15 +152,19 @@ test('US-004: sequential runs perform a clean scripted merge after epic completi
   }
 });
 
-test('US-004: sequential runs do not flag a completed epic as a crash before scripted merge', () => {
-  const { tempDir, env } = setupMergeRepo([{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }]);
+test('US-004: sequential runs fall back to Ralph merge when the Team Lead leaves it unmerged', () => {
+  const { tempDir, env } = setupMergeRepo([{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }], { skipTeamLeadMerge: true });
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
   assert.doesNotMatch(result.stdout, /\[EPIC-001\] CRASH/);
+  assert.match(result.stdout, /\[EPIC-001\] Merge result missing — Ralph will verify and may retry on /);
+  assert.match(result.stdout, /--- Merging completed epic branches into /);
+  assert.match(result.stdout, /\[EPIC-001\] Merge successful \(clean\)/);
 
   const progress = fs.readFileSync(path.join(tempDir, '.ralph-teams', 'progress.txt'), 'utf-8');
   assert.doesNotMatch(progress, /\[EPIC-001\] CRASH/);
   assert.match(progress, /\[EPIC-001\] PASSED/);
+  assert.match(progress, /\[EPIC-001\] PENDING MERGE VERIFICATION \(missing team lead merge result artifact\)/);
   assert.match(progress, /\[EPIC-001\] MERGED \(clean\)/);
 });
 

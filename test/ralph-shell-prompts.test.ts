@@ -355,8 +355,8 @@ test('team lead policy requires in-session merge ownership with a scripted artif
   const policy = fs.readFileSync(`${repoRoot}/prompts/team-lead-policy.md`, 'utf-8');
 
   assert.match(policy, /## Merge Completion/);
-  assert.match(policy, /If the runtime prompt says this Team Lead session owns the merge, attempt it before exiting/i);
-  assert.match(policy, /If the runtime prompt says Ralph owns the merge, do not attempt it yourself/i);
+  assert.match(policy, /The Team Lead always owns the first merge attempt before exiting/i);
+  assert.match(policy, /Ralph will verify the merge result after your session exits and may attempt a scripted fallback merge/i);
   assert.match(policy, /merge-result artifact/i);
 });
 

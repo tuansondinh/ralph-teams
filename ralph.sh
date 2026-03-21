@@ -1511,27 +1511,6 @@ process_epic_result() {
   passed_stories=$(rjq count-where "$PRD_FILE" ".epics[$epic_index].userStories" "passes=true" 2>/dev/null) || passed_stories=0
 
   if [ "$passed_stories" -eq "$total_stories" ] && [ "$total_stories" -gt 0 ]; then
-    if use_dedicated_epic_worktrees; then
-      if [ "$merge_status" = "merge-failed" ]; then
-        echo ""
-        echo "  [$epic_id] MERGE FAILED — all stories passed but merge did not complete"
-        [ -n "$merge_details" ] && echo "  [$epic_id] Merge details: $merge_details"
-        rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"' 2>/dev/null || echo "  [WARN] Failed to set epic $epic_index status" >&2
-        FAILED=$((FAILED + 1))
-        echo "[$epic_id] MERGE FAILED (${merge_details:-team lead merge failed}) — $(date)" >> "$PROGRESS_FILE"
-        return
-      fi
-
-      if [ "$merge_status" != "merged" ]; then
-        echo ""
-        echo "  [$epic_id] MERGE FAILED — all stories passed but Team Lead did not record a merge result"
-        rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"' 2>/dev/null || echo "  [WARN] Failed to set epic $epic_index status" >&2
-        FAILED=$((FAILED + 1))
-        echo "[$epic_id] MERGE FAILED (missing team lead merge result artifact) — $(date)" >> "$PROGRESS_FILE"
-        return
-      fi
-    fi
-
     echo ""
     echo "  [$epic_id] PASSED — all stories completed ($passed_stories/$total_stories)"
     rjq set "$PRD_FILE" ".epics[$epic_index].status" '"completed"' 2>/dev/null || echo "  [WARN] Failed to set epic $epic_index status" >&2
@@ -1540,8 +1519,13 @@ process_epic_result() {
     if [ "$merge_status" = "merged" ]; then
       echo "  [$epic_id] Merge successful (team lead, ${merge_mode:-unknown})"
       echo "[$epic_id] MERGED (team lead ${merge_mode:-unknown}) — $(date)" >> "$PROGRESS_FILE"
-    elif ! use_dedicated_epic_worktrees; then
-      echo "  [$epic_id] Awaiting scripted merge on ${LOOP_BRANCH}"
+    elif [ "$merge_status" = "merge-failed" ]; then
+      echo "  [$epic_id] Team Lead merge did not complete — Ralph will verify and may retry on ${LOOP_BRANCH}"
+      [ -n "$merge_details" ] && echo "  [$epic_id] Merge details: $merge_details"
+      echo "[$epic_id] PENDING MERGE VERIFICATION (${merge_details:-team lead merge failed}) — $(date)" >> "$PROGRESS_FILE"
+    else
+      echo "  [$epic_id] Merge result missing — Ralph will verify and may retry on ${LOOP_BRANCH}"
+      echo "[$epic_id] PENDING MERGE VERIFICATION (missing team lead merge result artifact) — $(date)" >> "$PROGRESS_FILE"
     fi
   elif [ "$passed_stories" -gt 0 ]; then
     echo ""
@@ -1750,9 +1734,8 @@ spawn_epic_bg() {
     WORKTREE_PLAN_EXISTS="true"
   fi
   local MERGE_RESPONSIBILITY
-  if use_dedicated_epic_worktrees; then
-    MERGE_RESPONSIBILITY=$(cat <<EOF
-- If all stories pass, this same Team Lead session owns the merge attempt before exiting.
+  MERGE_RESPONSIBILITY=$(cat <<EOF
+ - If all stories pass, this Team Lead session owns the merge attempt before exiting.
 - Loop branch to merge into: ${LOOP_BRANCH}
 - Source epic branch: ${EPIC_BRANCH}
 - Repository root for the merge attempt: ${ROOT_DIR}
@@ -1762,19 +1745,9 @@ spawn_epic_bg() {
 - Allowed mode values: clean, projected-prd, conflict-resolved, unknown.
 - When all stories pass, do not print DONE until after you have attempted the merge and written the merge result artifact.
 - During the merge attempt you may operate in the repository root path above even though normal implementation work stays inside the epic workspace.
+- If the merge does not complete in this session, Ralph will verify the result and may attempt a scripted fallback merge afterward.
 EOF
 )
-  else
-    MERGE_RESPONSIBILITY=$(cat <<EOF
-- Ralph owns the merge for this run mode. Do NOT attempt the merge yourself.
-- Loop branch to merge into: ${LOOP_BRANCH}
-- Source epic branch: ${EPIC_BRANCH}
-- Repository root for the scripted merge attempt: ${ROOT_DIR}
-- When all stories pass, stop after writing the epic state updates. Ralph will attempt the merge after this session exits.
-- Do not write a merge result artifact in this mode. Ralph will write it after the scripted merge attempt.
-EOF
-)
-  fi
 
   init_epic_state_file "$EPIC_ID" "$EPIC_INDEX"
   reset_epic_merge_result_file "$EPIC_ID"
@@ -2468,13 +2441,10 @@ while true; do
         fi
         local process_exit_complete=false
         if [ "$all_done" = true ]; then
-          # In parallel mode the Team Lead owns the merge, so a completed
-          # session must include the merge result artifact. In sequential mode
-          # Ralph performs the scripted merge after the Team Lead exits, so a
-          # normal exit with all stories passed is already a complete session.
-          if [ "$merge_recorded" = true ] || ! use_dedicated_epic_worktrees; then
-            process_exit_complete=true
-          fi
+          # Once all stories pass, accept a normal Team Lead exit even if the
+          # merge result is still missing. Ralph will verify the merge result
+          # and attempt a scripted fallback merge when needed.
+          process_exit_complete=true
         fi
 
         if [ "$process_finished" = true ] || [ "$epic_flow_complete" = true ]; then
@@ -2605,7 +2575,7 @@ while true; do
 
   # Merge completed epic branches back to starting branch
   if [ ${#wave_completed_ids[@]} -gt 0 ]; then
-    merge_wave "${wave_completed_ids[@]}"
+    merge_wave "${wave_completed_ids[@]}" || true
   fi
 
   # If we hit --max-epics mid-wave, stop processing further waves

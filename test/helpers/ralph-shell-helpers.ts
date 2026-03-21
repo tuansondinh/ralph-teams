@@ -326,13 +326,14 @@ export function runRalph(tempDir: string, env: Record<string, string>, args: str
 
 export function setupMergeRepo(
   epics: Array<{ id: string; title: string; fileName: string }>,
-  options?: { dirtyLoopBranchBeforeMerge?: boolean; hangAfterStoryPassBeforeMerge?: boolean },
+  options?: { dirtyLoopBranchBeforeMerge?: boolean; hangAfterStoryPassBeforeMerge?: boolean; skipTeamLeadMerge?: boolean },
 ) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ralph-merge-'));
   const binDir = path.join(tempDir, 'bin');
   fs.mkdirSync(binDir);
   const dirtyLoopBranchBeforeMerge = options?.dirtyLoopBranchBeforeMerge === true;
   const hangAfterStoryPassBeforeMerge = options?.hangAfterStoryPassBeforeMerge === true;
+  const skipTeamLeadMerge = options?.skipTeamLeadMerge === true;
 
   execFileSync('git', ['init', '-b', 'main'], { cwd: tempDir });
   execFileSync('git', ['config', 'user.name', 'Ralph Test'], { cwd: tempDir });
@@ -356,6 +357,7 @@ export function setupMergeRepo(
     '#!/bin/sh',
     `DIRTY_LOOP_BEFORE_MERGE="${dirtyLoopBranchBeforeMerge ? '1' : '0'}"`,
     `HANG_AFTER_STORY_PASS_BEFORE_MERGE="${hangAfterStoryPassBeforeMerge ? '1' : '0'}"`,
+    `SKIP_TEAM_LEAD_MERGE="${skipTeamLeadMerge ? '1' : '0'}"`,
     'STDIN=$(cat)',
     'TEAM_LEAD_OWNS_MERGE=$(printf "%s" "$STDIN" | grep -c "this Team Lead session owns the merge" || true)',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
@@ -413,7 +415,7 @@ export function setupMergeRepo(
     '    sleep 5',
     '    exit 0',
     '  fi',
-    '  if [ "$TEAM_LEAD_OWNS_MERGE" != "0" ] && [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
+    '  if [ "$SKIP_TEAM_LEAD_MERGE" != "1" ] && [ "$TEAM_LEAD_OWNS_MERGE" != "0" ] && [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
     '    if [ -n "$(git -C "$ROOT_DIR" status --porcelain 2>/dev/null || true)" ]; then',
     '      git -C "$ROOT_DIR" add -A',
     '      git -C "$ROOT_DIR" commit -m "chore: checkpoint loop branch before merge wave"',

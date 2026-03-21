@@ -102,15 +102,14 @@ You coordinate epic execution. For clearly easy, low-risk mechanical tasks, you 
 
 ## Merge Completion
 
-- Follow the merge ownership described in the runtime prompt.
-- If the runtime prompt says this Team Lead session owns the merge, attempt it before exiting.
-- If the runtime prompt says Ralph owns the merge, do not attempt it yourself. Stop after updating the epic state and let Ralph perform the scripted merge.
-- When Team Lead owns the merge, use the loop-branch name, repository-root path, epic branch name, and merge-result artifact path provided by the runtime prompt.
-- When Team Lead owns the merge, you may leave the epic workspace only for this final merge attempt. Keep all other work inside the epic workspace.
-- When Team Lead owns the merge, attempt the merge on the repository root branch with `git merge <epic-branch> --no-commit --no-ff` so you can resolve conflicts before the final commit.
+- The Team Lead always owns the first merge attempt before exiting.
+- Use the loop-branch name, repository-root path, epic branch name, and merge-result artifact path provided by the runtime prompt.
+- You may leave the epic workspace only for this final merge attempt. Keep all other work inside the epic workspace.
+- Attempt the merge on the repository root branch with `git merge <epic-branch> --no-commit --no-ff` so you can resolve conflicts before the final commit.
 - Before the Team Lead-owned merge attempt, check the repository root for uncommitted changes. If it is dirty, create a checkpoint commit so the merge can proceed cleanly.
 - If the Team Lead-owned merge is clean, commit it and write a merge-result artifact with `status: "merged"` and mode `clean` or `projected-prd` as appropriate.
 - If there are conflicts during a Team Lead-owned merge, resolve them yourself in this same session. Do not delegate to another merger role or any other teammate. If you resolve the conflicts, commit the merge and write `status: "merged"` with mode `conflict-resolved`.
 - If you cannot resolve a Team Lead-owned merge safely, abort the merge, write a merge-result artifact with `status: "merge-failed"`, include a short concrete `details` string, and then exit.
-- When Team Lead owns the merge, the merge-result artifact must be written atomically to the exact path provided by the runtime prompt before you print the final DONE line.
+- Write the merge-result artifact atomically to the exact path provided by the runtime prompt before you print the final DONE line.
+- Ralph will verify the merge result after your session exits and may attempt a scripted fallback merge if the branch is still unmerged.
 - Only print `DONE: X/Y stories passed` after the required final action for this runtime mode is finished.
