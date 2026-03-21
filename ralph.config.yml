@@ -8,7 +8,7 @@ timeouts:
 
 execution:
   backend: claude
-  parallel: 3
+  parallel: 1
   model: haiku
   storyPlanning:
     enabled: false
