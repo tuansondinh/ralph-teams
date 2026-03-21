@@ -804,6 +804,10 @@ fail_on_pending_epic_git_state_mismatch() {
 fail_on_pending_epic_git_state_mismatch
 
 # --- Worktree Management ---
+use_dedicated_epic_worktrees() {
+  [ -n "$PARALLEL" ] && [ "$PARALLEL" -gt 1 ]
+}
+
 # Creates a git worktree at .worktrees/<epic_id> on a run-scoped branch under
 # the current loop branch name, rooted from the loop branch for this run.
 # rooted from the loop branch for this run.
@@ -841,6 +845,56 @@ create_epic_worktree() {
     exit 1
   fi
   echo "$worktree_path"
+}
+
+restore_loop_worktree_branch() {
+  local current_branch=""
+  current_branch=$(git -C "$LOOP_ROOT_DIR" branch --show-current 2>/dev/null || echo "")
+
+  if [ -z "$current_branch" ] || [ "$current_branch" = "$LOOP_BRANCH" ]; then
+    return 0
+  fi
+
+  local dirty_status=""
+  dirty_status=$(git -C "$LOOP_ROOT_DIR" status --porcelain 2>/dev/null || true)
+  if [ -n "$dirty_status" ]; then
+    git -C "$LOOP_ROOT_DIR" add -A
+    (
+      cd "$LOOP_ROOT_DIR"
+      unstage_runtime_artifacts
+    )
+    if git -C "$LOOP_ROOT_DIR" commit -m "chore: checkpoint ${current_branch} before returning to loop branch" >/dev/null 2>&1; then
+      echo "  [${current_branch}] Auto-committed dirty workspace before returning to ${LOOP_BRANCH}"
+    fi
+  fi
+
+  git -C "$LOOP_ROOT_DIR" checkout "$LOOP_BRANCH" >/dev/null 2>&1
+}
+
+prepare_sequential_epic_workspace() {
+  local epic_id="$1"
+  local branch_name
+  branch_name=$(epic_branch_name "$epic_id")
+
+  restore_loop_worktree_branch
+
+  if git show-ref --verify --quiet "refs/heads/${branch_name}"; then
+    git -C "$LOOP_ROOT_DIR" checkout "$branch_name" >/dev/null 2>&1
+  else
+    git -C "$LOOP_ROOT_DIR" checkout -b "$branch_name" "$LOOP_BRANCH" >/dev/null 2>&1
+  fi
+
+  echo "$LOOP_ROOT_DIR"
+}
+
+prepare_epic_workspace() {
+  local epic_id="$1"
+
+  if use_dedicated_epic_worktrees; then
+    create_epic_worktree "$epic_id"
+  else
+    prepare_sequential_epic_workspace "$epic_id"
+  fi
 }
 
 compute_file_checksum() {
@@ -882,6 +936,16 @@ CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
 cleanup_epic_worktree() {
   local epic_id="$1"
   git worktree remove "${WORKTREES_DIR}/${epic_id}" --force 2>/dev/null || true
+}
+
+cleanup_epic_workspace() {
+  local epic_id="$1"
+
+  if use_dedicated_epic_worktrees; then
+    cleanup_epic_worktree "$epic_id"
+  else
+    restore_loop_worktree_branch
+  fi
 }
 
 # Removes ALL .worktrees/* entries (used on EXIT).
@@ -1405,6 +1469,7 @@ render_team_lead_prompt() {
   TEAM_LEAD_TEMPLATE_EPIC_PLANNED="$EPIC_PLANNED" \
   TEAM_LEAD_TEMPLATE_WORKTREE_PLAN_EXISTS="$WORKTREE_PLAN_EXISTS" \
   TEAM_LEAD_TEMPLATE_PENDING_STORIES_JSON="$PENDING_STORIES_JSON" \
+  TEAM_LEAD_TEMPLATE_MERGE_RESPONSIBILITY="$MERGE_RESPONSIBILITY" \
   TEAM_LEAD_TEMPLATE_TEAM_LEAD_POLICY="$TEAM_LEAD_POLICY" \
   TEAM_LEAD_TEMPLATE_STORY_PLANNING_ENABLED="$STORY_PLANNING_ENABLED" \
   TEAM_LEAD_TEMPLATE_STORY_VALIDATION_ENABLED="$STORY_VALIDATION_ENABLED" \
@@ -1446,23 +1511,25 @@ process_epic_result() {
   passed_stories=$(rjq count-where "$PRD_FILE" ".epics[$epic_index].userStories" "passes=true" 2>/dev/null) || passed_stories=0
 
   if [ "$passed_stories" -eq "$total_stories" ] && [ "$total_stories" -gt 0 ]; then
-    if [ "$merge_status" = "merge-failed" ]; then
-      echo ""
-      echo "  [$epic_id] MERGE FAILED — all stories passed but merge did not complete"
-      [ -n "$merge_details" ] && echo "  [$epic_id] Merge details: $merge_details"
-      rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"' 2>/dev/null || echo "  [WARN] Failed to set epic $epic_index status" >&2
-      FAILED=$((FAILED + 1))
-      echo "[$epic_id] MERGE FAILED (${merge_details:-team lead merge failed}) — $(date)" >> "$PROGRESS_FILE"
-      return
-    fi
+    if use_dedicated_epic_worktrees; then
+      if [ "$merge_status" = "merge-failed" ]; then
+        echo ""
+        echo "  [$epic_id] MERGE FAILED — all stories passed but merge did not complete"
+        [ -n "$merge_details" ] && echo "  [$epic_id] Merge details: $merge_details"
+        rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"' 2>/dev/null || echo "  [WARN] Failed to set epic $epic_index status" >&2
+        FAILED=$((FAILED + 1))
+        echo "[$epic_id] MERGE FAILED (${merge_details:-team lead merge failed}) — $(date)" >> "$PROGRESS_FILE"
+        return
+      fi
 
-    if [ "$merge_status" != "merged" ]; then
-      echo ""
-      echo "  [$epic_id] MERGE FAILED — all stories passed but Team Lead did not record a merge result"
-      rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"' 2>/dev/null || echo "  [WARN] Failed to set epic $epic_index status" >&2
-      FAILED=$((FAILED + 1))
-      echo "[$epic_id] MERGE FAILED (missing team lead merge result artifact) — $(date)" >> "$PROGRESS_FILE"
-      return
+      if [ "$merge_status" != "merged" ]; then
+        echo ""
+        echo "  [$epic_id] MERGE FAILED — all stories passed but Team Lead did not record a merge result"
+        rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"' 2>/dev/null || echo "  [WARN] Failed to set epic $epic_index status" >&2
+        FAILED=$((FAILED + 1))
+        echo "[$epic_id] MERGE FAILED (missing team lead merge result artifact) — $(date)" >> "$PROGRESS_FILE"
+        return
+      fi
     fi
 
     echo ""
@@ -1473,6 +1540,8 @@ process_epic_result() {
     if [ "$merge_status" = "merged" ]; then
       echo "  [$epic_id] Merge successful (team lead, ${merge_mode:-unknown})"
       echo "[$epic_id] MERGED (team lead ${merge_mode:-unknown}) — $(date)" >> "$PROGRESS_FILE"
+    elif ! use_dedicated_epic_worktrees; then
+      echo "  [$epic_id] Awaiting scripted merge on ${LOOP_BRANCH}"
     fi
   elif [ "$passed_stories" -gt 0 ]; then
     echo ""
@@ -1530,6 +1599,31 @@ read_epic_merge_result_field() {
 
   [ -f "$result_file" ] || return 1
   rjq read "$result_file" "$field_path" "$default_value"
+}
+
+write_epic_merge_result_file() {
+  local epic_id="$1"
+  local status="$2"
+  local mode="$3"
+  local details="$4"
+  local result_file="${STATE_DIR}/merge-${epic_id}.json"
+  local tmp_file
+  tmp_file=$(mktemp "${STATE_DIR}/.merge-${epic_id}.json.XXXXXX")
+
+  node - "$tmp_file" "$epic_id" "$status" "$mode" "$details" <<'NODE'
+const fs = require('fs');
+const [filePath, epicId, status, mode, details] = process.argv.slice(2);
+const payload = {
+  epicId,
+  status,
+  mode,
+  details,
+  timestamp: new Date().toISOString(),
+};
+fs.writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`);
+NODE
+
+  mv "$tmp_file" "$result_file"
 }
 
 delete_epic_branch() {
@@ -1612,7 +1706,7 @@ NODE
 
 # spawn_epic_bg: create worktree, build prompt, and run team lead in the background.
 # Sets LAST_SPAWN_PID to the background PID.
-# Callers must wait on that PID and then call cleanup_epic_worktree + process_epic_result.
+# Callers must wait on that PID and then call cleanup_epic_workspace + process_epic_result.
 spawn_epic_bg() {
   local EPIC_INDEX="$1"
   local EPIC_ID
@@ -1639,9 +1733,9 @@ spawn_epic_bg() {
 
   local EPIC_LOG="${LOGS_DIR}/epic-${EPIC_ID}-$(date +%s).log"
 
-  # Create isolated worktree for this epic
+  # Create or reuse the workspace for this epic.
   local WORKTREE_PATH
-  WORKTREE_PATH=$(create_epic_worktree "$EPIC_ID")
+  WORKTREE_PATH=$(prepare_epic_workspace "$EPIC_ID")
   local WORKTREE_ABS_PATH
   WORKTREE_ABS_PATH="$WORKTREE_PATH"
   local EPIC_BRANCH
@@ -1655,11 +1749,41 @@ spawn_epic_bg() {
   if [ -f "$WORKTREE_PLAN_FILE" ]; then
     WORKTREE_PLAN_EXISTS="true"
   fi
+  local MERGE_RESPONSIBILITY
+  if use_dedicated_epic_worktrees; then
+    MERGE_RESPONSIBILITY=$(cat <<EOF
+- If all stories pass, this same Team Lead session owns the merge attempt before exiting.
+- Loop branch to merge into: ${LOOP_BRANCH}
+- Source epic branch: ${EPIC_BRANCH}
+- Repository root for the merge attempt: ${ROOT_DIR}
+- Write the final merge result artifact to: ${WORKTREE_MERGE_RESULT_FILE}
+- The merge result artifact must be valid JSON with fields: epicId, status, mode, details, timestamp.
+- Allowed status values: merged, merge-failed.
+- Allowed mode values: clean, projected-prd, conflict-resolved, unknown.
+- When all stories pass, do not print DONE until after you have attempted the merge and written the merge result artifact.
+- During the merge attempt you may operate in the repository root path above even though normal implementation work stays inside the epic workspace.
+EOF
+)
+  else
+    MERGE_RESPONSIBILITY=$(cat <<EOF
+- Ralph owns the merge for this run mode. Do NOT attempt the merge yourself.
+- Loop branch to merge into: ${LOOP_BRANCH}
+- Source epic branch: ${EPIC_BRANCH}
+- Repository root for the scripted merge attempt: ${ROOT_DIR}
+- When all stories pass, stop after writing the epic state updates. Ralph will attempt the merge after this session exits.
+- Do not write a merge result artifact in this mode. Ralph will write it after the scripted merge attempt.
+EOF
+)
+  fi
 
   init_epic_state_file "$EPIC_ID" "$EPIC_INDEX"
   reset_epic_merge_result_file "$EPIC_ID"
 
-  echo "  Spawning [$EPIC_ID] in worktree $WORKTREE_PATH"
+  if use_dedicated_epic_worktrees; then
+    echo "  Spawning [$EPIC_ID] in worktree $WORKTREE_PATH"
+  else
+    echo "  Spawning [$EPIC_ID] on branch ${EPIC_BRANCH} in loop worktree $WORKTREE_PATH"
+  fi
 
   local TEAM_LEAD_POLICY
   TEAM_LEAD_POLICY="$(cat "$TEAM_LEAD_POLICY_FILE")"
@@ -1713,7 +1837,22 @@ merge_wave() {
   local merge_failures=0
   local target_branch="$LOOP_BRANCH"
 
-  if [ "$(git branch --show-current 2>/dev/null || echo "")" != "$target_branch" ]; then
+  local current_branch=""
+  current_branch=$(git branch --show-current 2>/dev/null || echo "")
+  if [ -n "$current_branch" ] && [ "$current_branch" != "$target_branch" ]; then
+    local current_branch_dirty=""
+    current_branch_dirty=$(git status --porcelain 2>/dev/null || true)
+    if [ -n "$current_branch_dirty" ]; then
+      git add -A
+      unstage_runtime_artifacts
+      if git commit -m "chore: checkpoint ${current_branch} before scripted merge" >/dev/null 2>&1; then
+        echo "  [${current_branch}] Auto-committed dirty branch before scripted merge"
+        echo "[${current_branch}] AUTO-COMMIT before scripted merge — $(date)" >> "$PROGRESS_FILE"
+      fi
+    fi
+  fi
+
+  if [ "$current_branch" != "$target_branch" ]; then
     git checkout "$target_branch" >/dev/null 2>&1
   fi
 
@@ -1753,6 +1892,7 @@ merge_wave() {
       if [ -n "$epic_index" ]; then
         rjq set "$PRD_FILE" ".epics[$epic_index].status" '"completed"'
       fi
+      write_epic_merge_result_file "$epic_id" "merged" "clean" "Scripted merge of ${branch_name} into ${target_branch}"
       echo "  [$epic_id] Merge successful (clean)"
       echo "[$epic_id] MERGED (clean) — $(date)" >> "$PROGRESS_FILE"
     else
@@ -1770,6 +1910,7 @@ merge_wave() {
         echo "[$epic_id] MERGE FAILED (merge did not enter conflict state) — $(date)" >> "$PROGRESS_FILE"
         [ -n "$merge_error" ] && echo "  [$epic_id] Working tree state:" && printf '%s\n' "$merge_error" | sed 's/^/    /'
         merge_failures=$((merge_failures + 1))
+        write_epic_merge_result_file "$epic_id" "merge-failed" "unknown" "Scripted merge did not enter a merge state"
 
         if [ -n "$epic_index" ]; then
           rjq set "$PRD_FILE" ".epics[$epic_index].status" '"merge-failed"'
@@ -1790,6 +1931,7 @@ merge_wave() {
         if [ -n "$epic_index" ]; then
           rjq set "$PRD_FILE" ".epics[$epic_index].status" '"completed"'
         fi
+        write_epic_merge_result_file "$epic_id" "merged" "projected-prd" "Scripted merge kept the projected prd.json from ${target_branch}"
         echo "  [$epic_id] Merge successful (kept projected prd.json)"
         echo "[$epic_id] MERGED (projected prd.json) — $(date)" >> "$PROGRESS_FILE"
         git branch -d "${branch_name}" 2>/dev/null || true
@@ -1797,6 +1939,7 @@ merge_wave() {
       fi
 
       git merge --abort 2>/dev/null || true
+      write_epic_merge_result_file "$epic_id" "merge-failed" "unknown" "Scripted merge left conflicts in: ${conflicted_files}"
       echo "  [$epic_id] Merge FAILED — conflicts remain; leaving ${branch_name} for a later clean retry"
       echo "[$epic_id] MERGE FAILED (conflicts remain, files: ${conflicted_files}) — $(date)" >> "$PROGRESS_FILE"
       merge_failures=$((merge_failures + 1))
@@ -2206,7 +2349,7 @@ while true; do
             echo "  [$finished_epic_id] Timeout with $_to_passed/$_to_total passed — retry $((_to_retry_count + 1))/$MAX_CRASH_RETRIES"
             echo "[$finished_epic_id] TIMEOUT RETRY $((_to_retry_count + 1))/$MAX_CRASH_RETRIES ($_to_passed/$_to_total passed) — $(date)" >> "$PROGRESS_FILE"
             project_state_to_prd "$finished_epic_id" || true
-            cleanup_epic_worktree "$finished_epic_id"
+            cleanup_epic_workspace "$finished_epic_id"
             if spawn_epic_bg "${active_indices[$slot]}"; then
               active_pids[$slot]="$LAST_SPAWN_PID"
               active_start_times[$slot]="$(date +%s)"
@@ -2217,7 +2360,10 @@ while true; do
             echo "  [$finished_epic_id] Retry spawn failed — treating as timeout failure" >&2
           fi
           project_state_to_prd "$finished_epic_id" || true
-          cleanup_epic_worktree "$finished_epic_id"
+          cleanup_epic_workspace "$finished_epic_id"
+          if ! use_dedicated_epic_worktrees; then
+            project_state_to_prd "$finished_epic_id" || true
+          fi
           echo "TIMEOUT: Epic exceeded ${EPIC_TIMEOUT}s limit" >> "${active_logs[$slot]}"
           # Log timeout-specific message before generic result
           echo "[$finished_epic_id] FAILED (epic timeout after ${EPIC_TIMEOUT}s) — $(date)" >> "$PROGRESS_FILE"
@@ -2266,7 +2412,7 @@ while true; do
             echo "  [$finished_epic_id] Idle timeout with $_it_passed/$_it_total passed — retry $((_it_retry_count + 1))/$MAX_CRASH_RETRIES"
             echo "[$finished_epic_id] IDLE RETRY $((_it_retry_count + 1))/$MAX_CRASH_RETRIES ($_it_passed/$_it_total passed) — $(date)" >> "$PROGRESS_FILE"
             project_state_to_prd "$finished_epic_id" || true
-            cleanup_epic_worktree "$finished_epic_id"
+            cleanup_epic_workspace "$finished_epic_id"
             if spawn_epic_bg "${active_indices[$slot]}"; then
               active_pids[$slot]="$LAST_SPAWN_PID"
               active_start_times[$slot]="$(date +%s)"
@@ -2277,7 +2423,10 @@ while true; do
             echo "  [$finished_epic_id] Retry spawn failed — treating as idle timeout failure" >&2
           fi
           project_state_to_prd "$finished_epic_id" || true
-          cleanup_epic_worktree "$finished_epic_id"
+          cleanup_epic_workspace "$finished_epic_id"
+          if ! use_dedicated_epic_worktrees; then
+            project_state_to_prd "$finished_epic_id" || true
+          fi
           # Log idle-timeout-specific message before generic result
           echo "[$finished_epic_id] FAILED (idle timeout — no output for ${IDLE_TIMEOUT}s) — $(date)" >> "$PROGRESS_FILE"
           process_epic_result "${active_indices[$slot]}"
@@ -2339,7 +2488,7 @@ while true; do
               echo "  [$finished_epic_id] CRASH DETECTED ($passed_s/$total_s passed) — retry $((retry_count + 1))/$MAX_CRASH_RETRIES"
               echo "[$finished_epic_id] CRASH RETRY $((retry_count + 1))/$MAX_CRASH_RETRIES ($passed_s/$total_s passed so far) — $(date)" >> "$PROGRESS_FILE"
               project_state_to_prd "$finished_epic_id" || true
-              cleanup_epic_worktree "$finished_epic_id"
+              cleanup_epic_workspace "$finished_epic_id"
               if spawn_epic_bg "${active_indices[$slot]}"; then
                 active_pids[$slot]="$LAST_SPAWN_PID"
                 active_start_times[$slot]="$(date +%s)"
@@ -2369,10 +2518,16 @@ while true; do
           # Track completed epics for merge_wave only when the Team Lead did not already merge.
           local post_status
           post_status=$(rjq read "$PRD_FILE" ".epics[${active_indices[$slot]}].status" "pending" 2>/dev/null) || post_status="pending"
-          if [ "$post_status" = "completed" ] && [ "$merge_status" != "merged" ]; then
+          if [ "$post_status" = "completed" ] && [ "$merge_status" != "merged" ] && use_dedicated_epic_worktrees; then
             wave_completed_ids+=("$finished_epic_id")
           fi
-          cleanup_epic_worktree "$finished_epic_id"
+
+          if [ "$post_status" = "completed" ] && [ "$merge_status" != "merged" ] && ! use_dedicated_epic_worktrees; then
+            merge_wave "$finished_epic_id" || true
+            merge_status=$(read_epic_merge_result_field "$finished_epic_id" .status "" 2>/dev/null || true)
+          fi
+
+          cleanup_epic_workspace "$finished_epic_id"
           if [ "$merge_status" = "merged" ]; then
             delete_epic_branch "$finished_epic_id"
           fi

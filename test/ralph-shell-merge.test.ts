@@ -47,6 +47,7 @@ test('US-004: epic success is preserved when only the worktree PRD is updated', 
   const mockClaude = [
     '#!/bin/sh',
     'STDIN=$(cat)',
+    'TEAM_LEAD_OWNS_MERGE=$(printf "%s" "$STDIN" | grep -c "this Team Lead session owns the merge" || true)',
     'WORKTREE=$(printf "%s" "$STDIN" | awk \'/ALL work for this epic MUST happen in this directory:/ {sub(/^.*directory: /, ""); print; exit}\')',
     'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
@@ -80,7 +81,7 @@ test('US-004: epic success is preserved when only the worktree PRD is updated', 
     '" "$PRD_PATH" "$EPIC_ID"',
     '  git add prd.json',
     '  git commit -m "feat: mark story passed in worktree PRD"',
-    '  if [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
+    '  if [ "$TEAM_LEAD_OWNS_MERGE" != "0" ] && [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
     '    EPIC_BRANCH=$(git branch --show-current)',
     '    git -C "$ROOT_DIR" checkout "$LOOP_BRANCH"',
     '    if git -C "$ROOT_DIR" merge "$EPIC_BRANCH" --no-commit --no-ff; then',
@@ -136,11 +137,12 @@ test('ralph.sh auto-adds runtime artifacts to the repo .gitignore', () => {
   assert.match(gitignore, /^\.ralph-teams\/$/m);
 });
 
-test('US-004: clean merge succeeds inside the epic team lead session', () => {
+test('US-004: sequential runs perform a clean scripted merge after epic completion', () => {
   const { tempDir, env } = setupMergeRepo([{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }]);
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
-  assert.match(result.stdout, /\[EPIC-001\] Merge successful \(team lead, clean\)/);
+  assert.match(result.stdout, /\[EPIC-001\] Awaiting scripted merge on /);
+  assert.match(result.stdout, /\[EPIC-001\] Merge successful \(clean\)/);
   const logsDir = path.join(tempDir, '.ralph-teams', 'logs');
   if (fs.existsSync(logsDir)) {
     const mergeLogs = fs.readdirSync(logsDir).filter((f) => f.startsWith('merge-'));
@@ -159,12 +161,12 @@ test('US-004: dirty loop branch is auto-committed before merge', () => {
   const { tempDir, env } = setupMergeRepo([{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }], { dirtyLoopBranchBeforeMerge: true });
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
-  assert.match(result.stdout, /\[EPIC-001\] Merge successful \(team lead, clean\)/);
+  assert.match(result.stdout, /\[EPIC-001\] Merge successful \(clean\)/);
   const subjects = execFileSync('git', ['log', getSingleLoopBranch(tempDir), '--pretty=%s', '-n', '5'], { cwd: tempDir, encoding: 'utf-8' });
   assert.match(subjects, /chore: checkpoint loop branch before merge wave/);
 });
 
-test('US-004: runner waits for merge artifact instead of killing the team lead after stories pass', () => {
+test('US-004: idle timeout still recovers a completed sequential epic for scripted merge finalization', () => {
   const { tempDir, env } = setupMergeRepo(
     [{ id: 'EPIC-001', title: 'Alpha', fileName: 'alpha.txt' }],
     { hangAfterStoryPassBeforeMerge: true },
@@ -181,7 +183,6 @@ test('US-004: runner waits for merge artifact instead of killing the team lead a
   assert.equal(prd.epics[0].status, 'completed');
 
   const progress = fs.readFileSync(path.join(tempDir, '.ralph-teams', 'progress.txt'), 'utf-8');
-  assert.match(progress, /\[EPIC-001\] MERGE FAILED \(missing team lead merge result artifact\)/);
   assert.match(progress, /\[EPIC-001\] RECOVERED PENDING MERGE \(finalization\)/);
   assert.match(progress, /\[EPIC-001\] MERGED \(clean\)/);
 });
@@ -327,7 +328,7 @@ test('US-004: resume recovers completed-but-unmerged epic branches before finish
 
 test('US-005: merge-failed status set when conflict cannot be resolved', () => {
   const { tempDir, env } = setupConflictRepo();
-  runRalph(tempDir, env);
+  runRalph(tempDir, env, ['--parallel', '2']);
   const prd = readLoopBranchPrd(tempDir) as { epics: Array<{ status: string }> };
   assert.equal(prd.epics[0].status, 'merge-failed');
 });
@@ -396,7 +397,7 @@ test('US-005: recovered pending merges do not respawn a fresh team lead when con
 
 test('US-005: conflict resolution attempt is logged to progress.txt', () => {
   const { tempDir, env } = setupConflictRepo();
-  runRalph(tempDir, env);
+  runRalph(tempDir, env, ['--parallel', '2']);
   const progress = fs.readFileSync(path.join(tempDir, '.ralph-teams', 'progress.txt'), 'utf-8');
   assert.match(progress, /\[EPIC-001\] MERGE FAILED/);
 });
@@ -431,14 +432,14 @@ test('US-005: final validation still runs when every epic is terminal but one me
 
 test('US-005: team lead merge result artifact is written for conflict handling', () => {
   const { tempDir, env } = setupConflictRepo();
-  runRalph(tempDir, env);
+  runRalph(tempDir, env, ['--parallel', '2']);
   const mergeArtifact = path.join(tempDir, '.ralph-teams', 'state', 'merge-EPIC-001.json');
   assert.ok(fs.existsSync(mergeArtifact));
 });
 
 test('US-005: epic team lead can resolve a simple conflict end to end', () => {
   const { tempDir, env } = setupConflictRepo({ resolveWithTeamLead: true });
-  const result = runRalph(tempDir, env);
+  const result = runRalph(tempDir, env, ['--parallel', '2']);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
   assert.match(result.stdout, /\[EPIC-001\] Merge successful \(team lead, conflict-resolved\)/);
   const prd = readLoopBranchPrd(tempDir) as { epics: Array<{ status: string }> };

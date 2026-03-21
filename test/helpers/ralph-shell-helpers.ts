@@ -119,6 +119,7 @@ export function setupUnbornRepo() {
   const mockClaude = [
     '#!/bin/sh',
     'STDIN=$(cat)',
+    'TEAM_LEAD_OWNS_MERGE=$(printf "%s" "$STDIN" | grep -c "this Team Lead session owns the merge" || true)',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
     'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
@@ -142,7 +143,7 @@ export function setupUnbornRepo() {
       "if(e)e.userStories.forEach(s=>{s.passes=true;});" +
       "fs.writeFileSync(f,JSON.stringify(p,null,2)+'\\n');" +
       '" "$EPIC_ID" "$PRD_PATH"',
-    '  if [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
+    '  if [ "$TEAM_LEAD_OWNS_MERGE" != "0" ] && [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
     '    EPIC_BRANCH=$(git branch --show-current)',
     '    git -C "$ROOT_DIR" checkout "$LOOP_BRANCH"',
     '    if git -C "$ROOT_DIR" merge "$EPIC_BRANCH" --no-commit --no-ff; then',
@@ -197,6 +198,7 @@ export function setupMultiEpicRepo(
   const mockClaude = [
     '#!/bin/sh',
     'STDIN=$(cat)',
+    'TEAM_LEAD_OWNS_MERGE=$(printf "%s" "$STDIN" | grep -c "this Team Lead session owns the merge" || true)',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
     'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
@@ -234,7 +236,7 @@ export function setupMultiEpicRepo(
       "fs.renameSync(t,f);" +
     '" "$EPIC_ID" "$PRD_PATH"',
     '      EPIC_BRANCH=$(git branch --show-current)',
-    '      if [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
+    '      if [ "$TEAM_LEAD_OWNS_MERGE" != "0" ] && [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
     '        git -C "$ROOT_DIR" checkout "$LOOP_BRANCH"',
     '        if git -C "$ROOT_DIR" merge "$EPIC_BRANCH" --no-commit --no-ff; then',
     '          if [ -f "$ROOT_DIR/.git/MERGE_HEAD" ]; then',
@@ -355,6 +357,7 @@ export function setupMergeRepo(
     `DIRTY_LOOP_BEFORE_MERGE="${dirtyLoopBranchBeforeMerge ? '1' : '0'}"`,
     `HANG_AFTER_STORY_PASS_BEFORE_MERGE="${hangAfterStoryPassBeforeMerge ? '1' : '0'}"`,
     'STDIN=$(cat)',
+    'TEAM_LEAD_OWNS_MERGE=$(printf "%s" "$STDIN" | grep -c "this Team Lead session owns the merge" || true)',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
     'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
@@ -410,7 +413,7 @@ export function setupMergeRepo(
     '    sleep 5',
     '    exit 0',
     '  fi',
-    '  if [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
+    '  if [ "$TEAM_LEAD_OWNS_MERGE" != "0" ] && [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
     '    if [ -n "$(git -C "$ROOT_DIR" status --porcelain 2>/dev/null || true)" ]; then',
     '      git -C "$ROOT_DIR" add -A',
     '      git -C "$ROOT_DIR" commit -m "chore: checkpoint loop branch before merge wave"',
@@ -507,6 +510,7 @@ export function setupConflictRepo(options?: { resolveWithTeamLead?: boolean }) {
     '#!/bin/sh',
     `RESOLVE_WITH_TEAM_LEAD="${resolveWithTeamLead ? '1' : '0'}"`,
     'STDIN=$(cat)',
+    'TEAM_LEAD_OWNS_MERGE=$(printf "%s" "$STDIN" | grep -c "this Team Lead session owns the merge" || true)',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
     'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
@@ -544,7 +548,7 @@ export function setupConflictRepo(options?: { resolveWithTeamLead?: boolean }) {
       "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
       "fs.renameSync(t,f);" +
     '" "$EPIC_ID" "$PRD_PATH"',
-    '  if [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
+    '  if [ "$TEAM_LEAD_OWNS_MERGE" != "0" ] && [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
     '    MAIN_ROOT=$(git -C "$ROOT_DIR" worktree list --porcelain | awk \'/^worktree / {print $2; exit}\')',
     '    if [ -n "$MAIN_ROOT" ] && [ -d "$MAIN_ROOT" ]; then',
     '      touch "$MAIN_ROOT/team-lead-merge-invoked.txt"',
@@ -629,6 +633,7 @@ export function setupIdleTimeoutRepo(
   const mockClaude = [
     '#!/bin/sh',
     'STDIN=$(cat)',
+    'TEAM_LEAD_OWNS_MERGE=$(printf "%s" "$STDIN" | grep -c "this Team Lead session owns the merge" || true)',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
     'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
@@ -666,7 +671,7 @@ export function setupIdleTimeoutRepo(
       "fs.renameSync(t,f);" +
     '" "$EPIC_ID" "$PRD_PATH"',
     '      EPIC_BRANCH=$(git branch --show-current)',
-    '      if [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
+    '      if [ "$TEAM_LEAD_OWNS_MERGE" != "0" ] && [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
     '        git -C "$ROOT_DIR" checkout "$LOOP_BRANCH"',
     '        if git -C "$ROOT_DIR" merge "$EPIC_BRANCH" --no-commit --no-ff; then',
     '          if [ -f "$ROOT_DIR/.git/MERGE_HEAD" ]; then',
