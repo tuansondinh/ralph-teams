@@ -197,7 +197,7 @@ test('ralph.sh loads the canonical Team Lead policy for runtime prompts', () => 
   assert.match(runtimePrompt, /Ralph does not preinstall dependencies or preselect build\/test commands/);
   assert.match(runtimePrompt, /## Source Checkout/);
   assert.match(runtimePrompt, /Source checkout path: \{\{SOURCE_ROOT_DIR\}\}/);
-  assert.match(runtimePrompt, /establish the epic worktree environment once for this epic/i);
+  assert.match(runtimePrompt, /establish the epic workspace environment once for this epic/i);
   assert.match(runtimePrompt, /first check whether the source checkout already has reusable artifacts/i);
   assert.match(runtimePrompt, /pass those exact commands to every Builder/i);
   assert.match(runtimePrompt, /Check repo instructions first: 'AGENTS\.md', 'README\*'/);
@@ -229,16 +229,16 @@ test('canonical Team Lead policy covers scoped planner and validator heuristics'
   assert.match(content, /Do not rerun the planner only for the missing file write/i);
   assert.match(content, /Keep the Team Lead orchestration-first/i);
   assert.match(content, /Do not do open-ended architecture tours, large file sweeps, or broad grep passes yourself/i);
-  assert.match(content, /prepare the epic worktree environment once/i);
+  assert.match(content, /prepare the epic workspace environment once/i);
   assert.match(content, /source checkout path provided in the runtime prompt/i);
   assert.match(content, /pass the exact commands and any required environment-prep steps to every Builder/i);
-  assert.match(content, /Before delegating the first story, ensure the epic worktree environment is actually runnable/i);
+  assert.match(content, /Before delegating the first story, ensure the epic workspace environment is actually runnable/i);
   assert.match(content, /storyPlanning\.enabled = 1/i);
   assert.match(content, /storyValidation\.enabled = 1/i);
   assert.match(content, /epicValidation\.enabled = 1/i);
   assert.match(content, /If you are unsure, spawn the story validator/i);
   assert.match(content, /If you are unsure, spawn the epic validator/i);
-  assert.match(content, /Only print `DONE: X\/Y stories passed` after the merge attempt and merge-result artifact write are finished/i);
+  assert.match(content, /Only print `DONE: X\/Y stories passed` after the required final action for this runtime mode is finished/i);
 });
 
 test('claude team-lead prompt uses difficulty-based model selection unless config overrides are set', () => {
@@ -347,7 +347,7 @@ test('team lead runtime prompt keeps the lead in orchestration mode', () => {
   assert.match(runtimePrompt, /You are the Team Lead for execution, not the primary implementer or explorer/i);
   assert.match(runtimePrompt, /Keep your own repo exploration minimal and delegate the actual work/i);
   assert.match(runtimePrompt, /## Merge Responsibility/);
-  assert.match(runtimePrompt, /this same Team Lead session owns the merge attempt before exiting/i);
+  assert.match(runtimePrompt, /\{\{MERGE_RESPONSIBILITY\}\}/);
   assert.match(runtimePrompt, /Do NOT modify the source checkout during normal implementation/i);
 });
 
@@ -355,7 +355,8 @@ test('team lead policy requires in-session merge ownership with a scripted artif
   const policy = fs.readFileSync(`${repoRoot}/prompts/team-lead-policy.md`, 'utf-8');
 
   assert.match(policy, /## Merge Completion/);
-  assert.match(policy, /same Team Lead session must attempt the merge before exiting/i);
+  assert.match(policy, /If the runtime prompt says this Team Lead session owns the merge, attempt it before exiting/i);
+  assert.match(policy, /If the runtime prompt says Ralph owns the merge, do not attempt it yourself/i);
   assert.match(policy, /merge-result artifact/i);
 });
 

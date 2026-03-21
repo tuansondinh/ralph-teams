@@ -110,6 +110,7 @@ test('codex backend suppresses bare file-path chatter in stdout while keeping ou
   const mockCodex = [
     '#!/bin/sh',
     'STDIN=$(cat)',
+    'TEAM_LEAD_OWNS_MERGE=$(printf "%s" "$STDIN" | grep -c "this Team Lead session owns the merge" || true)',
     'EPIC_ID=$(printf "%s" "$STDIN" | grep -oE "EPIC-[0-9]+" | head -1)',
     'STATE_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## Epic State File$/ {found=1}\')',
     'PRD_PATH=$(printf "%s" "$STDIN" | awk \'found {print; exit} /^## PRD File Path/ {found=1}\')',
@@ -140,7 +141,7 @@ test('codex backend suppresses bare file-path chatter in stdout while keeping ou
       "fs.writeFileSync(t,JSON.stringify(p,null,2)+'\\n');" +
       "fs.renameSync(t,f);" +
     '" "$EPIC_ID" "$PRD_PATH"',
-    '  if [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
+    '  if [ "$TEAM_LEAD_OWNS_MERGE" != "0" ] && [ -n "$LOOP_BRANCH" ] && [ -n "$ROOT_DIR" ] && [ -n "$MERGE_RESULT_PATH" ]; then',
     '    EPIC_BRANCH=$(git branch --show-current)',
     '    git -C "$ROOT_DIR" checkout "$LOOP_BRANCH"',
     '    if git -C "$ROOT_DIR" merge "$EPIC_BRANCH" --no-commit --no-ff; then',
@@ -473,7 +474,7 @@ test('US-001: sequential mode merges before scheduling the next independent epic
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
 
-  const epic1MergedPos = result.stdout.indexOf('[EPIC-001] Merge successful (team lead, clean)');
+  const epic1MergedPos = result.stdout.indexOf('[EPIC-001] Merge successful (clean)');
   const secondRemainingPos = result.stdout.indexOf('1 epic(s) remaining to run sequentially');
   const epic2PassedPos = result.stdout.indexOf('[EPIC-002] PASSED');
 
@@ -498,33 +499,35 @@ test('US-001: rerunning Ralph automatically retries failed epics', () => {
   assert.match(second.stdout, /\[EPIC-001\] PASSED/);
 });
 
-test('US-002: a loop branch is created for the run and an epic worktree is created per epic', () => {
+test('US-002: sequential mode reuses the loop worktree and creates no dedicated epic worktree', () => {
   const { tempDir, env } = setupMultiEpicRepo([{ id: 'EPIC-001', title: 'Alpha' }], { 'EPIC-001': 'PASS' });
   const result = runRalph(tempDir, env);
   assert.equal(result.status, 0);
   assert.equal(execFileSync('git', ['branch', '--show-current'], { cwd: tempDir, encoding: 'utf-8' }).trim(), 'main');
   assert.match(getSingleLoopBranch(tempDir), /^ralph\/loop\//);
   assert.ok(fs.existsSync(path.join(tempDir, '.ralph-teams', '.worktrees')));
+  assert.ok(!fs.existsSync(path.join(tempDir, '.ralph-teams', '.worktrees', 'loop')));
+  assert.ok(!fs.existsSync(path.join(tempDir, '.ralph-teams', '.worktrees', 'EPIC-001')));
 });
 
-test('US-002: worktrees are cleaned up after wave completes', () => {
+test('US-002: sequential mode leaves no dedicated epic worktree behind after the wave completes', () => {
   const { tempDir, env } = setupMultiEpicRepo([{ id: 'EPIC-001', title: 'Alpha' }], { 'EPIC-001': 'PASS' });
   runRalph(tempDir, env);
-  const worktreeDir = path.join(tempDir, '.ralph-teams', '.worktrees', 'EPIC-001');
-  assert.ok(!fs.existsSync(worktreeDir));
+  assert.ok(!fs.existsSync(path.join(tempDir, '.ralph-teams', '.worktrees', 'loop')));
+  assert.ok(!fs.existsSync(path.join(tempDir, '.ralph-teams', '.worktrees', 'EPIC-001')));
 });
 
-test('US-002: stale unregistered worktree directory is removed automatically', () => {
+test('US-002: stale unregistered dedicated epic worktree directory is removed automatically in parallel mode', () => {
   const { tempDir, env } = setupMultiEpicRepo([{ id: 'EPIC-001', title: 'Alpha' }], { 'EPIC-001': 'PASS' });
   const stale = path.join(tempDir, '.ralph-teams', '.worktrees', 'EPIC-001');
   fs.mkdirSync(stale, { recursive: true });
   fs.writeFileSync(path.join(stale, 'stale.txt'), 'x\n');
-  const result = runRalph(tempDir, env);
+  const result = runRalph(tempDir, env, ['--parallel', '2']);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
   assert.ok(!fs.existsSync(stale));
 });
 
-test('US-002: a transient worktree creation failure is retried automatically', () => {
+test('US-002: a transient dedicated worktree creation failure is retried automatically in parallel mode', () => {
   const { tempDir, binDir, env } = setupMultiEpicRepo([{ id: 'EPIC-001', title: 'Alpha' }], { 'EPIC-001': 'PASS' });
   const realGit = execFileSync('which', ['git'], { encoding: 'utf-8' }).trim();
   const marker = path.join(tempDir, 'git-once.txt');
@@ -541,7 +544,7 @@ test('US-002: a transient worktree creation failure is retried automatically', (
   ].join('\n');
   fs.writeFileSync(path.join(binDir, 'git'), `${mockGit}\n`);
   fs.chmodSync(path.join(binDir, 'git'), 0o755);
-  const result = runRalph(tempDir, env);
+  const result = runRalph(tempDir, env, ['--parallel', '2']);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
   assert.ok(fs.existsSync(marker), 'expected transient worktree failure hook to run once');
 });
@@ -569,7 +572,7 @@ test('US-002: Ralph fails fast when a pending epic was already merged into the r
   assert.match(combined, /Mark the already-merged epic\(s\) completed in 'prd\.json'/);
 });
 
-test('US-002: new worktrees do not centrally bootstrap Node dependencies before spawning the epic', () => {
+test('US-002: new dedicated worktrees do not centrally bootstrap Node dependencies before spawning the epic in parallel mode', () => {
   const { tempDir, binDir, env } = setupMultiEpicRepo([{ id: 'EPIC-001', title: 'Alpha' }], { 'EPIC-001': 'PASS' });
   fs.mkdirSync(path.join(tempDir, 'web'), { recursive: true });
   fs.writeFileSync(path.join(tempDir, 'web', 'package.json'), JSON.stringify({
@@ -588,7 +591,7 @@ test('US-002: new worktrees do not centrally bootstrap Node dependencies before 
   fs.chmodSync(path.join(binDir, 'npm'), 0o755);
   env.RALPH_NPM_LOG = npmLog;
 
-  const result = runRalph(tempDir, env);
+  const result = runRalph(tempDir, env, ['--parallel', '2']);
   assert.equal(result.status, 0, `stderr: ${result.stderr}\nstdout: ${result.stdout}`);
   assert.doesNotMatch(result.stdout, /Bootstrapping dependencies in web with 'npm ci'/);
   assert.ok(!fs.existsSync(npmLog), 'expected runtime not to invoke npm during worktree creation');

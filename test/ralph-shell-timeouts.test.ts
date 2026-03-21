@@ -42,11 +42,12 @@ test('US-008: SIGINT exits with code 130', { timeout: 10000 }, async () => {
   assert.equal(code, 130);
 });
 
-test('US-008: worktrees are preserved after SIGINT (not cleaned up)', { timeout: 10000 }, async () => {
+test('US-008: the shared loop worktree is preserved after SIGINT', { timeout: 10000 }, async () => {
   const { tempDir, env } = setupMultiEpicRepo([{ id: 'EPIC-001', title: 'Alpha' }], {});
   env['MOCK_HANG_EPIC_001'] = '1';
   await runRalphWithSigint(tempDir, env);
-  assert.ok(fs.existsSync(path.join(tempDir, '.ralph-teams', '.worktrees', 'EPIC-001')));
+  assert.ok(fs.existsSync(path.join(tempDir, '.ralph-teams', '.worktrees', 'loop')));
+  assert.ok(!fs.existsSync(path.join(tempDir, '.ralph-teams', '.worktrees', 'EPIC-001')));
 });
 
 test('US-008: ralph-state.json includes the active epic ID', { timeout: 10000 }, async () => {

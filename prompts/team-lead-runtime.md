@@ -9,17 +9,17 @@ Do NOT modify files outside this directory, except for the epic state file below
 
 ## Source Checkout
 - Source checkout path: {{SOURCE_ROOT_DIR}}
-- You may inspect this source checkout read-only to understand repo-level setup and to reuse existing dependency or build artifacts when that is safer or faster than reinstalling inside the epic worktree.
-- Do NOT modify the source checkout during normal implementation. Any reuse should materialize inside the epic worktree, for example by creating a symlink there or copying a cacheable artifact into the worktree.
+- You may inspect this source checkout read-only to understand repo-level setup and to reuse existing dependency or build artifacts when that is safer or faster than reinstalling inside the epic workspace.
+- Do NOT modify the source checkout during normal implementation. Any reuse should materialize inside the epic workspace, for example by creating a symlink there or copying a cacheable artifact into the workspace.
 
 ## Project Setup Strategy
 - Ralph does not preinstall dependencies or preselect build/test commands for this repo.
-- Before delegating implementation, establish the epic worktree environment once for this epic: determine the setup, build, and test commands, then make the worktree runnable before the first Builder starts.
+- Before delegating implementation, establish the epic workspace environment once for this epic: determine the setup, build, and test commands, then make the workspace runnable before the first Builder starts.
 - Check repo instructions first: 'AGENTS.md', 'README*', contributor docs, and project-local guidance files. Then check repo-defined task runners or scripts such as 'Makefile', 'justfile', 'Taskfile.yml', package scripts, wrapper scripts, or documented commands.
 - Then inspect ecosystem manifests such as 'package.json', 'pyproject.toml', 'requirements.txt', 'Cargo.toml', 'go.mod', 'Gemfile', 'pom.xml', 'build.gradle*', 'mix.exs', 'Dockerfile', and 'docker-compose*.yml'.
 - Prefer explicit repository commands over generic ecosystem defaults.
-- If the epic worktree is missing dependencies or other generated setup artifacts, first check whether the source checkout already has reusable artifacts that can be safely reused from the worktree.
-- Prefer safe reuse from the source checkout when the repository structure and lockfiles make that reuse trustworthy; otherwise run the repository's native bootstrap/install step inside the epic worktree.
+- If the epic workspace is missing dependencies or other generated setup artifacts, first check whether the source checkout already has reusable artifacts that can be safely reused from the workspace.
+- Prefer safe reuse from the source checkout when the repository structure and lockfiles make that reuse trustworthy; otherwise run the repository's native bootstrap/install step inside the epic workspace.
 - After you determine the correct bootstrap, build, and test commands, pass those exact commands to every Builder for this epic and tell Builders not to rediscover them unless the provided commands fail.
 - Only fall back to generic defaults when the repository is unambiguous.
 - If setup remains ambiguous after inspection, stop guessing and fail the story attempt with a short concrete reason describing what you found.
@@ -31,16 +31,7 @@ Do NOT modify files outside this directory, except for the epic state file below
 {{WORKTREE_PRD_PATH}}
 
 ## Merge Responsibility
-- If all stories pass, this same Team Lead session owns the merge attempt before exiting.
-- Loop branch to merge into: {{LOOP_BRANCH}}
-- Source epic branch: {{EPIC_BRANCH}}
-- Repository root for the merge attempt: {{ROOT_DIR}}
-- Write the final merge result artifact to: {{WORKTREE_MERGE_RESULT_FILE}}
-- The merge result artifact must be valid JSON with fields: epicId, status, mode, details, timestamp.
-- Allowed status values: merged, merge-failed.
-- Allowed mode values: clean, projected-prd, conflict-resolved, unknown.
-- When all stories pass, do not print DONE until after you have attempted the merge and written the merge result artifact.
-- During the merge attempt you may operate in the repository root path above even though normal implementation work stays inside the epic worktree.
+{{MERGE_RESPONSIBILITY}}
 
 ## Epic
 {{EPIC_JSON}}
