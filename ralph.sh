@@ -2039,7 +2039,7 @@ WAVE_NUM=0
 # Count total stories across all epics for running estimate calculations
 TOTAL_STORIES=0
 for i in $(seq 0 $((TOTAL_EPICS - 1))); do
-  sc=$(rjq length "$PRD_FILE" ".epics[$i].userStories")
+  sc=$(rjq length "$PRD_FILE" ".epics[$i].userStories" 2>/dev/null) || sc=0
   TOTAL_STORIES=$((TOTAL_STORIES + sc))
 done
 
@@ -2048,20 +2048,20 @@ while true; do
   WAVE_EPICS=()
 
   for EPIC_INDEX in $(seq 0 $((TOTAL_EPICS - 1))); do
-    EPIC_STATUS=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].status" "pending")
+    EPIC_STATUS=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].status" "pending" 2>/dev/null) || EPIC_STATUS="pending"
     [ "$EPIC_STATUS" != "pending" ] && continue
 
     # Check all dependencies
     ALL_DEPS_MET=true
-    DEPS=$(rjq list "$PRD_FILE" ".epics[$EPIC_INDEX].dependsOn")
+    DEPS=$(rjq list "$PRD_FILE" ".epics[$EPIC_INDEX].dependsOn" 2>/dev/null) || DEPS=""
     for DEP in $DEPS; do
-      DEP_STATUS=$(rjq read-where "$PRD_FILE" .epics id "$DEP" status "pending")
+      DEP_STATUS=$(rjq read-where "$PRD_FILE" .epics id "$DEP" status "pending" 2>/dev/null) || DEP_STATUS="pending"
       if [ "$DEP_STATUS" = "failed" ] || [ "$DEP_STATUS" = "partial" ] || [ "$DEP_STATUS" = "merge-failed" ]; then
         # Dependency failed — skip this epic permanently
-        EPIC_ID=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].id")
-        EPIC_TITLE=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].title")
+        EPIC_ID=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].id" 2>/dev/null) || EPIC_ID="EPIC-???"
+        EPIC_TITLE=$(rjq read "$PRD_FILE" ".epics[$EPIC_INDEX].title" 2>/dev/null) || EPIC_TITLE="(unknown)"
         echo "  [$EPIC_ID] $EPIC_TITLE — skipped (dependency $DEP has status: $DEP_STATUS)"
-        rjq set "$PRD_FILE" ".epics[$EPIC_INDEX].status" '"failed"'
+        rjq set "$PRD_FILE" ".epics[$EPIC_INDEX].status" '"failed"' 2>/dev/null || echo "  [WARN] Failed to set epic $EPIC_INDEX status to failed" >&2
         FAILED=$((FAILED + 1))
         echo "[$EPIC_ID] SKIPPED (dependency $DEP failed) — $(date)" >> "$PROGRESS_FILE"
         ALL_DEPS_MET=false
@@ -2089,7 +2089,7 @@ while true; do
   if [ -n "$PARALLEL" ]; then
     echo "  Wave $WAVE_NUM — ${#WAVE_EPICS[@]} epic(s), $PARALLEL at a time"
   else
-    REMAINING_EPICS=$(rjq count-where "$PRD_FILE" .epics "status=pending" --default pending)
+    REMAINING_EPICS=$(rjq count-where "$PRD_FILE" .epics "status=pending" --default pending 2>/dev/null) || REMAINING_EPICS="?"
     echo "  ${REMAINING_EPICS} epic(s) remaining to run sequentially"
   fi
   echo "========================================================"
@@ -2166,7 +2166,10 @@ while true; do
       now=$(date +%s)
       for slot in "${!active_pids[@]}"; do
         local finished_epic_id
-        finished_epic_id=$(rjq read "$PRD_FILE" ".epics[${active_indices[$slot]}].id")
+        finished_epic_id=$(rjq read "$PRD_FILE" ".epics[${active_indices[$slot]}].id" 2>/dev/null) || {
+          echo "  [WARN] rjq failed reading epic id for index ${active_indices[$slot]} — skipping slot" >&2
+          continue
+        }
         local process_finished=false
 
         emit_new_log_output "$finished_epic_id" "${active_logs[$slot]}" "${active_log_lines[$slot]:-0}"
@@ -2181,7 +2184,7 @@ while true; do
           wait "${active_pids[$slot]}" 2>/dev/null || true
           # Check progress and retry if possible
           local _to_total _to_state_passed _to_prd_passed _to_passed
-          _to_total=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories")
+          _to_total=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories" 2>/dev/null) || _to_total=0
           _to_state_passed=$(read_epic_state_passed "$finished_epic_id")
           _to_prd_passed=$(read_epic_prd_passed "${active_indices[$slot]}")
           _to_passed="$_to_state_passed"
@@ -2239,7 +2242,7 @@ while true; do
           wait "${active_pids[$slot]}" 2>/dev/null || true
           # Check progress and retry if possible
           local _it_total _it_state_passed _it_prd_passed _it_passed
-          _it_total=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories")
+          _it_total=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories" 2>/dev/null) || _it_total=0
           _it_state_passed=$(read_epic_state_passed "$finished_epic_id")
           _it_prd_passed=$(read_epic_prd_passed "${active_indices[$slot]}")
           _it_passed="$_it_state_passed"
@@ -2283,7 +2286,7 @@ while true; do
         fi
 
         local total_s passed_s_state passed_s_prd passed_s
-        total_s=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories")
+        total_s=$(rjq length "$PRD_FILE" ".epics[${active_indices[$slot]}].userStories" 2>/dev/null) || total_s=0
         passed_s_state=$(read_epic_state_passed "$finished_epic_id")
         passed_s_prd=$(read_epic_prd_passed "${active_indices[$slot]}")
         passed_s="$passed_s_state"
@@ -2349,7 +2352,7 @@ while true; do
           process_epic_result "${active_indices[$slot]}"
           # Track completed epics for merge_wave only when the Team Lead did not already merge.
           local post_status
-          post_status=$(rjq read "$PRD_FILE" ".epics[${active_indices[$slot]}].status" "pending")
+          post_status=$(rjq read "$PRD_FILE" ".epics[${active_indices[$slot]}].status" "pending" 2>/dev/null) || post_status="pending"
           if [ "$post_status" = "completed" ] && [ "$merge_status" != "merged" ]; then
             wave_completed_ids+=("$finished_epic_id")
           fi
